@@ -2,9 +2,9 @@
 //!
 //! Provides a central registry of storage backends that can be looked up by URL scheme.
 
-use crate::{IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
-use crate::ConfigProvider;
 use crate::BundlebaseError;
+use crate::ConfigProvider;
+use crate::{IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -116,7 +116,9 @@ impl IORegistry {
     /// Get the factory for a URL scheme.
     /// Checks static factories first, then dynamically registered ones.
     pub fn get_factory(&self, scheme: &str) -> Option<Arc<dyn IOFactory>> {
-        self.factories.get(scheme).cloned()
+        self.factories
+            .get(scheme)
+            .cloned()
             .or_else(|| self.dynamic.read().get(scheme).cloned())
     }
 
@@ -161,9 +163,9 @@ impl IORegistry {
         url: &Url,
         config: Arc<dyn ConfigProvider>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        let factory = self.get_factory(url.scheme()).ok_or_else(|| {
-            format!("Unsupported URL scheme: {}", url.scheme())
-        })?;
+        let factory = self
+            .get_factory(url.scheme())
+            .ok_or_else(|| format!("Unsupported URL scheme: {}", url.scheme()))?;
         factory.create_reader(url, config).await
     }
 
@@ -173,9 +175,9 @@ impl IORegistry {
         url: &Url,
         config: Arc<dyn ConfigProvider>,
     ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
-        let factory = self.get_factory(url.scheme()).ok_or_else(|| {
-            format!("Unsupported URL scheme: {}", url.scheme())
-        })?;
+        let factory = self
+            .get_factory(url.scheme())
+            .ok_or_else(|| format!("Unsupported URL scheme: {}", url.scheme()))?;
         factory.create_lister(url, config).await
     }
 
@@ -186,9 +188,9 @@ impl IORegistry {
         url: &Url,
         config: Arc<dyn ConfigProvider>,
     ) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
-        let factory = self.get_factory(url.scheme()).ok_or_else(|| {
-            format!("Unsupported URL scheme: {}", url.scheme())
-        })?;
+        let factory = self
+            .get_factory(url.scheme())
+            .ok_or_else(|| format!("Unsupported URL scheme: {}", url.scheme()))?;
 
         factory
             .create_writable_lister(url, config)
@@ -203,9 +205,9 @@ impl IORegistry {
         url: &Url,
         config: Arc<dyn ConfigProvider>,
     ) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
-        let factory = self.get_factory(url.scheme()).ok_or_else(|| {
-            format!("Unsupported URL scheme: {}", url.scheme())
-        })?;
+        let factory = self
+            .get_factory(url.scheme())
+            .ok_or_else(|| format!("Unsupported URL scheme: {}", url.scheme()))?;
 
         factory
             .create_writer(url, config)
@@ -281,7 +283,10 @@ mod tests {
 
         let result = registry.create_reader(&url, config).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported URL scheme"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported URL scheme"));
     }
 
     #[test]
@@ -313,7 +318,8 @@ mod tests {
         assert!(registry.supports_write(&Url::parse("tar+file:///data.tar/file.txt").unwrap()));
         assert!(!registry.supports_write(&Url::parse("tar+s3://bucket/data.tar/file.txt").unwrap()));
         assert!(!registry.supports_write(&Url::parse("tar+gs://bucket/data.tar/file.txt").unwrap()));
-        assert!(!registry.supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
+        assert!(!registry
+            .supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
     }
 
     #[test]

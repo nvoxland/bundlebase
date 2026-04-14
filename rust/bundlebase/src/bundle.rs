@@ -5,59 +5,70 @@ pub mod command_metadata;
 mod commit;
 mod data_block;
 pub mod export;
-mod pack;
 mod facade;
 mod indexed_blocks;
 mod init;
 pub mod operation;
+mod pack;
 mod source;
 pub mod connector_entry {
-    pub use bundlebase_udf::{ConnectorEntry, resolve_connector, parse_connector_name};
+    pub use bundlebase_udf::{parse_connector_name, resolve_connector, ConnectorEntry};
 }
 pub mod function_entry {
-    pub use bundlebase_udf::{FunctionEntry, FunctionKind, FunctionRegistry, parse_function_name, validate_kind_consistency};
+    pub use bundlebase_udf::{
+        parse_function_name, validate_kind_consistency, FunctionEntry, FunctionKind,
+        FunctionRegistry,
+    };
 }
-mod sql;
-pub mod tombstone;
 pub mod deleted_row_filter;
 pub mod schema_rename_filter;
+mod sql;
+pub mod tombstone;
 pub mod update_overlay;
 pub mod update_overlay_filter;
 pub mod verification;
 
-use crate::io::EMPTY_SCHEME;
-pub use builder::BundleBuilder;
-pub use builder::BundleStatus;
-pub use verification::{FileVerificationResult, VerificationResults};
-pub use bundlebase_common::command_response::{CommandResponse, OutputShape};
-pub use commit::{manifest_version, BundleCommit, CommitHistory};
-pub use data_block::DataBlock;
-pub use pack::Pack;
-pub use pack::JoinTypeOption;
-pub use facade::BundleFacade;
-pub use indexed_blocks::IndexedBlocks;
-pub use init::{InitCommit, INIT_FILENAME};
-pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation, HollowContext, ExpectedColumn, resolve_cast_ops};
-pub use source::Source;
 pub use crate::arrow_types::parse_arrow_type_name;
-pub use connector_entry::ConnectorEntry;
+use crate::io::EMPTY_SCHEME;
 pub use crate::platform::Platform;
 pub use crate::udf::UdfRuntime;
-pub use function_entry::{validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
+pub use builder::BundleBuilder;
+pub use builder::BundleStatus;
+pub use bundlebase_common::command_response::{CommandResponse, OutputShape};
+pub use commit::{manifest_version, BundleCommit, CommitHistory};
+pub use connector_entry::ConnectorEntry;
+pub use data_block::DataBlock;
+pub use facade::BundleFacade;
+pub use function_entry::{
+    validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry,
+};
+pub use indexed_blocks::IndexedBlocks;
+pub use init::{InitCommit, INIT_FILENAME};
+pub use operation::{
+    resolve_cast_ops, AnyOperation, BundleChange, CreateSourceOp, ExpectedColumn, HollowContext,
+    Operation,
+};
+pub use pack::JoinTypeOption;
+pub use pack::Pack;
+pub use source::Source;
 use std::collections::{HashMap, HashSet};
+pub use verification::{FileVerificationResult, VerificationResults};
 
+use crate::bundle::bundle_schema::BundleSchema;
+use crate::bundle_config::PassedBundleConfig;
+use crate::bundle_config::Scope;
 use crate::catalog::CATALOG_NAME;
-use crate::ConfigProvider;
-use crate::function::VersionFunction;
-use crate::index::SearchTableFunction;
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
+use crate::function::VersionFunction;
+use crate::index::IndexDefinition;
+use crate::index::SearchTableFunction;
+use crate::io::{
+    read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage,
+    IOReadWriteDir, EMPTY_URL,
+};
 use crate::object_id::ColumnId;
 use crate::source::ConnectorRegistry;
-use crate::index::IndexDefinition;
-use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
-use crate::bundle_config::Scope;
-use crate::bundle_config::PassedBundleConfig;
-use crate::bundle::bundle_schema::BundleSchema;
+use crate::ConfigProvider;
 use crate::{BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -239,7 +250,9 @@ impl Bundle {
     ///
     /// Returns `Arc<Self>` ready for use. Schema providers are registered with the
     /// Bundle as the facade. BundleBuilder will re-register with itself as facade.
-    pub async fn empty(passed_config: Option<PassedBundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
+    pub async fn empty(
+        passed_config: Option<PassedBundleConfig>,
+    ) -> Result<Arc<Self>, BundlebaseError> {
         let url = Url::parse(EMPTY_URL)?;
 
         let storage = Arc::new(DataStorage::new());
@@ -269,7 +282,9 @@ impl Bundle {
         let dataframe = DataFrameHolder::new(Some(empty_dataframe));
 
         // Register version() UDF with initial "empty" version
-        ctx.register_udf(ScalarUDF::new_from_impl(VersionFunction::new("empty".to_string())));
+        ctx.register_udf(ScalarUDF::new_from_impl(VersionFunction::new(
+            "empty".to_string(),
+        )));
 
         ctx.register_object_store(
             ObjectStoreUrl::parse("memory://")?.as_ref(),
@@ -281,8 +296,11 @@ impl Bundle {
         );
 
         let bundle_config = Arc::new(BundleConfig::new(passed_config.as_ref())?);
-        let config_provider: Arc<dyn ConfigProvider> = Arc::clone(&bundle_config) as Arc<dyn ConfigProvider>;
-        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, config_provider).await?));
+        let config_provider: Arc<dyn ConfigProvider> =
+            Arc::clone(&bundle_config) as Arc<dyn ConfigProvider>;
+        let data_dir = Arc::new(RwLock::new(
+            writable_dir_from_url(&url, config_provider).await?,
+        ));
         let subprocess_cache = crate::function::ipc_bridge::new_subprocess_cache();
 
         let bundle = Arc::new(Self {
@@ -303,7 +321,7 @@ impl Bundle {
                     Arc::new(crate::data::plugin::ParquetPlugin::default()),
                 ],
             )
-                .into(),
+            .into(),
             connector_registry,
             function_registry: Arc::new(RwLock::new(FunctionRegistry::new(
                 Arc::clone(&data_dir),
@@ -357,7 +375,10 @@ impl Bundle {
     /// let bundle = Bundle::open("file:///data/my_bundle").await?;
     /// let schema = bundle.schema();
     /// ```
-    pub async fn open(path: &str, config: Option<PassedBundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
+    pub async fn open(
+        path: &str,
+        config: Option<PassedBundleConfig>,
+    ) -> Result<Arc<Self>, BundlebaseError> {
         let mut visited = HashSet::new();
         let arc_bundle = Self::empty(config).await?;
 
@@ -367,7 +388,8 @@ impl Bundle {
         arc_bundle.refresh_data_dir().await?;
 
         Self::open_recursive(
-            writable_dir_from_str(path, arc_bundle.config()).await?
+            writable_dir_from_str(path, arc_bundle.config())
+                .await?
                 .url()
                 .as_str(),
             &mut visited,
@@ -395,7 +417,8 @@ impl Bundle {
 
         debug!("Loading initial commit from {}", INIT_FILENAME);
 
-        let init_commit: Option<InitCommit> = read_yaml(manifest_dir.file(INIT_FILENAME)?.as_ref()).await?;
+        let init_commit: Option<InitCommit> =
+            read_yaml(manifest_dir.file(INIT_FILENAME)?.as_ref()).await?;
         let init_commit = init_commit.ok_or_else(|| {
             BundlebaseError::from(format!(
                 "No bundle found at '{}' ({}/{} does not exist)",
@@ -445,8 +468,14 @@ impl Bundle {
         *bundle.is_view.write() = init_commit.view.is_some();
 
         // Set initial version bounds from init commit
-        *bundle.min_version.write() = init_commit.min_version.as_deref().map(bundlebase_common::parse_format_version);
-        *bundle.max_version.write() = init_commit.max_version.as_deref().map(bundlebase_common::parse_format_version);
+        *bundle.min_version.write() = init_commit
+            .min_version
+            .as_deref()
+            .map(bundlebase_common::parse_format_version);
+        *bundle.max_version.write() = init_commit
+            .max_version
+            .as_deref()
+            .map(bundlebase_common::parse_format_version);
 
         // List files in the manifest directory
         let manifest_files = manifest_dir.list_files().await?;
@@ -489,12 +518,18 @@ impl Bundle {
 
         // Load and apply each manifest in order
         for manifest_file_info in manifest_files {
-            *bundle.last_manifest_version.write() = manifest_version(manifest_file_info.filename().unwrap_or(""));
+            *bundle.last_manifest_version.write() =
+                manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
-            let manifest_file = readable_file_from_url(&manifest_file_info.url, bundle.config()).await?;
-            let mut commit: BundleCommit = read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
-                BundlebaseError::from(format!("Failed to read manifest: {}", manifest_file_info.url))
-            })?;
+            let manifest_file =
+                readable_file_from_url(&manifest_file_info.url, bundle.config()).await?;
+            let mut commit: BundleCommit =
+                read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
+                    BundlebaseError::from(format!(
+                        "Failed to read manifest: {}",
+                        manifest_file_info.url
+                    ))
+                })?;
             commit.url = Some(manifest_file_info.url.clone());
             commit.data_dir = Some(data_dir.url().clone());
 
@@ -522,7 +557,9 @@ impl Bundle {
                     // Skip view-related operations when loading a view
                     if *bundle.is_view.read() {
                         match &op {
-                            AnyOperation::CreateView(_) | AnyOperation::RenameView(_) | AnyOperation::DropView(_) => {
+                            AnyOperation::CreateView(_)
+                            | AnyOperation::RenameView(_)
+                            | AnyOperation::DropView(_) => {
                                 debug!("    Skipping (view operation in view): {}", op.describe());
                                 continue;
                             }
@@ -540,7 +577,6 @@ impl Bundle {
 
         Ok(())
     }
-
 }
 
 /// Walk all `AttachBlock` ops in a freshly-deserialized commit, parallel-load
@@ -565,11 +601,11 @@ async fn resolve_attach_sidecars(
     for change in &commit.changes {
         for op in &change.operations {
             if let AnyOperation::AttachBlock(a) = op {
-                if a.schema.is_none() {
-                    schema_paths.insert(a.schema_path.clone());
+                if a.schema_cache.is_none() {
+                    schema_paths.insert(a.schema.clone());
                 }
-                if a.column_ids.is_empty() {
-                    column_ids_paths.insert(a.column_ids_path.clone());
+                if a.column_ids_cache.is_empty() {
+                    column_ids_paths.insert(a.column_ids.clone());
                 }
             }
         }
@@ -590,17 +626,19 @@ async fn resolve_attach_sidecars(
                 path, e
             ))
         })?;
-        let value: Option<serde_yaml_ng::Value> = read_yaml(file.as_ref()).await
-            .map_err(|e| BundlebaseError::from(format!(
-                "Failed to read schema file '{}': {}", path, e
-            )))?;
-        let value = value.ok_or_else(|| BundlebaseError::from(format!(
-            "Schema sidecar file not found: '{}'", path
-        )))?;
+        let value: Option<serde_yaml_ng::Value> = read_yaml(file.as_ref()).await.map_err(|e| {
+            BundlebaseError::from(format!("Failed to read schema file '{}': {}", path, e))
+        })?;
+        let value = value.ok_or_else(|| {
+            BundlebaseError::from(format!("Schema sidecar file not found: '{}'", path))
+        })?;
         let schema = crate::bundle::operation::serde_util::deserialize_schema_internal(&value)
-            .map_err(|e| BundlebaseError::from(format!(
-                "Failed to deserialize schema from '{}': {}", path, e
-            )))?;
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to deserialize schema from '{}': {}",
+                    path, e
+                ))
+            })?;
         Ok::<(String, std::sync::Arc<arrow_schema::Schema>), BundlebaseError>((path, schema))
     });
 
@@ -612,13 +650,12 @@ async fn resolve_attach_sidecars(
                 path, e
             ))
         })?;
-        let value: Option<Vec<ColumnId>> = read_yaml(file.as_ref()).await
-            .map_err(|e| BundlebaseError::from(format!(
-                "Failed to read column-id file '{}': {}", path, e
-            )))?;
-        let ids = value.ok_or_else(|| BundlebaseError::from(format!(
-            "Column-id sidecar file not found: '{}'", path
-        )))?;
+        let value: Option<Vec<ColumnId>> = read_yaml(file.as_ref()).await.map_err(|e| {
+            BundlebaseError::from(format!("Failed to read column-id file '{}': {}", path, e))
+        })?;
+        let ids = value.ok_or_else(|| {
+            BundlebaseError::from(format!("Column-id sidecar file not found: '{}'", path))
+        })?;
         Ok::<(String, Vec<ColumnId>), BundlebaseError>((path, ids))
     });
 
@@ -628,19 +665,18 @@ async fn resolve_attach_sidecars(
     )?;
     let path_to_schema: HashMap<String, std::sync::Arc<arrow_schema::Schema>> =
         schemas_loaded.into_iter().collect();
-    let path_to_column_ids: HashMap<String, Vec<ColumnId>> =
-        columns_loaded.into_iter().collect();
+    let path_to_column_ids: HashMap<String, Vec<ColumnId>> = columns_loaded.into_iter().collect();
 
     // Populate each attach op's in-memory schema + column_ids fields.
     for change in &mut commit.changes {
         for op in &mut change.operations {
             if let AnyOperation::AttachBlock(a) = op {
-                if a.schema.is_none() {
-                    a.schema = path_to_schema.get(&a.schema_path).cloned();
+                if a.schema_cache.is_none() {
+                    a.schema_cache = path_to_schema.get(&a.schema).cloned();
                 }
-                if a.column_ids.is_empty() {
-                    if let Some(ids) = path_to_column_ids.get(&a.column_ids_path) {
-                        a.column_ids = ids.clone();
+                if a.column_ids_cache.is_empty() {
+                    if let Some(ids) = path_to_column_ids.get(&a.column_ids) {
+                        a.column_ids_cache = ids.clone();
                     }
                 }
             }
@@ -651,7 +687,6 @@ async fn resolve_attach_sidecars(
 }
 
 impl Bundle {
-
     /// Check bundle format version compatibility by scanning raw YAML before typed deserialization.
     ///
     /// Reads the init commit and all manifest files as raw YAML values, looking for
@@ -705,13 +740,17 @@ impl Bundle {
                             if let Some(op_type) = op.get("type").and_then(|t| t.as_str()) {
                                 match op_type {
                                     "setMinVersion" => {
-                                        if let Some(v) = op.get("version").and_then(|v| v.as_str()) {
-                                            min_version = Some(bundlebase_common::parse_format_version(v));
+                                        if let Some(v) = op.get("version").and_then(|v| v.as_str())
+                                        {
+                                            min_version =
+                                                Some(bundlebase_common::parse_format_version(v));
                                         }
                                     }
                                     "setMaxVersion" => {
-                                        if let Some(v) = op.get("version").and_then(|v| v.as_str()) {
-                                            max_version = Some(bundlebase_common::parse_format_version(v));
+                                        if let Some(v) = op.get("version").and_then(|v| v.as_str())
+                                        {
+                                            max_version =
+                                                Some(bundlebase_common::parse_format_version(v));
                                         }
                                     }
                                     _ => {}
@@ -729,7 +768,8 @@ impl Bundle {
                 return Err(format!(
                     "This bundle requires bundlebase >= {}.{}, but current version is {}",
                     min.0, min.1, current_str
-                ).into());
+                )
+                .into());
             }
         }
         if let Some(max) = max_version {
@@ -738,7 +778,8 @@ impl Bundle {
                     "This bundle requires bundlebase <= {}.{}, but current version is {}. \
                      Run `bundlebase upgrade-bundle` to update.",
                     max.0, max.1, current_str
-                ).into());
+                )
+                .into());
             }
         }
 
@@ -791,7 +832,7 @@ impl Bundle {
                     identifier,
                     available.join("\n  ")
                 )
-                    .into())
+                .into())
             }
         }
     }
@@ -880,7 +921,9 @@ impl Bundle {
 
     /// Remove a specific always-delete rule by WHERE clause.
     pub fn remove_always_delete_rule(&self, where_clause: &str) {
-        self.always_delete_rules.write().retain(|r| r != where_clause);
+        self.always_delete_rules
+            .write()
+            .retain(|r| r != where_clause);
     }
 
     /// Remove all always-delete rules.
@@ -903,7 +946,9 @@ impl Bundle {
 
     /// Remove a specific always-update rule by its canonical text ("SET ... WHERE ...").
     pub fn remove_always_update_rule(&self, rule_text: &str) {
-        self.always_update_rules.write().retain(|r| r.rule_text() != rule_text);
+        self.always_update_rules
+            .write()
+            .retain(|r| r.rule_text() != rule_text);
     }
 
     /// Remove all always-update rules.
@@ -969,16 +1014,24 @@ impl Bundle {
 
         // Translate the join expression from user-visible names to internal names.
         // Build a combined name map from base pack columns AND join pack columns.
-        let pack_expression = pack.expression().expect("Pack must have expression for join");
+        let pack_expression = pack
+            .expression()
+            .expect("Pack must have expression for join");
         let mut combined_names = bundle_schema.clone();
         // Add join pack's column names from AttachBlock operations targeting this pack
         let ops = self.operations.read().clone();
         for op in &ops {
             if let AnyOperation::AttachBlock(attach) = op {
                 if &attach.pack == pack.id() {
-                    if let Some(schema) = &attach.schema {
-                        for (field, col_id) in schema.fields().iter().zip(attach.column_ids.iter()) {
-                            combined_names.entry(*col_id).or_insert_with(|| field.name().clone());
+                    if let Some(schema) = &attach.schema_cache {
+                        for (field, col_id) in schema
+                            .fields()
+                            .iter()
+                            .zip(attach.column_ids_cache.iter())
+                        {
+                            combined_names
+                                .entry(*col_id)
+                                .or_insert_with(|| field.name().clone());
                         }
                     }
                 }
@@ -994,7 +1047,8 @@ impl Bundle {
             *pack.join_type().expect("Pack must have join_type"),
         );
 
-        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, "", &translated_pack, &base_df).await?;
+        let (expr, left_alias) =
+            sql::parse_join_expr(&self.ctx, "", &translated_pack, &base_df).await?;
 
         let base_df = base_df.alias(left_alias)?;
 
@@ -1018,19 +1072,16 @@ impl Bundle {
         // Disambiguate: rename join-pack internal name columns that collide with base columns.
         // This happens when both packs share a column with the same ColumnId (same logical column).
         for col in joined_df.schema().columns() {
-            let is_from_join_pack = col.relation.as_ref()
-                .is_some_and(|r| r.table() == name);
+            let is_from_join_pack = col.relation.as_ref().is_some_and(|r| r.table() == name);
             if is_from_join_pack && base_col_names.contains(&col.name) {
                 // Rename to disambiguated internal name
                 let new_internal_name = format!("{}_{}", name, col.name);
-                joined_df = joined_df.with_column_renamed(
-                    col.flat_name(),
-                    &new_internal_name,
-                )?;
+                joined_df = joined_df.with_column_renamed(col.flat_name(), &new_internal_name)?;
                 // Add a col_names entry so the final rename maps this to a user-visible name.
                 // The user-visible name is pack_name + user_visible_original_name.
                 if let Some(col_id) = bundle_schema::parse_internal_name(&col.name) {
-                    let user_name = bundle_schema.get(&col_id)
+                    let user_name = bundle_schema
+                        .get(&col_id)
                         .map(|n| format!("{}_{}", name, n))
                         .unwrap_or_else(|| new_internal_name.clone());
                     // Generate a new ColumnId for this disambiguated column so the
@@ -1038,11 +1089,11 @@ impl Bundle {
                     let disambig_id = ColumnId::generate();
                     bundle_schema.insert(disambig_id, user_name);
                     // Also rename to the new disambiguated internal name so final rename works
-                    let final_internal = bundle_schema.internal_name(&disambig_id).expect("just inserted");
-                    joined_df = joined_df.with_column_renamed(
-                        &new_internal_name,
-                        &final_internal,
-                    )?;
+                    let final_internal = bundle_schema
+                        .internal_name(&disambig_id)
+                        .expect("just inserted");
+                    joined_df =
+                        joined_df.with_column_renamed(&new_internal_name, &final_internal)?;
                 }
             }
         }
@@ -1070,7 +1121,9 @@ impl Bundle {
         let new_version = hex::encode(hasher.clone().finalize())[0..12].to_string();
         *self.version.write() = new_version.clone();
 
-        self.function_registry.read().refresh_version_udf(new_version);
+        self.function_registry
+            .read()
+            .refresh_version_udf(new_version);
     }
 
     /// Recomputes the version from scratch by iterating all operations.
@@ -1087,7 +1140,9 @@ impl Bundle {
         let new_version = hex::encode(hasher.finalize())[0..12].to_string();
         *self.version.write() = new_version.clone();
 
-        self.function_registry.read().refresh_version_udf(new_version);
+        self.function_registry
+            .read()
+            .refresh_version_udf(new_version);
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -1136,10 +1191,7 @@ impl Bundle {
 
     /// Get a pack's name by its ID
     pub fn pack_name(&self, pack_id: &ObjectId) -> Option<String> {
-        self.packs
-            .read()
-            .get(pack_id)
-            .map(|p| p.name().to_string())
+        self.packs.read().get(pack_id).map(|p| p.name().to_string())
     }
 
     /// Get all join pack names
@@ -1290,13 +1342,17 @@ impl Bundle {
         for pack in packs.values() {
             for block in pack.blocks() {
                 let block_id = block.id();
-                let location = block_locations.get(block_id).cloned().unwrap_or_else(|| {
-                    block.reader().url().to_string()
-                });
+                let location = block_locations
+                    .get(block_id)
+                    .cloned()
+                    .unwrap_or_else(|| block.reader().url().to_string());
 
                 let expected_hash = block_hashes.get(block_id).cloned();
 
-                match self.verify_block_hash(&location, expected_hash.as_deref()).await {
+                match self
+                    .verify_block_hash(&location, expected_hash.as_deref())
+                    .await
+                {
                     Ok((actual_hash, passed)) => {
                         results.push(FileVerificationResult {
                             location,
@@ -1504,9 +1560,9 @@ impl BundleFacade for Bundle {
             // execute the join at that point so that prior operations (renames,
             // drops, etc.) are already reflected in the DataFrame schema.
             debug!(
-                    "dataframe: Applying {} operations to dataframe...",
-                    ops.len()
-                );
+                "dataframe: Applying {} operations to dataframe...",
+                ops.len()
+            );
 
             let mut bundle_schema = BundleSchema::initial(&ops);
             let cast_active = resolve_cast_ops(&ops);
@@ -1522,13 +1578,15 @@ impl BundleFacade for Bundle {
                         }
                     }
                 } else {
-                    df = op.apply_dataframe(df, self.ctx.clone(), &mut bundle_schema).await?;
+                    df = op
+                        .apply_dataframe(df, self.ctx.clone(), &mut bundle_schema)
+                        .await?;
                 }
             }
             debug!(
-                    "dataframe: Applying {} operations to dataframe...DONE",
-                    ops.len()
-                );
+                "dataframe: Applying {} operations to dataframe...DONE",
+                ops.len()
+            );
 
             // Final rename: replace internal names with user-visible names
             df = bundle_schema.rename_to_real_names(df)?;
@@ -1549,10 +1607,7 @@ impl BundleFacade for Bundle {
         Ok(self.dataframe.dataframe())
     }
 
-    async fn extend(
-        &self,
-        data_dir: Option<&str>,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    async fn extend(&self, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         BundleBuilder::extend(Arc::new(self.clone()), data_dir).await
     }
 
@@ -1610,9 +1665,8 @@ impl BundleFacade for Bundle {
         use std::fs::File;
         use tar::{Builder, Header};
 
-        let tar_file = File::create(tar_path).map_err(|e| {
-            format!("Failed to create tar file '{}': {}", tar_path, e)
-        })?;
+        let tar_file = File::create(tar_path)
+            .map_err(|e| format!("Failed to create tar file '{}': {}", tar_path, e))?;
         let mut builder = Builder::new(tar_file);
 
         // Get all files from the bundle's data_dir
@@ -1637,7 +1691,7 @@ impl BundleFacade for Bundle {
                     "File URL '{}' is not under base URL '{}'",
                     file_url, base_url
                 )
-                    .into());
+                .into());
             };
 
             let relative_path = relative_path.trim_start_matches('/').to_string();
@@ -1651,9 +1705,8 @@ impl BundleFacade for Bundle {
         }
 
         // Write _bundlebase_manifest.json as the first tar entry
-        let manifest_json = serde_json::to_vec(&manifest_entries).map_err(|e| {
-            format!("Failed to serialize tar manifest: {}", e)
-        })?;
+        let manifest_json = serde_json::to_vec(&manifest_entries)
+            .map_err(|e| format!("Failed to serialize tar manifest: {}", e))?;
 
         let mtime = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1667,10 +1720,12 @@ impl BundleFacade for Bundle {
         manifest_header.set_cksum();
 
         builder
-            .append_data(&mut manifest_header, "_bundlebase_manifest.json", &manifest_json[..])
-            .map_err(|e| {
-                format!("Failed to write tar manifest: {}", e)
-            })?;
+            .append_data(
+                &mut manifest_header,
+                "_bundlebase_manifest.json",
+                &manifest_json[..],
+            )
+            .map_err(|e| format!("Failed to write tar manifest: {}", e))?;
 
         // Second pass: write each file's data
         for (i, file) in files.iter().enumerate() {
@@ -1680,9 +1735,10 @@ impl BundleFacade for Bundle {
 
             // Read file contents via stream
             let io_file = readable_file_from_url(&file.url, self.config()).await?;
-            let mut stream = io_file.read_stream().await?.ok_or_else(|| {
-                BundlebaseError::from(format!("File not found: {}", file.url))
-            })?;
+            let mut stream = io_file
+                .read_stream()
+                .await?
+                .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", file.url)))?;
 
             // Collect stream into buffer (tar API requires &[u8])
             let mut buffer = Vec::new();
@@ -1701,15 +1757,13 @@ impl BundleFacade for Bundle {
             // Append to tar
             builder
                 .append_data(&mut header, relative_path.as_str(), &buffer[..])
-                .map_err(|e| {
-                    format!("Failed to append file '{}' to tar: {}", relative_path, e)
-                })?;
+                .map_err(|e| format!("Failed to append file '{}' to tar: {}", relative_path, e))?;
         }
 
         // Finish writing tar (writes footer)
-        builder.finish().map_err(|e| {
-            format!("Failed to finalize tar archive: {}", e)
-        })?;
+        builder
+            .finish()
+            .map_err(|e| format!("Failed to finalize tar archive: {}", e))?;
 
         info!("Exported bundle to tar archive: {}", tar_path);
         Ok(format!("Exported bundle to {}", tar_path))
@@ -1760,7 +1814,10 @@ impl BundleFacade for Bundle {
         name: &str,
         platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        Ok(self.connector_registry.write().remove_entry(name, platform, true))
+        Ok(self
+            .connector_registry
+            .write()
+            .remove_entry(name, platform, true))
     }
 
     async fn drop_temp_function(
@@ -1781,7 +1838,10 @@ impl BundleFacade for Bundle {
         // Validate old name has temporary entries
         {
             let registry = self.connector_registry.read();
-            let has_temp = registry.entries().iter().any(|e| e.temporary && e.name == old_name);
+            let has_temp = registry
+                .entries()
+                .iter()
+                .any(|e| e.temporary && e.name == old_name);
             if !has_temp {
                 return Err(format!(
                     "No temporary connector entries found for '{}'. Use IMPORT TEMP CONNECTOR first.",
@@ -1793,11 +1853,14 @@ impl BundleFacade for Bundle {
                 return Err(format!(
                     "Connector '{}' already exists. Drop it first or choose a different name.",
                     new_name
-                ).into());
+                )
+                .into());
             }
         }
 
-        self.connector_registry.write().rename_temp_entries(old_name, &new_namespaced);
+        self.connector_registry
+            .write()
+            .rename_temp_entries(old_name, &new_namespaced);
 
         // Update sources referencing the old connector name
         let sources = self.sources.read();
@@ -1807,7 +1870,9 @@ impl BundleFacade for Bundle {
             }
         }
 
-        self.function_registry.read().refresh_version_udf("TEMP".to_string());
+        self.function_registry
+            .read()
+            .refresh_version_udf("TEMP".to_string());
         Ok(())
     }
 
@@ -1817,8 +1882,12 @@ impl BundleFacade for Bundle {
         new_name: &str,
     ) -> Result<(), BundlebaseError> {
         let new_namespaced = crate::NamespacedName::parse(new_name, "Function")?;
-        self.function_registry.write().rename_temp(&old_name, &new_namespaced)?;
-        self.function_registry.read().refresh_version_udf("TEMP".to_string());
+        self.function_registry
+            .write()
+            .rename_temp(&old_name, &new_namespaced)?;
+        self.function_registry
+            .read()
+            .refresh_version_udf("TEMP".to_string());
         Ok(())
     }
 
@@ -1828,7 +1897,12 @@ impl BundleFacade for Bundle {
         key: &str,
         value: &str,
     ) -> Result<(), BundlebaseError> {
-        self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime)?;
+        self.config.set(
+            scope,
+            key,
+            value,
+            crate::bundle_config::ConfigSource::Runtime,
+        )?;
         self.refresh_data_dir().await?;
         Ok(())
     }
@@ -1925,12 +1999,19 @@ mod tests {
         ctx: &datafusion::prelude::SessionContext,
         facade: std::sync::Weak<dyn crate::bundle::BundleFacade>,
     ) -> Result<(), crate::BundlebaseError> {
-        use crate::catalog::{BundleViewTable, BUNDLE_TABLE, CATALOG_NAME, DEFAULT_SCHEMA, BUNDLE_INFO_SCHEMA};
+        use crate::catalog::{
+            BundleViewTable, BUNDLE_INFO_SCHEMA, BUNDLE_TABLE, CATALOG_NAME, DEFAULT_SCHEMA,
+        };
 
-        let catalog = ctx.catalog(CATALOG_NAME).expect("Default catalog not found");
+        let catalog = ctx
+            .catalog(CATALOG_NAME)
+            .expect("Default catalog not found");
 
         // Register temp schema
-        catalog.register_schema("temp", Arc::new(datafusion::catalog::MemorySchemaProvider::new()))?;
+        catalog.register_schema(
+            "temp",
+            Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+        )?;
 
         // Register a minimal default schema provider inline
         struct TestDefaultSchemaProvider {
@@ -1943,32 +2024,55 @@ mod tests {
         }
         #[async_trait]
         impl datafusion::catalog::SchemaProvider for TestDefaultSchemaProvider {
-            fn as_any(&self) -> &dyn std::any::Any { self }
-            fn table_names(&self) -> Vec<String> { vec![BUNDLE_TABLE.to_string()] }
-            async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn datafusion::catalog::TableProvider>>> {
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn table_names(&self) -> Vec<String> {
+                vec![BUNDLE_TABLE.to_string()]
+            }
+            async fn table(
+                &self,
+                name: &str,
+            ) -> datafusion::error::Result<Option<Arc<dyn datafusion::catalog::TableProvider>>>
+            {
                 if name == BUNDLE_TABLE {
                     let facade = self.bundle.upgrade().ok_or_else(|| {
                         datafusion::error::DataFusionError::Internal("Bundle dropped".to_string())
                     })?;
-                    let df = facade.dataframe().await
+                    let df = facade
+                        .dataframe()
+                        .await
                         .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;
                     Ok(Some(Arc::new(BundleViewTable::new((*df).clone()))))
                 } else {
                     Ok(None)
                 }
             }
-            fn table_exist(&self, name: &str) -> bool { name == BUNDLE_TABLE }
+            fn table_exist(&self, name: &str) -> bool {
+                name == BUNDLE_TABLE
+            }
         }
 
         catalog.register_schema(
             DEFAULT_SCHEMA,
-            Arc::new(TestDefaultSchemaProvider { bundle: facade.clone() }),
+            Arc::new(TestDefaultSchemaProvider {
+                bundle: facade.clone(),
+            }),
         )?;
 
         // Register empty schemas for blocks and packs (some tests may need them)
-        catalog.register_schema("blocks", Arc::new(datafusion::catalog::MemorySchemaProvider::new()))?;
-        catalog.register_schema("packs", Arc::new(datafusion::catalog::MemorySchemaProvider::new()))?;
-        catalog.register_schema(BUNDLE_INFO_SCHEMA, Arc::new(datafusion::catalog::MemorySchemaProvider::new()))?;
+        catalog.register_schema(
+            "blocks",
+            Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+        )?;
+        catalog.register_schema(
+            "packs",
+            Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+        )?;
+        catalog.register_schema(
+            BUNDLE_INFO_SCHEMA,
+            Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
+        )?;
 
         Ok(())
     }
@@ -1982,14 +2086,14 @@ mod tests {
         c.apply_operation(AnyOperation::SetName(SetNameOp {
             name: "New Name".to_string(),
         }))
-            .await?;
+        .await?;
 
         assert_eq!(c.version(), "ead23fcd0c25".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {
             name: "Other Name".to_string(),
         }))
-            .await?;
+        .await?;
 
         assert_eq!(c.version(), "b4ef54330e9a".to_string());
 
@@ -2066,7 +2170,11 @@ mod tests {
         // search should be a recognized table function even on an empty bundle.
         let ctx = bundle.ctx();
         let result = ctx.table_function("search");
-        assert!(result.is_ok(), "search UDTF should be registered: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "search UDTF should be registered: {:?}",
+            result.err()
+        );
 
         Ok(())
     }
@@ -2079,7 +2187,9 @@ mod tests {
         let bundle = Bundle::empty(None).await?;
 
         // This previously failed with "Invalid qualifier t" when the bundle had 0 columns
-        let stream = bundle.query("SELECT t.* FROM bundle t", vec![], None).await?;
+        let stream = bundle
+            .query("SELECT t.* FROM bundle t", vec![], None)
+            .await?;
         let batches: Vec<_> = stream.try_collect().await?;
 
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
@@ -2123,5 +2233,4 @@ mod tests {
 
         Ok(())
     }
-
 }

@@ -1,14 +1,14 @@
-use crate::DataContext;
+use crate::attach_format::AttachFormat;
+use crate::page_map::{resolve_row_numbers_to_byte_offsets, PageMap};
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
-use crate::attach_format::AttachFormat;
+use crate::DataContext;
 use crate::{BlockId, DataReader, LineOrientedFormat, PageMapDataSource, RowId};
-use crate::page_map::{PageMap, resolve_row_numbers_to_byte_offsets};
-use bundlebase_io::plugin::object_store::ObjectStoreFile;
-use bundlebase_io::IOReadWriteDir;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
+use bundlebase_io::IOReadWriteDir;
 use bytes::Buf;
 use datafusion::common::config::CsvOptions;
 use datafusion::common::stats::Precision;
@@ -65,7 +65,11 @@ impl CsvFormatConfig {
         Self {
             newlines_in_values: Arc::new(AtomicBool::new(niv)),
             delimiter,
-            extensions: if delimiter == b'\t' { &[".tsv"] } else { &[".csv"] },
+            extensions: if delimiter == b'\t' {
+                &[".tsv"]
+            } else {
+                &[".csv"]
+            },
         }
     }
 
@@ -144,7 +148,12 @@ impl ReaderPlugin for CsvPlugin {
                 bundle.config_provider(),
             )?),
         };
-        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout, AttachFormat::Csv))))
+        Ok(Some(Arc::new(CsvReader::new(
+            reader,
+            block_id,
+            &layout,
+            AttachFormat::Csv,
+        ))))
     }
 }
 
@@ -204,10 +213,7 @@ fn is_line_delimiter_error(err: &BundlebaseError) -> bool {
 /// nor Arrow's CSV reader provides a trim option for headers, so we post-process
 /// the schema here. Short-circuits if no names need trimming.
 fn trim_schema_field_names(schema: SchemaRef) -> SchemaRef {
-    let needs_trimming = schema
-        .fields()
-        .iter()
-        .any(|f| f.name() != f.name().trim());
+    let needs_trimming = schema.fields().iter().any(|f| f.name() != f.name().trim());
     if !needs_trimming {
         return schema;
     }
@@ -352,12 +358,9 @@ impl DataReader for CsvReader {
                 byte_offsets,
                 projection.cloned(),
                 LineOrientedFormat::Csv,
-                false, // CSV has no nested containers; flag ignored
             )));
         }
-        self.inner
-            .data_source(projection, filters, limit)
-            .await
+        self.inner.data_source(projection, filters, limit).await
     }
 
     async fn read_version(&self) -> Result<String, BundlebaseError> {
@@ -443,7 +446,9 @@ impl DataReader for CsvReader {
         let delimiter = self.inner.config().delimiter;
 
         // Read file bytes once — used for both page layout and column stats.
-        let get_result = object_store.get_opts(&path, object_store::GetOptions::default()).await?;
+        let get_result = object_store
+            .get_opts(&path, object_store::GetOptions::default())
+            .await?;
         let mut file_stream = get_result.into_stream();
         let mut buffer = Vec::new();
         while let Some(chunk) = file_stream.next().await {
@@ -465,19 +470,24 @@ impl DataReader for CsvReader {
         // from `buffer`. `read_schema` has a 64KB-range fetch + its own parse;
         // doing the same work again here is the other half of the "double
         // parse" inefficiency.
-        let schema = self
-            .inner
-            .read_schema()
-            .await?
-            .ok_or_else(|| BundlebaseError::from("CSV schema unavailable during build_layout"))?;
+        let schema =
+            self.inner.read_schema().await?.ok_or_else(|| {
+                BundlebaseError::from("CSV schema unavailable during build_layout")
+            })?;
 
         // Compute column stats with page-level tracking.
-        let column_stats = self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter, schema)?;
+        let column_stats =
+            self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter, schema)?;
 
         // Assemble final layout with stats and write.
-        let layout = PageMap { column_stats, ..initial_layout };
+        let layout = PageMap {
+            column_stats,
+            ..initial_layout
+        };
         let index_bytes = layout.serialize()?;
-        let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
+        let data_stream = Box::pin(stream::once(
+            async move { Ok::<_, std::io::Error>(index_bytes) },
+        ));
         let address = bundlebase_common::ContentAddress::with_sub_type(
             bundlebase_common::ContentCategory::Block,
             "layout",
@@ -493,11 +503,14 @@ impl DataReader for CsvReader {
         filters: &[datafusion::logical_expr::Expr],
         _limit: Option<usize>,
     ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
-        use bundlebase_io::IOReadFile;
         use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
-        use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
+        use crate::page_filter::{
+            extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound,
+            prune_exact_with_bloom, prune_prefix, prune_range,
+        };
         use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
+        use bundlebase_io::IOReadFile;
 
         let layout_file = match &self.layout {
             Some(f) => f,
@@ -536,7 +549,11 @@ impl DataReader for CsvReader {
 
         for filter in &indexable {
             // Find column index in schema by name
-            let col_idx = match schema.fields().iter().position(|f| f.name() == &filter.column) {
+            let col_idx = match schema
+                .fields()
+                .iter()
+                .position(|f| f.name() == &filter.column)
+            {
                 Some(i) => i,
                 None => continue,
             };
@@ -560,15 +577,24 @@ impl DataReader for CsvReader {
 
                 let bloom = page_stat.bloom_filter.as_deref();
                 let can_prune = match &filter.predicate {
-                    IndexPredicate::Exact(val) => {
-                        prune_exact_with_bloom(val, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom)
-                    }
-                    IndexPredicate::Range { min: fmin, max: fmax } => {
-                        prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref())
-                    }
-                    IndexPredicate::In(vals) => {
-                        vals.iter().all(|v| prune_exact_with_bloom(v, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom))
-                    }
+                    IndexPredicate::Exact(val) => prune_exact_with_bloom(
+                        val,
+                        page_stat.min.as_ref(),
+                        page_stat.max.as_ref(),
+                        bloom,
+                    ),
+                    IndexPredicate::Range {
+                        min: fmin,
+                        max: fmax,
+                    } => prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref()),
+                    IndexPredicate::In(vals) => vals.iter().all(|v| {
+                        prune_exact_with_bloom(
+                            v,
+                            page_stat.min.as_ref(),
+                            page_stat.max.as_ref(),
+                            bloom,
+                        )
+                    }),
                     // Per-page null counts are not tracked; null pruning only works at block level
                     IndexPredicate::IsNull | IndexPredicate::IsNotNull => false,
                     IndexPredicate::Prefix(prefix) => {
@@ -625,7 +651,9 @@ impl DataReader for CsvReader {
         // Return an empty page set — the caller handles the empty DataSource.
 
         // Collect included page indices.
-        let included: Vec<usize> = include.iter().enumerate()
+        let included: Vec<usize> = include
+            .iter()
+            .enumerate()
             .filter(|(_, &inc)| inc)
             .map(|(i, _)| i)
             .collect();
@@ -656,7 +684,6 @@ impl DataReader for CsvReader {
             page_ranges,
             projection.cloned(),
             LineOrientedFormat::Csv,
-            false, // CSV has no nested containers; flag ignored
         ))))
     }
 }
@@ -705,7 +732,7 @@ impl CsvReader {
 mod tests {
     use super::*;
     use crate::plugin::ReaderPlugin;
-    use crate::test_utils::{test_datafile, test_context};
+    use crate::test_utils::{test_context, test_datafile};
     use arrow::array::{downcast_array, Array, StringArray};
     use futures::stream::StreamExt;
 
@@ -715,7 +742,15 @@ mod tests {
 
         let binding = test_context();
         let result = plugin
-            .reader("file:///test.parquet", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///test.parquet",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
         assert!(result.is_none(), "CsvPlugin should reject non-Csv format");
@@ -729,7 +764,15 @@ mod tests {
 
         let binding = test_context();
         let invalid_reader = plugin
-            .reader("file:///invalid.csv", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///invalid.csv",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -867,7 +910,10 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let schema = reader.read_schema().await?.ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
 
         for field in schema.fields() {
             assert_eq!(
@@ -910,7 +956,10 @@ mod tests {
         let stats = stats.expect("checked above");
 
         // Extract actual row count from statistics
-        let rows = stats.num_rows.get_value().ok_or_else(|| BundlebaseError::from("Expected row count"))?;
+        let rows = stats
+            .num_rows
+            .get_value()
+            .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
 
         // Now CSV statistics should return the actual row count by reading the file
         // customers-0-100.csv has 100 data rows (plus 1 header row)
@@ -1064,7 +1113,10 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let schema = reader.read_schema().await?.ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
 
         // Create a new reader with the detected options for data reading
         let options = reader.read_options();
@@ -1169,7 +1221,15 @@ mod tests {
         let plugin = CsvPlugin::default();
         let binding = test_context();
         let reader = plugin
-            .reader(&csv_url, &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                &csv_url,
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
@@ -1182,10 +1242,7 @@ mod tests {
         let column_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(
             column_names,
-            vec![
-                "show_num", "air_date", "round", "category", "value", "question",
-                "answer"
-            ],
+            vec!["show_num", "air_date", "round", "category", "value", "question", "answer"],
         );
 
         Ok(())
@@ -1267,7 +1324,15 @@ mod tests {
         let plugin = CsvPlugin::default();
         let binding = test_context();
         let reader = plugin
-            .reader(url.as_str(), &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
@@ -1277,10 +1342,7 @@ mod tests {
             .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
 
         let column_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert_eq!(
-            column_names,
-            vec!["id", "category", "question", "answer"],
-        );
+        assert_eq!(column_names, vec!["id", "category", "question", "answer"],);
 
         Ok(())
     }
@@ -1327,7 +1389,15 @@ mod tests {
         // Now test with CsvReader which has the retry logic
         let plugin = CsvPlugin::default();
         let reader = plugin
-            .reader(&csv_url_str, &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                &csv_url_str,
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 

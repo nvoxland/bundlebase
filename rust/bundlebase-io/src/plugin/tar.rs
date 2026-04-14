@@ -10,9 +10,9 @@
 //! (written by `export_tar()`). This enables O(1) startup via two range requests.
 
 use crate::registry::IOFactory;
-use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
-use crate::ConfigProvider;
 use crate::BundlebaseError;
+use crate::ConfigProvider;
+use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::{self, BoxStream, StreamExt, TryStreamExt};
@@ -95,20 +95,21 @@ impl TarObjectStore {
             return Ok(());
         }
 
-        let file = File::open(&*self.tar_path).map_err(|e| {
-            object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            }
+        let file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
+            store: "TarObjectStore",
+            source: Box::new(e),
         })?;
 
         let mut archive = Archive::new(file);
         let mut entries = HashMap::new();
 
-        for (_i, entry_result) in archive.entries().map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?.enumerate()
+        for (_i, entry_result) in archive
+            .entries()
+            .map_err(|e| object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            })?
+            .enumerate()
         {
             let entry = entry_result.map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
@@ -120,10 +121,12 @@ impl TarObjectStore {
                 store: "TarObjectStore",
                 source: Box::new(e),
             })?;
-            let path_str = path_bytes.to_str().ok_or_else(|| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: "Invalid UTF-8 in tar entry path".into(),
-            })?;
+            let path_str = path_bytes
+                .to_str()
+                .ok_or_else(|| object_store::Error::Generic {
+                    store: "TarObjectStore",
+                    source: "Invalid UTF-8 in tar entry path".into(),
+                })?;
 
             // Skip directories and the bundlebase manifest (internal metadata)
             if path_str.ends_with('/') || path_str == TAR_MANIFEST_FILENAME {
@@ -138,9 +141,7 @@ impl TarObjectStore {
                 .header()
                 .mtime()
                 .ok()
-                .and_then(|mtime| {
-                    chrono::DateTime::from_timestamp(mtime as i64, 0)
-                })
+                .and_then(|mtime| chrono::DateTime::from_timestamp(mtime as i64, 0))
                 .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
 
             let tar_entry = TarEntry {
@@ -174,10 +175,13 @@ impl TarObjectStore {
 
         // Look up the entry in the index
         let index = self.index.read();
-        let entry = index.entries.get(path).ok_or_else(|| object_store::Error::NotFound {
-            path: path.to_string(),
-            source: "File not found in tar index".into(),
-        })?;
+        let entry = index
+            .entries
+            .get(path)
+            .ok_or_else(|| object_store::Error::NotFound {
+                path: path.to_string(),
+                source: "File not found in tar index".into(),
+            })?;
 
         let offset = entry.offset;
         let size = entry.size;
@@ -189,17 +193,19 @@ impl TarObjectStore {
             source: Box::new(e),
         })?;
 
-        file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .map_err(|e| object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            })?;
 
         // Read exactly `size` bytes
         let mut buffer = vec![0u8; size as usize];
-        file.read_exact(&mut buffer).map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?;
+        file.read_exact(&mut buffer)
+            .map_err(|e| object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            })?;
 
         Ok(Bytes::from(buffer))
     }
@@ -213,20 +219,21 @@ impl TarObjectStore {
     fn append_entry(&self, path: &ObjectPath, data: Bytes) -> ObjectStoreResult<()> {
         // If the tar file exists, read all existing entries first
         let existing_entries: Vec<(ObjectPath, Bytes)> = if self.tar_path.exists() {
-            let file = File::open(&*self.tar_path).map_err(|e| {
-                object_store::Error::Generic {
-                    store: "TarObjectStore",
-                    source: Box::new(e),
-                }
+            let file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
             })?;
 
             let mut archive = Archive::new(file);
             let mut entries = Vec::new();
 
-            for entry_result in archive.entries().map_err(|e| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            })? {
+            for entry_result in archive
+                .entries()
+                .map_err(|e| object_store::Error::Generic {
+                    store: "TarObjectStore",
+                    source: Box::new(e),
+                })?
+            {
                 let mut entry = entry_result.map_err(|e| object_store::Error::Generic {
                     store: "TarObjectStore",
                     source: Box::new(e),
@@ -236,18 +243,21 @@ impl TarObjectStore {
                     store: "TarObjectStore",
                     source: Box::new(e),
                 })?;
-                let path_string = entry_path.to_str().ok_or_else(|| object_store::Error::Generic {
-                    store: "TarObjectStore",
-                    source: "Invalid UTF-8 in tar entry path".into(),
-                })?.to_string();
+                let path_string = entry_path
+                    .to_str()
+                    .ok_or_else(|| object_store::Error::Generic {
+                        store: "TarObjectStore",
+                        source: "Invalid UTF-8 in tar entry path".into(),
+                    })?
+                    .to_string();
 
                 let mut buffer = Vec::new();
-                entry.read_to_end(&mut buffer).map_err(|e| {
-                    object_store::Error::Generic {
+                entry
+                    .read_to_end(&mut buffer)
+                    .map_err(|e| object_store::Error::Generic {
                         store: "TarObjectStore",
                         source: Box::new(e),
-                    }
-                })?;
+                    })?;
 
                 entries.push((ObjectPath::from(path_string), Bytes::from(buffer)));
             }
@@ -257,11 +267,9 @@ impl TarObjectStore {
         };
 
         // Rewrite the entire tar file with all entries plus the new one
-        let file = File::create(&*self.tar_path).map_err(|e| {
-            object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            }
+        let file = File::create(&*self.tar_path).map_err(|e| object_store::Error::Generic {
+            store: "TarObjectStore",
+            source: Box::new(e),
         })?;
 
         let mut builder = Builder::new(file);
@@ -354,7 +362,11 @@ impl ObjectStore for TarObjectStore {
         })
     }
 
-    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
+    async fn get_opts(
+        &self,
+        location: &ObjectPath,
+        _options: GetOptions,
+    ) -> ObjectStoreResult<GetResult> {
         self.ensure_indexed()?;
 
         let bytes = self.read_entry(location)?;
@@ -387,7 +399,10 @@ impl ObjectStore for TarObjectStore {
         }))
     }
 
-    fn list(&self, prefix: Option<&ObjectPath>) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
+    fn list(
+        &self,
+        prefix: Option<&ObjectPath>,
+    ) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
         // Ensure index is built synchronously
         if let Err(e) = self.ensure_indexed() {
             return Box::pin(stream::once(async move { Err(e) }));
@@ -420,7 +435,10 @@ impl ObjectStore for TarObjectStore {
         Box::pin(stream::iter(entries.into_iter().map(Ok)))
     }
 
-    async fn list_with_delimiter(&self, prefix: Option<&ObjectPath>) -> ObjectStoreResult<ListResult> {
+    async fn list_with_delimiter(
+        &self,
+        prefix: Option<&ObjectPath>,
+    ) -> ObjectStoreResult<ListResult> {
         self.ensure_indexed()?;
 
         let index = self.index.read();
@@ -464,7 +482,12 @@ impl ObjectStore for TarObjectStore {
         })
     }
 
-    async fn copy_opts(&self, _from: &ObjectPath, _to: &ObjectPath, _options: CopyOptions) -> ObjectStoreResult<()> {
+    async fn copy_opts(
+        &self,
+        _from: &ObjectPath,
+        _to: &ObjectPath,
+        _options: CopyOptions,
+    ) -> ObjectStoreResult<()> {
         Err(object_store::Error::NotSupported {
             source: "Tar archives do not support copy".into(),
         })
@@ -512,7 +535,10 @@ fn pad512(size: u64) -> u64 {
 ///
 /// Returns a map from entry name to (data_offset, data_size).
 /// The layout is: manifest_header(512) + manifest_data(padded) + for each entry: header(512) + data(padded).
-fn compute_offsets(manifest_data_size: u64, entries: &[(String, u64)]) -> HashMap<ObjectPath, TarEntry> {
+fn compute_offsets(
+    manifest_data_size: u64,
+    entries: &[(String, u64)],
+) -> HashMap<ObjectPath, TarEntry> {
     let mut offset = 512 + pad512(manifest_data_size); // skip past manifest entry
     let mut result = HashMap::new();
 
@@ -566,10 +592,12 @@ impl ReadOnlyTarObjectStore {
             store: "ReadOnlyTarObjectStore",
             source: Box::new(e),
         })?;
-        let entry_name_str = entry_name.to_str().ok_or_else(|| object_store::Error::Generic {
-            store: "ReadOnlyTarObjectStore",
-            source: "Invalid UTF-8 in tar header path".into(),
-        })?;
+        let entry_name_str = entry_name
+            .to_str()
+            .ok_or_else(|| object_store::Error::Generic {
+                store: "ReadOnlyTarObjectStore",
+                source: "Invalid UTF-8 in tar header path".into(),
+            })?;
 
         if entry_name_str != TAR_MANIFEST_FILENAME {
             return Err(object_store::Error::Generic {
@@ -605,10 +633,7 @@ impl ReadOnlyTarObjectStore {
         let entries_vec: Vec<(String, u64)> = manifest
             .iter()
             .map(|entry| {
-                let name = entry["name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
+                let name = entry["name"].as_str().unwrap_or_default().to_string();
                 let size = entry["size"].as_u64().unwrap_or(0);
                 (name, size)
             })
@@ -637,10 +662,13 @@ impl ReadOnlyTarObjectStore {
 
         let (offset, size) = {
             let index = self.index.read();
-            let entry = index.entries.get(path).ok_or_else(|| object_store::Error::NotFound {
-                path: path.to_string(),
-                source: "File not found in remote tar index".into(),
-            })?;
+            let entry = index
+                .entries
+                .get(path)
+                .ok_or_else(|| object_store::Error::NotFound {
+                    path: path.to_string(),
+                    source: "File not found in remote tar index".into(),
+                })?;
             (entry.offset, entry.size)
         };
 
@@ -679,7 +707,11 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         })
     }
 
-    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
+    async fn get_opts(
+        &self,
+        location: &ObjectPath,
+        _options: GetOptions,
+    ) -> ObjectStoreResult<GetResult> {
         let bytes = self.read_entry(location).await?;
         let size = bytes.len() as u64;
 
@@ -710,7 +742,10 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         }))
     }
 
-    fn list(&self, prefix: Option<&ObjectPath>) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
+    fn list(
+        &self,
+        prefix: Option<&ObjectPath>,
+    ) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
         let this = self.clone();
         let prefix_owned = prefix.cloned();
 
@@ -744,7 +779,10 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         Box::pin(fut.into_stream().try_flatten())
     }
 
-    async fn list_with_delimiter(&self, prefix: Option<&ObjectPath>) -> ObjectStoreResult<ListResult> {
+    async fn list_with_delimiter(
+        &self,
+        prefix: Option<&ObjectPath>,
+    ) -> ObjectStoreResult<ListResult> {
         self.ensure_indexed().await?;
 
         let index = self.index.read();
@@ -785,7 +823,12 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         })
     }
 
-    async fn copy_opts(&self, _from: &ObjectPath, _to: &ObjectPath, _options: CopyOptions) -> ObjectStoreResult<()> {
+    async fn copy_opts(
+        &self,
+        _from: &ObjectPath,
+        _to: &ObjectPath,
+        _options: CopyOptions,
+    ) -> ObjectStoreResult<()> {
         Err(object_store::Error::NotSupported {
             source: "Remote tar archives are read-only".into(),
         })
@@ -873,11 +916,8 @@ pub fn parse_tar_url(
         );
         let archive_url = Url::parse(&archive_url_str)?;
 
-        let store = super::object_store::build_object_store(
-            &archive_url,
-            &archive_url_str,
-            config,
-        )?;
+        let store =
+            super::object_store::build_object_store(&archive_url, &archive_url_str, config)?;
         let obj_path = ObjectPath::from(archive_path_str);
 
         TarArchiveLocation::Remote {
@@ -899,9 +939,7 @@ fn base_tar_url(url: &Url, internal_path: &str) -> String {
     } else {
         // Remove the "/internal_path" suffix
         let suffix = format!("/{}", internal_path);
-        full.strip_suffix(&suffix)
-            .unwrap_or(full)
-            .to_string()
+        full.strip_suffix(&suffix).unwrap_or(full).to_string()
     }
 }
 
@@ -933,12 +971,14 @@ impl TarFile {
         let path = ObjectPath::from(internal_path.as_str());
 
         let (store, writable): (Arc<dyn ObjectStore>, bool) = match location {
-            TarArchiveLocation::Local(tar_path) => {
-                (Arc::new(TarObjectStore::new(tar_path)?), true)
-            }
-            TarArchiveLocation::Remote { store, path: archive_path } => {
-                (Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)), false)
-            }
+            TarArchiveLocation::Local(tar_path) => (Arc::new(TarObjectStore::new(tar_path)?), true),
+            TarArchiveLocation::Remote {
+                store,
+                path: archive_path,
+            } => (
+                Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)),
+                false,
+            ),
         };
 
         Ok(Self {
@@ -951,7 +991,12 @@ impl TarFile {
 
     /// Create a TarFile with an existing store.
     pub fn new(url: Url, store: Arc<dyn ObjectStore>, path: ObjectPath, writable: bool) -> Self {
-        Self { url, store, path, writable }
+        Self {
+            url,
+            store,
+            path,
+            writable,
+        }
     }
 }
 
@@ -1085,12 +1130,14 @@ impl TarDir {
         let tar_url = base_tar_url(url, &internal_path);
 
         let (store, writable): (Arc<dyn ObjectStore>, bool) = match location {
-            TarArchiveLocation::Local(tar_path) => {
-                (Arc::new(TarObjectStore::new(tar_path)?), true)
-            }
-            TarArchiveLocation::Remote { store, path: archive_path } => {
-                (Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)), false)
-            }
+            TarArchiveLocation::Local(tar_path) => (Arc::new(TarObjectStore::new(tar_path)?), true),
+            TarArchiveLocation::Remote {
+                store,
+                path: archive_path,
+            } => (
+                Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)),
+                false,
+            ),
         };
 
         Ok(Self {
@@ -1155,11 +1202,7 @@ impl IOReadDir for TarDir {
             self.path.child(name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "{}/{}",
-            self.base_tar_url,
-            new_path.as_ref()
-        ))?;
+        let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
 
         Ok(Box::new(TarDir {
             url: new_url,
@@ -1177,13 +1220,14 @@ impl IOReadDir for TarDir {
             self.path.child(name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "{}/{}",
-            self.base_tar_url,
-            new_path.as_ref()
-        ))?;
+        let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
 
-        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path, self.writable)))
+        Ok(Box::new(TarFile::new(
+            new_url,
+            self.store.clone(),
+            new_path,
+            self.writable,
+        )))
     }
 }
 
@@ -1196,11 +1240,7 @@ impl IOReadWriteDir for TarDir {
             self.path.child(name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "{}/{}",
-            self.base_tar_url,
-            new_path.as_ref()
-        ))?;
+        let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
 
         Ok(Box::new(TarDir {
             url: new_url,
@@ -1218,13 +1258,14 @@ impl IOReadWriteDir for TarDir {
             self.path.child(name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "{}/{}",
-            self.base_tar_url,
-            new_path.as_ref()
-        ))?;
+        let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
 
-        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path, self.writable)))
+        Ok(Box::new(TarFile::new(
+            new_url,
+            self.store.clone(),
+            new_path,
+            self.writable,
+        )))
     }
 
     async fn rename(&self, _from: &str, _to: &str) -> Result<(), BundlebaseError> {
@@ -1388,9 +1429,18 @@ mod tests {
         });
 
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0].as_ref().unwrap().location.as_ref(), "dir1/file1.txt");
-        assert_eq!(results[1].as_ref().unwrap().location.as_ref(), "dir1/file2.txt");
-        assert_eq!(results[2].as_ref().unwrap().location.as_ref(), "dir2/file3.txt");
+        assert_eq!(
+            results[0].as_ref().unwrap().location.as_ref(),
+            "dir1/file1.txt"
+        );
+        assert_eq!(
+            results[1].as_ref().unwrap().location.as_ref(),
+            "dir1/file2.txt"
+        );
+        assert_eq!(
+            results[2].as_ref().unwrap().location.as_ref(),
+            "dir2/file3.txt"
+        );
 
         // List with prefix
         let prefix_results: Vec<_> = store
@@ -1429,7 +1479,9 @@ mod tests {
             header.set_mode(0o644);
             header.set_mtime(0);
             header.set_cksum();
-            builder.append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_data[..]).unwrap();
+            builder
+                .append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_data[..])
+                .unwrap();
 
             let file_data = b"hello";
             let mut header = Header::new_gnu();
@@ -1437,7 +1489,9 @@ mod tests {
             header.set_mode(0o644);
             header.set_mtime(0);
             header.set_cksum();
-            builder.append_data(&mut header, "data.txt", &file_data[..]).unwrap();
+            builder
+                .append_data(&mut header, "data.txt", &file_data[..])
+                .unwrap();
 
             builder.finish().unwrap();
         }
@@ -1457,7 +1511,9 @@ mod tests {
         let config = test_config();
         let url = Url::parse("tar+file:///home/user/data.tar/subdir/file.parquet").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
-        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/home/user/data.tar")));
+        assert!(
+            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/home/user/data.tar"))
+        );
         assert_eq!(internal_path, "subdir/file.parquet");
     }
 
@@ -1466,7 +1522,9 @@ mod tests {
         let config = test_config();
         let url = Url::parse("tar+file:///data.tar/").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
-        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/data.tar")));
+        assert!(
+            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/data.tar"))
+        );
         assert_eq!(internal_path, "");
     }
 
@@ -1475,7 +1533,9 @@ mod tests {
         let config = test_config();
         let url = Url::parse("tar+file:///archive.tar").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
-        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/archive.tar")));
+        assert!(
+            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/archive.tar"))
+        );
         assert_eq!(internal_path, "");
     }
 
@@ -1485,7 +1545,10 @@ mod tests {
         let url = Url::parse("file:///data.tar").unwrap();
         let result = parse_tar_url(&url, &config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Expected 'tar+<scheme>'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected 'tar+<scheme>'"));
     }
 
     #[test]
@@ -1607,7 +1670,9 @@ mod tests {
             header.set_mode(0o644);
             header.set_mtime(0);
             header.set_cksum();
-            builder.append_data(&mut header, "hello.txt", &data[..]).unwrap();
+            builder
+                .append_data(&mut header, "hello.txt", &data[..])
+                .unwrap();
 
             // Write subdir/world.txt
             let data = b"hello world";
@@ -1616,7 +1681,9 @@ mod tests {
             header.set_mode(0o644);
             header.set_mtime(0);
             header.set_cksum();
-            builder.append_data(&mut header, "subdir/world.txt", &data[..]).unwrap();
+            builder
+                .append_data(&mut header, "subdir/world.txt", &data[..])
+                .unwrap();
 
             builder.finish().unwrap();
         }
@@ -1625,7 +1692,10 @@ mod tests {
         let mem_store = object_store::memory::InMemory::new();
         let archive_path = ObjectPath::from("test.tar");
         mem_store
-            .put(&archive_path, PutPayload::from_bytes(Bytes::from(tar_buffer)))
+            .put(
+                &archive_path,
+                PutPayload::from_bytes(Bytes::from(tar_buffer)),
+            )
             .await
             .unwrap();
 
@@ -1638,7 +1708,10 @@ mod tests {
         assert_eq!(&bytes[..], b"hello");
 
         // Test reading subdir/world.txt
-        let result = store.get(&ObjectPath::from("subdir/world.txt")).await.unwrap();
+        let result = store
+            .get(&ObjectPath::from("subdir/world.txt"))
+            .await
+            .unwrap();
         let bytes = result.bytes().await.unwrap();
         assert_eq!(&bytes[..], b"hello world");
 
@@ -1661,7 +1734,10 @@ mod tests {
                 PutPayload::from_bytes(Bytes::from("data")),
             )
             .await;
-        assert!(matches!(put_err, Err(object_store::Error::NotSupported { .. })));
+        assert!(matches!(
+            put_err,
+            Err(object_store::Error::NotSupported { .. })
+        ));
     }
 
     #[tokio::test]
@@ -1677,7 +1753,9 @@ mod tests {
             header.set_mode(0o644);
             header.set_mtime(0);
             header.set_cksum();
-            builder.append_data(&mut header, "hello.txt", &data[..]).unwrap();
+            builder
+                .append_data(&mut header, "hello.txt", &data[..])
+                .unwrap();
 
             builder.finish().unwrap();
         }
@@ -1685,7 +1763,10 @@ mod tests {
         let mem_store = object_store::memory::InMemory::new();
         let archive_path = ObjectPath::from("no_manifest.tar");
         mem_store
-            .put(&archive_path, PutPayload::from_bytes(Bytes::from(tar_buffer)))
+            .put(
+                &archive_path,
+                PutPayload::from_bytes(Bytes::from(tar_buffer)),
+            )
             .await
             .unwrap();
 
@@ -1721,19 +1802,13 @@ mod tests {
     #[test]
     fn test_base_tar_url_empty_internal() {
         let url = Url::parse("tar+file:///path/to/data.tar/").unwrap();
-        assert_eq!(
-            base_tar_url(&url, ""),
-            "tar+file:///path/to/data.tar"
-        );
+        assert_eq!(base_tar_url(&url, ""), "tar+file:///path/to/data.tar");
     }
 
     #[test]
     fn test_base_tar_url_no_trailing_slash() {
         let url = Url::parse("tar+file:///path/to/data.tar").unwrap();
-        assert_eq!(
-            base_tar_url(&url, ""),
-            "tar+file:///path/to/data.tar"
-        );
+        assert_eq!(base_tar_url(&url, ""), "tar+file:///path/to/data.tar");
     }
 
     // TarIOFactory tests
@@ -1755,6 +1830,7 @@ mod tests {
         assert!(factory.supports_write(&Url::parse("tar+file:///data.tar/file.txt").unwrap()));
         assert!(!factory.supports_write(&Url::parse("tar+s3://bucket/data.tar/file.txt").unwrap()));
         assert!(!factory.supports_write(&Url::parse("tar+gs://bucket/data.tar/file.txt").unwrap()));
-        assert!(!factory.supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
+        assert!(!factory
+            .supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
     }
 }

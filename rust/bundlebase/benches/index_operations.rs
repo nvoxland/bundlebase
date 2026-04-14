@@ -34,39 +34,35 @@ fn bench_create_index(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            // Spawn a separate thread for setup because iter_batched's
-                            // setup closure runs inside the async runtime context,
-                            // and block_on cannot be called from within a runtime.
-                            std::thread::scope(|s| {
-                                s.spawn(|| {
-                                    let setup_rt = tokio::runtime::Builder::new_current_thread()
-                                        .enable_all()
-                                        .build()
-                                        .expect("setup runtime");
-                                    setup_rt
-                                        .block_on(create_benchmark_bundle(rows, &format))
-                                        .expect("bundle creation")
-                                })
-                                .join()
-                                .expect("setup thread panicked")
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                b.to_async(&rt).iter_batched(
+                    || {
+                        // Spawn a separate thread for setup because iter_batched's
+                        // setup closure runs inside the async runtime context,
+                        // and block_on cannot be called from within a runtime.
+                        std::thread::scope(|s| {
+                            s.spawn(|| {
+                                let setup_rt = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .expect("setup runtime");
+                                setup_rt
+                                    .block_on(create_benchmark_bundle(rows, &format))
+                                    .expect("bundle creation")
                             })
-                        },
-                        |bundle| async move {
-                            bundle
-                                .rebuild_index("id")
-                                .await
-                                .expect("index creation failed");
-                        },
-                        criterion::BatchSize::SmallInput,
-                    );
-                },
-            );
+                            .join()
+                            .expect("setup thread panicked")
+                        })
+                    },
+                    |bundle| async move {
+                        bundle
+                            .rebuild_index("id")
+                            .await
+                            .expect("index creation failed");
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            });
         }
     }
     group.finish();
@@ -82,8 +78,9 @@ fn bench_index_lookup_exact(c: &mut Criterion) {
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,
                 |b, &rows| {
-                    let bundle =
-                        rt.block_on(create_indexed_bundle(rows, &format)).expect("bundle creation");
+                    let bundle = rt
+                        .block_on(create_indexed_bundle(rows, &format))
+                        .expect("bundle creation");
                     let target_id = (rows / 2) as i64;
 
                     b.to_async(&rt).iter(|| {
@@ -185,8 +182,9 @@ fn bench_index_range_query(c: &mut Criterion) {
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,
                 |b, &rows| {
-                    let bundle =
-                        rt.block_on(create_indexed_bundle(rows, &format)).expect("bundle creation");
+                    let bundle = rt
+                        .block_on(create_indexed_bundle(rows, &format))
+                        .expect("bundle creation");
                     let min_id = (rows / 10) as i64;
                     let max_id = (rows / 5) as i64;
 
@@ -226,8 +224,9 @@ fn bench_index_in_query(c: &mut Criterion) {
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,
                 |b, &rows| {
-                    let bundle =
-                        rt.block_on(create_indexed_bundle(rows, &format)).expect("bundle creation");
+                    let bundle = rt
+                        .block_on(create_indexed_bundle(rows, &format))
+                        .expect("bundle creation");
                     let ids: Vec<i64> = (0..10).map(|i| (rows * i / 10) as i64).collect();
                     let id_list = ids
                         .iter()
@@ -241,10 +240,7 @@ fn bench_index_in_query(c: &mut Criterion) {
                         async move {
                             let mut stream = bundle
                                 .query(
-                                    &format!(
-                                        "SELECT * FROM bundle WHERE id IN ({})",
-                                        id_list
-                                    ),
+                                    &format!("SELECT * FROM bundle WHERE id IN ({})", id_list),
                                     vec![],
                                     None,
                                 )

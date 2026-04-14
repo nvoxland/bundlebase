@@ -1,25 +1,28 @@
-use bundlebase_command::BundleFacadeCommandExt;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
+use bundlebase_command::BundleBuilderExt;
+use bundlebase_command::BundleFacadeCommandExt;
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use futures::TryStreamExt;
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 #[tokio::test]
 async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Apply SQL query to filter results
     let stream = bundle
@@ -43,9 +46,13 @@ async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
 async fn test_query_star() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
-    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![], None).await?;
+    let stream = bundle
+        .query("SELECT * FROM bundle LIMIT 10", vec![], None)
+        .await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -58,7 +65,9 @@ async fn test_query_star() -> Result<(), BundlebaseError> {
 async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Lowercase "select" should work
     let stream = bundle
@@ -76,7 +85,9 @@ async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
 async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Apply SQL query with multiple parameters
     let stream = bundle
@@ -104,10 +115,14 @@ async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
 async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Apply SQL query without parameters
-    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![], None).await?;
+    let stream = bundle
+        .query("SELECT * FROM bundle LIMIT 10", vec![], None)
+        .await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -120,7 +135,9 @@ async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
 async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Apply SQL query with GROUP BY
     let stream = bundle
@@ -146,14 +163,23 @@ async fn test_explain_basic() -> Result<(), BundlebaseError> {
     use futures::StreamExt;
 
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Explain should return a stream with plan_type and plan columns
-    let mut stream = bundle.bundle().explain(false, false, ExplainFormat::Indent, None).await?;
+    let mut stream = bundle
+        .bundle()
+        .explain(false, false, ExplainFormat::Indent, None)
+        .await?;
     let mut row_count = 0;
     while let Some(batch_result) = stream.next().await {
         let batch = batch_result?;
-        assert_eq!(batch.num_columns(), 2, "Should have plan_type and plan columns");
+        assert_eq!(
+            batch.num_columns(),
+            2,
+            "Should have plan_type and plan columns"
+        );
         row_count += batch.num_rows();
     }
     assert!(row_count > 0, "Explain should return at least one row");
@@ -168,20 +194,31 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
     use futures::StreamExt;
 
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Apply a filter and explain
     let filtered = bundle
-        .filter("SELECT * FROM bundle WHERE salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
+        .filter(
+            "SELECT * FROM bundle WHERE salary > $1",
+            vec![ScalarValue::Float64(Some(50000.0))],
+        )
         .await?;
-    let mut stream = filtered.bundle().explain(false, false, ExplainFormat::Indent, None).await?;
+    let mut stream = filtered
+        .bundle()
+        .explain(false, false, ExplainFormat::Indent, None)
+        .await?;
 
     let mut row_count = 0;
     while let Some(batch_result) = stream.next().await {
         let batch = batch_result?;
         row_count += batch.num_rows();
     }
-    assert!(row_count > 0, "Explain should produce at least one row for filtered bundle");
+    assert!(
+        row_count > 0,
+        "Explain should produce at least one row for filtered bundle"
+    );
 
     Ok(())
 }
@@ -190,9 +227,13 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
 async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
-    let stream = bundle.query("SELECT t.* FROM bundle t", vec![], None).await?;
+    let stream = bundle
+        .query("SELECT t.* FROM bundle t", vec![], None)
+        .await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -211,7 +252,11 @@ async fn test_query_empty_bundle() -> Result<(), BundlebaseError> {
     let result: Vec<_> = stream.try_collect().await?;
 
     // Should have exactly one column: no_data (not duplicated)
-    assert_eq!(schema.fields().len(), 1, "Empty bundle should have exactly 1 column, not duplicated");
+    assert_eq!(
+        schema.fields().len(),
+        1,
+        "Empty bundle should have exactly 1 column, not duplicated"
+    );
     assert_eq!(schema.field(0).name(), "no_data");
 
     let total_rows: usize = result.iter().map(|b| b.num_rows()).sum();

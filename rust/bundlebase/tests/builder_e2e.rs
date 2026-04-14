@@ -7,7 +7,9 @@ mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
 
 #[tokio::test]
@@ -108,7 +110,10 @@ async fn test_name_tracked_as_operation() {
     // Verify the name was actually set
     assert_eq!(bundle.name(), Some("Named Bundle".to_string()));
     // set_name should show up in status as a change
-    assert!(!bundle.status().is_empty(), "Status should reflect name change");
+    assert!(
+        !bundle.status().is_empty(),
+        "Status should reflect name change"
+    );
 }
 
 #[tokio::test]
@@ -117,17 +122,26 @@ async fn test_operations_list() {
     let bundle = BundleBuilder::create("memory:///test_bundle", None)
         .await
         .unwrap();
-    assert!(bundle.status().is_empty(), "Empty bundle should have no status changes");
+    assert!(
+        bundle.status().is_empty(),
+        "Empty bundle should have no status changes"
+    );
 
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    assert!(!bundle.status().is_empty(), "Status should have changes after attach");
+    assert!(
+        !bundle.status().is_empty(),
+        "Status should have changes after attach"
+    );
 
     let ops_after_attach = bundle.operations().len();
     bundle.drop_column("title").await.unwrap();
-    assert!(bundle.operations().len() > ops_after_attach, "Operations should grow after drop_column");
+    assert!(
+        bundle.operations().len() > ops_after_attach,
+        "Operations should grow after drop_column"
+    );
 }
 
 #[tokio::test]
@@ -165,7 +179,10 @@ async fn test_multiple_operations_pipeline() {
         .unwrap();
 
     // Verify all 3 operations are tracked
-    assert!(bundle.operations().len() >= 3, "Should have at least 3 operations");
+    assert!(
+        bundle.operations().len() >= 3,
+        "Should have at least 3 operations"
+    );
     // Verify the rename took effect
     let schema = bundle.schema().await.unwrap();
     let field_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
@@ -245,16 +262,15 @@ async fn test_version_uncommitted_temp_via_facade() {
 #[tokio::test]
 async fn test_commit_blocked_by_temp_function_in_filter() -> Result<(), BundlebaseError> {
     init();
-    use bundlebase::bundle::function_entry::{FunctionEntry, FunctionKind, parse_function_name};
-    use bundlebase_udf::UdfRuntime;
+    use arrow::datatypes::DataType;
+    use bundlebase::bundle::function_entry::{parse_function_name, FunctionEntry, FunctionKind};
+    use bundlebase_common::object_id::ObjectId;
     use bundlebase_common::platform::Platform;
     use bundlebase_udf::bridge::ipc_bridge::new_subprocess_cache;
-    use bundlebase_common::object_id::ObjectId;
-    use arrow::datatypes::DataType;
+    use bundlebase_udf::UdfRuntime;
     use datafusion::logical_expr::ScalarUDF;
 
-    let builder = BundleBuilder::create("memory:///test_temp_guard", None)
-        .await?;
+    let builder = BundleBuilder::create("memory:///test_temp_guard", None).await?;
     builder
         .attach(test_datafile("userdata.parquet"), None)
         .await?;
@@ -279,7 +295,11 @@ async fn test_commit_blocked_by_temp_function_in_filter() -> Result<(), Bundleba
     builder.bundle().function_registry().write().add(entry);
 
     // Verify temp function is registered
-    let temp_names = builder.bundle().function_registry().read().temporary_only_names();
+    let temp_names = builder
+        .bundle()
+        .function_registry()
+        .read()
+        .temporary_only_names();
     assert!(
         temp_names.contains(&"test.double_val".to_string()),
         "Expected 'test.double_val' in temp_names: {:?}",
@@ -288,16 +308,25 @@ async fn test_commit_blocked_by_temp_function_in_filter() -> Result<(), Bundleba
 
     // Apply a filter that uses the temp function
     builder
-        .filter("SELECT * FROM bundle WHERE test.double_val(id) > 10", vec![])
+        .filter(
+            "SELECT * FROM bundle WHERE test.double_val(id) > 10",
+            vec![],
+        )
         .await?;
 
     // Verify status has the filter operation
     let status = builder.status();
-    assert!(!status.is_empty(), "Status should have changes after filter");
+    assert!(
+        !status.is_empty(),
+        "Status should have changes after filter"
+    );
 
     // Commit should fail
     let result = builder.commit("should fail").await;
-    assert!(result.is_err(), "Commit should fail when filter uses temp function");
+    assert!(
+        result.is_err(),
+        "Commit should fail when filter uses temp function"
+    );
     let err = result.err().unwrap();
     let err_msg = err.to_string();
     assert!(
@@ -344,15 +373,22 @@ async fn test_reset_before_first_commit_leaves_bundle_usable() {
     let bundle = BundleBuilder::create(path, None).await.unwrap();
 
     // Attach then reset (no commit yet)
-    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
     bundle.reset().await.unwrap();
 
     // Should be able to attach again after reset
-    bundle.attach(test_datafile("userdata.parquet"), None).await
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
         .expect("ATTACH after RESET (before first commit) should succeed");
 
     // Should be able to commit
-    bundle.commit("initial").await
+    bundle
+        .commit("initial")
+        .await
         .expect("COMMIT after RESET (before first commit) should succeed");
 
     // Reopen and verify the data survived
@@ -369,16 +405,25 @@ async fn test_reset_after_commit_preserves_init_file_and_data() {
     let path = tmp.path().to_str().unwrap();
 
     let bundle = BundleBuilder::create(path, None).await.unwrap();
-    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
     bundle.commit("initial").await.unwrap();
 
     // Add more (uncommitted) data then reset
-    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
     bundle.reset().await.unwrap();
 
     // Should be back to the committed state (1000 rows, not 2000)
-    assert_eq!(1000, bundle.num_rows().await.unwrap(),
-        "After RESET, row count should match last commit");
+    assert_eq!(
+        1000,
+        bundle.num_rows().await.unwrap(),
+        "After RESET, row count should match last commit"
+    );
 
     // The INIT file must still be on disk (META_DIR = "_bundlebase")
     let meta_path = std::path::Path::new(path)
@@ -387,7 +432,8 @@ async fn test_reset_after_commit_preserves_init_file_and_data() {
     assert!(meta_path.exists(), "INIT file must still exist after RESET");
 
     // Bundle must still be reopenable
-    let reopened = bundlebase::bundle::Bundle::open(path, None).await
+    let reopened = bundlebase::bundle::Bundle::open(path, None)
+        .await
         .expect("Bundle must be reopenable after RESET");
     assert_eq!(1000, reopened.num_rows().await.unwrap());
 }

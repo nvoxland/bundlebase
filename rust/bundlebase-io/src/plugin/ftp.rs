@@ -4,18 +4,18 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::registry::IOFactory;
+use crate::{BundlebaseError, ConfigProvider};
 use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
-use crate::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
+use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use log::debug;
-use suppaftp::tokio::AsyncFtpStream;
-use suppaftp::types::FileType;
 use std::fmt::Debug;
 use std::sync::Arc;
+use suppaftp::tokio::AsyncFtpStream;
+use suppaftp::types::FileType;
 use tokio::io::AsyncReadExt;
 use url::Url;
 
@@ -27,7 +27,6 @@ config_keys!(ftp_keys, {
     pub const FTP_USERNAME_CFG: ConfigKey = FTP_SCOPE.define("username");
     pub const FTP_PASSWORD_CFG: ConfigKey = FTP_SCOPE.define_secure("password");
 });
-
 
 /// Parse an FTP URL into its components.
 ///
@@ -65,10 +64,8 @@ pub fn parse_ftp_url(url: &Url) -> Result<(String, u16, String), BundlebaseError
 ///
 /// Constructs a URL in the format: `ftp://host:port/path`
 fn build_ftp_url(host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
-    Url::parse(&format!(
-        "ftp://{}:{}{}",
-        host, port, path
-    )).map_err(|e| format!("Failed to build FTP URL: {}", e).into())
+    Url::parse(&format!("ftp://{}:{}{}", host, port, path))
+        .map_err(|e| format!("Failed to build FTP URL: {}", e).into())
 }
 
 /// FTP file reader - read-only access to a single FTP file.
@@ -108,13 +105,12 @@ impl FtpFile {
                         e
                     ))
                 })?;
-                let mut async_temp =
-                    tokio::fs::File::from_std(temp.reopen().map_err(|e| {
-                        BundlebaseError::from(format!(
-                            "Failed to reopen temp file for FTP download: {}",
-                            e
-                        ))
-                    })?);
+                let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to reopen temp file for FTP download: {}",
+                        e
+                    ))
+                })?);
                 tokio::io::copy(&mut data_stream, &mut async_temp)
                     .await
                     .map_err(|e| {
@@ -149,10 +145,7 @@ impl FtpFile {
                 {
                     Ok(None)
                 } else {
-                    Err(
-                        format!("Failed to download FTP file '{}': {}", self.path, e)
-                            .into(),
-                    )
+                    Err(format!("Failed to download FTP file '{}': {}", self.path, e).into())
                 }
             }
         }
@@ -162,10 +155,10 @@ impl FtpFile {
     pub fn from_url(url: &Url, config: Arc<dyn ConfigProvider>) -> Result<Self, BundlebaseError> {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = bundlebase_common::Scope::try_from(url)?;
-        let user = config.get(&scope, &FTP_USERNAME_CFG)?
+        let user = config
+            .get(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
-            .unwrap_or_default();
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -186,16 +179,20 @@ impl FtpFile {
                 ))
             })?;
 
-        stream.login(&self.user, &self.password).await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "FTP authentication failed for user '{}': {}",
-                self.user, e
-            ))
-        })?;
+        stream
+            .login(&self.user, &self.password)
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "FTP authentication failed for user '{}': {}",
+                    self.user, e
+                ))
+            })?;
 
-        stream.transfer_type(FileType::Binary).await.map_err(|e| {
-            BundlebaseError::from(format!("Failed to set FTP binary mode: {}", e))
-        })?;
+        stream
+            .transfer_type(FileType::Binary)
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to set FTP binary mode: {}", e)))?;
 
         Ok(stream)
     }
@@ -223,9 +220,7 @@ impl IOReadFile for FtpFile {
             Some(temp) => {
                 let stream = crate::util::stream_from_temp_file(temp);
                 Ok(Some(Box::pin(futures::StreamExt::map(stream, |r| {
-                    r.map_err(|e| {
-                        BundlebaseError::from(format!("Failed to read temp file: {}", e))
-                    })
+                    r.map_err(|e| BundlebaseError::from(format!("Failed to read temp file: {}", e)))
                 }))))
             }
             None => Ok(None),
@@ -295,10 +290,10 @@ impl FtpDir {
     pub fn from_url(url: &Url, config: Arc<dyn ConfigProvider>) -> Result<Self, BundlebaseError> {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = bundlebase_common::Scope::try_from(url)?;
-        let user = config.get(&scope, &FTP_USERNAME_CFG)?
+        let user = config
+            .get(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
-            .unwrap_or_default();
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -319,16 +314,20 @@ impl FtpDir {
                 ))
             })?;
 
-        stream.login(&self.user, &self.password).await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "FTP authentication failed for user '{}': {}",
-                self.user, e
-            ))
-        })?;
+        stream
+            .login(&self.user, &self.password)
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "FTP authentication failed for user '{}': {}",
+                    self.user, e
+                ))
+            })?;
 
-        stream.transfer_type(FileType::Binary).await.map_err(|e| {
-            BundlebaseError::from(format!("Failed to set FTP binary mode: {}", e))
-        })?;
+        stream
+            .transfer_type(FileType::Binary)
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to set FTP binary mode: {}", e)))?;
 
         Ok(stream)
     }
@@ -484,7 +483,6 @@ impl IOFactory for FtpIOFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_parse_ftp_url_basic() {
@@ -517,7 +515,10 @@ mod tests {
         let url = Url::parse("ftp://ftp.example.com").unwrap();
         let result = parse_ftp_url(&url);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must include a path"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must include a path"));
     }
 
     #[test]

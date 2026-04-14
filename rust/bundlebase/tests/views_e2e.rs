@@ -2,26 +2,29 @@ use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
 use bundlebase::{Bundle, BundleBuilder, BundleFacade, Operation};
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::BundlebaseError;
 use bundlebase_io::read_yaml;
-use bundlebase_command::BundleBuilderExt;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 #[tokio::test]
 async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     init();
     // Create container and attach data
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create view with SQL
-    c.create_view("chile", "select * from bundle where Country = 'Chile'").await?;
+    c.create_view("chile", "select * from bundle where Country = 'Chile'")
+        .await?;
     c.commit("Add chile view").await?;
 
     // Open view
@@ -78,10 +81,12 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     // Create container and view
     let container_url = random_memory_url().to_string();
     let c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("v1").await?;
 
-    c.create_view("active", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("active", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("v2").await?;
 
     // Record initial view operations count
@@ -116,11 +121,16 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
     init();
     // Create container
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create view with SQL that has multiple conditions
-    c.create_view("working_age", "select * from bundle where \"Index\" > 21 AND \"Index\" < 65").await?;
+    c.create_view(
+        "working_age",
+        "select * from bundle where \"Index\" > 21 AND \"Index\" < 65",
+    )
+    .await?;
     c.commit("Add working_age view").await?;
 
     // Open view and verify it has the operations
@@ -148,15 +158,19 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
 async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial").await?;
 
     // Create first view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add first adults view").await?;
 
     // Try to create view with same name
-    let result = c.create_view("adults", "select * from bundle where \"Index\" > 30").await;
+    let result = c
+        .create_view("adults", "select * from bundle where \"Index\" > 30")
+        .await;
 
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
@@ -173,10 +187,12 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     // Create container and view
     let container_url = random_memory_url().to_string();
     let c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("v1").await?;
 
-    c.create_view("active", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("active", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("v2").await?;
 
     // Get the view ID
@@ -184,9 +200,7 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     let (view_id, _) = views_map.iter().next().unwrap();
 
     // Read the view's init file
-    let view_dir = c
-        .data_dir()
-        .subdir(&format!("view_{}", view_id))?;
+    let view_dir = c.data_dir().subdir(&format!("view_{}", view_id))?;
     let init_file = view_dir.subdir(META_DIR)?.file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = read_yaml(init_file.as_ref()).await?;
     let init_commit = init_commit.expect("View should have init file");
@@ -211,10 +225,12 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
 async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
-    c.create_view("high_index", "select * where \"Index\" > 50").await?;
+    c.create_view("high_index", "select * where \"Index\" > 50")
+        .await?;
     c.commit("Add view").await?;
 
     let view = c.view("high_index").await?;
@@ -241,14 +257,19 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
 async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Container should not be marked as a view
-    assert!(!c.bundle().is_view(), "Container should not be marked as view");
+    assert!(
+        !c.bundle().is_view(),
+        "Container should not be marked as view"
+    );
 
     // Create a view
-    c.create_view("filtered", "select * from bundle limit 10").await?;
+    c.create_view("filtered", "select * from bundle limit 10")
+        .await?;
     c.commit("Add view").await?;
 
     // Open the view
@@ -269,22 +290,33 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
 async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("filtered", "select * from bundle limit 10").await?;
+    c.create_view("filtered", "select * from bundle limit 10")
+        .await?;
     c.commit("Add view").await?;
 
     // Open the view
     let view_bundle = Bundle::open(
-        &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        &c.data_dir()
+            .as_ref()
+            .subdir(&format!("view_{}", c.views().keys().next().unwrap()))?
+            .url()
+            .to_string(),
         None,
-    ).await?;
-    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    )
+    .await?;
+    let view_builder = view_bundle
+        .extend(Some(random_memory_url().as_str()))
+        .await?;
 
     // Try to attach data to the view - should fail
-    let result = view_builder.attach(&test_datafile("customers-101-150.csv"), None).await;
+    let result = view_builder
+        .attach(&test_datafile("customers-101-150.csv"), None)
+        .await;
     assert!(result.is_err(), "Should not be able to attach to a view");
 
     let err_msg = result.err().unwrap().to_string();
@@ -301,23 +333,37 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
 async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("filtered", "select * from bundle limit 10").await?;
+    c.create_view("filtered", "select * from bundle limit 10")
+        .await?;
     c.commit("Add view").await?;
 
     // Open the view
     let view_bundle = Bundle::open(
-        &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        &c.data_dir()
+            .as_ref()
+            .subdir(&format!("view_{}", c.views().keys().next().unwrap()))?
+            .url()
+            .to_string(),
         None,
-    ).await?;
-    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    )
+    .await?;
+    let view_builder = view_bundle
+        .extend(Some(random_memory_url().as_str()))
+        .await?;
 
     // Try to create a view on the view - should fail
-    let result = view_builder.create_view("subview", "select * limit 5").await;
-    assert!(result.is_err(), "Should not be able to create view on a view");
+    let result = view_builder
+        .create_view("subview", "select * limit 5")
+        .await;
+    assert!(
+        result.is_err(),
+        "Should not be able to create view on a view"
+    );
 
     let err_msg = result.err().unwrap().to_string();
     assert!(
@@ -333,27 +379,44 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
 async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create two views
-    c.create_view("view1", "select * from bundle limit 10").await?;
-    c.create_view("view2", "select * from bundle limit 20").await?;
+    c.create_view("view1", "select * from bundle limit 10")
+        .await?;
+    c.create_view("view2", "select * from bundle limit 20")
+        .await?;
     c.commit("Add views").await?;
 
     // Open view1
     // views() returns HashMap<ObjectId, String> where key is ID and value is name
     let views = c.views();
-    let view1_id = views.iter().find(|(_, name)| name.as_str() == "view1").map(|(id, _)| id).unwrap();
+    let view1_id = views
+        .iter()
+        .find(|(_, name)| name.as_str() == "view1")
+        .map(|(id, _)| id)
+        .unwrap();
     let view_bundle = Bundle::open(
-        &c.data_dir().as_ref().subdir(&format!("view_{}", view1_id))?.url().to_string(),
+        &c.data_dir()
+            .as_ref()
+            .subdir(&format!("view_{}", view1_id))?
+            .url()
+            .to_string(),
         None,
-    ).await?;
-    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    )
+    .await?;
+    let view_builder = view_bundle
+        .extend(Some(random_memory_url().as_str()))
+        .await?;
 
     // Try to drop view2 from view1 - should fail
     let result = view_builder.drop_view("view2").await;
-    assert!(result.is_err(), "Should not be able to drop view from a view");
+    assert!(
+        result.is_err(),
+        "Should not be able to drop view from a view"
+    );
 
     let err_msg = result.err().unwrap().to_string();
     assert!(
@@ -370,11 +433,13 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
     init();
     // Test SELECT on a regular container (not a view) to isolate the issue
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Apply filter operation
-    c.filter("SELECT * FROM bundle WHERE Country = 'Chile'", vec![]).await?;
+    c.filter("SELECT * FROM bundle WHERE Country = 'Chile'", vec![])
+        .await?;
     c.commit("After filter").await?;
 
     // Try to get dataframe
@@ -398,10 +463,12 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
 async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
-    c.create_view("chile", "select * from bundle where Country = 'Chile'").await?;
+    c.create_view("chile", "select * from bundle where Country = 'Chile'")
+        .await?;
     c.commit("Add view").await?;
 
     let view = c.view("chile").await?;
@@ -426,12 +493,15 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
 async fn test_views_method() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create multiple views
-    c.create_view("high_index", "select * where \"Index\" > 50").await?;
-    c.create_view("low_index", "select * where \"Index\" < 30").await?;
+    c.create_view("high_index", "select * where \"Index\" > 50")
+        .await?;
+    c.create_view("low_index", "select * where \"Index\" < 30")
+        .await?;
 
     c.commit("Add views").await?;
 
@@ -452,11 +522,13 @@ async fn test_views_method() -> Result<(), BundlebaseError> {
 async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     // Get the view ID
@@ -519,11 +591,13 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     // Rename the view
@@ -552,7 +626,8 @@ async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
 async fn test_rename_view_old_name_not_found() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Try to rename non-existent view
@@ -571,12 +646,15 @@ async fn test_rename_view_old_name_not_found() -> Result<(), BundlebaseError> {
 async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create two views
-    c.create_view("view1", "select * from bundle where \"Index\" > 21").await?;
-    c.create_view("view2", "select * from bundle where \"Index\" < 30").await?;
+    c.create_view("view1", "select * from bundle where \"Index\" > 21")
+        .await?;
+    c.create_view("view2", "select * from bundle where \"Index\" < 30")
+        .await?;
     c.commit("Add two views").await?;
 
     // Try to rename view1 to view2 (conflict)
@@ -595,11 +673,13 @@ async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
 async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view and get its dataframe
-    c.create_view("high_index", "select * from bundle where \"Index\" > 50").await?;
+    c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+        .await?;
     c.commit("Add view").await?;
 
     let view_before = c.view("high_index").await?;
@@ -628,11 +708,13 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     init();
     let container_url = random_memory_url().to_string();
     let c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create and rename a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     c.rename_view("adults", "adults_renamed").await?;
@@ -664,18 +746,22 @@ async fn test_create_view_with_sql() -> Result<(), BundlebaseError> {
     // This test verifies that create_view properly stores the SQL as a select operation
 
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial").await?;
 
     // Create view with SQL directly
-    c.create_view("limited", "select * from bundle limit 10").await?;
+    c.create_view("limited", "select * from bundle limit 10")
+        .await?;
     c.commit("Added view").await?;
 
     // Verify the view has the select operation
     let bundle = Bundle::open(c.url().as_str(), None).await?;
     let view = bundle.view("limited").await?;
     let view_ops = view.operations();
-    let has_select = view_ops.iter().any(|op| op.describe().to_lowercase().contains("select"));
+    let has_select = view_ops
+        .iter()
+        .any(|op| op.describe().to_lowercase().contains("select"));
     assert!(has_select, "View should contain the select operation");
 
     Ok(())
@@ -685,11 +771,13 @@ async fn test_create_view_with_sql() -> Result<(), BundlebaseError> {
 async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     // Verify view exists
@@ -717,7 +805,8 @@ async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
 async fn test_drop_view_not_found() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Try to drop non-existent view
@@ -737,11 +826,13 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     init();
     let container_url = random_memory_url().to_string();
     let c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create and drop a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     c.drop_view("adults").await?;
@@ -765,12 +856,15 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create two views
-    c.create_view("view1", "select * from bundle where \"Index\" > 21").await?;
-    c.create_view("view2", "select * from bundle where \"Index\" < 30").await?;
+    c.create_view("view1", "select * from bundle where \"Index\" > 21")
+        .await?;
+    c.create_view("view2", "select * from bundle where \"Index\" < 30")
+        .await?;
     c.commit("Add two views").await?;
 
     // Verify both views exist
@@ -800,11 +894,13 @@ async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
 async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
     init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+        .await?;
     c.commit("Add adults view").await?;
 
     // Drop the view

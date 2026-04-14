@@ -92,7 +92,7 @@ pub fn extract_string_content(quoted: &str) -> Result<String, BundlebaseError> {
 pub fn process_escapes(s: &str) -> String {
     s.replace("\\\\", "\\")
         .replace("\\'", "'")
-        .replace("''", "'")  // SQL-style escaped single quote
+        .replace("''", "'") // SQL-style escaped single quote
         .replace("\\\"", "\"")
         .replace("\\n", "\n")
         .replace("\\r", "\r")
@@ -123,7 +123,7 @@ pub fn escape_string(s: &str) -> String {
     }
 
     let escaped = s
-        .replace('\'', "''")   // SQL-style: ' → ''
+        .replace('\'', "''") // SQL-style: ' → ''
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t");
@@ -270,7 +270,10 @@ mod tests {
     #[test]
     fn test_split_multiple_statements() {
         let stmts = split_statements("ATTACH 'a.csv'; FILTER WHERE x > 1; COMMIT 'done'").unwrap();
-        assert_eq!(stmts, vec!["ATTACH 'a.csv'", "FILTER WHERE x > 1", "COMMIT 'done'"]);
+        assert_eq!(
+            stmts,
+            vec!["ATTACH 'a.csv'", "FILTER WHERE x > 1", "COMMIT 'done'"]
+        );
     }
 
     // --- Dollar-quoting tests ---
@@ -282,12 +285,18 @@ mod tests {
 
     #[test]
     fn test_extract_dollar_quoted_with_single_quotes() {
-        assert_eq!(extract_string_content("$$it's a test$$").unwrap(), "it's a test");
+        assert_eq!(
+            extract_string_content("$$it's a test$$").unwrap(),
+            "it's a test"
+        );
     }
 
     #[test]
     fn test_extract_dollar_quoted_with_newlines() {
-        assert_eq!(extract_string_content("$$line1\nline2$$").unwrap(), "line1\nline2");
+        assert_eq!(
+            extract_string_content("$$line1\nline2$$").unwrap(),
+            "line1\nline2"
+        );
     }
 
     #[test]
@@ -305,7 +314,10 @@ mod tests {
     #[test]
     fn test_extract_dollar_quoted_no_escape_processing() {
         // Dollar-quoted strings are raw — backslash sequences are NOT processed
-        assert_eq!(extract_string_content(r"$$hello\nworld$$").unwrap(), r"hello\nworld");
+        assert_eq!(
+            extract_string_content(r"$$hello\nworld$$").unwrap(),
+            r"hello\nworld"
+        );
     }
 
     #[test]

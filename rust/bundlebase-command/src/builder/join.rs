@@ -1,15 +1,15 @@
 //! Join command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
-use crate::{CommandParsing, Rule};
 use crate::parser::{extract_string_content, parse_join_type};
+use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AttachBlockOp, CreateJoinOp};
 use bundlebase::bundle::BundleFacade;
-use bundlebase::JoinTypeOption;
-use bundlebase_data::ObjectId;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::JoinTypeOption;
+use bundlebase_common::BundlebaseError;
+use bundlebase_data::ObjectId;
 
 /// Command to join with another data source.
 #[derive(Debug, Clone)]
@@ -74,21 +74,23 @@ impl CommandParsing for JoinCommand {
             }
         }
 
-        let location = location.ok_or_else(|| -> BundlebaseError {
-            "JOIN statement missing location file".into()
-        })?;
-        let name = name.ok_or_else(|| -> BundlebaseError {
-            "JOIN statement missing AS name".into()
-        })?;
-        let expression = expression.ok_or_else(|| -> BundlebaseError {
-            "JOIN statement missing ON expression".into()
-        })?;
+        let location = location
+            .ok_or_else(|| -> BundlebaseError { "JOIN statement missing location file".into() })?;
+        let name =
+            name.ok_or_else(|| -> BundlebaseError { "JOIN statement missing AS name".into() })?;
+        let expression = expression
+            .ok_or_else(|| -> BundlebaseError { "JOIN statement missing ON expression".into() })?;
 
         if expression.is_empty() {
             return Err("JOIN ON expression cannot be empty".into());
         }
 
-        Ok(JoinCommand::new(name, expression, Some(location), join_type))
+        Ok(JoinCommand::new(
+            name,
+            expression,
+            Some(location),
+            join_type,
+        ))
     }
 
     fn to_statement(&self) -> String {
@@ -132,19 +134,28 @@ impl BundleBuilderCommand for JoinCommand {
         let join_pack_id = ObjectId::generate();
         builder
             .apply_operation(
-                CreateJoinOp::setup(&join_pack_id, &self.name, &translated_expression, self.join_type)
-                    .await?
-                    .into(),
+                CreateJoinOp::setup(
+                    &join_pack_id,
+                    &self.name,
+                    &translated_expression,
+                    self.join_type,
+                )
+                .await?
+                .into(),
             )
             .await?;
 
         // Step 2: Attach the location data to the join pack (if provided)
         if let Some(ref loc) = self.location {
-            let temp_reader = builder.bundle().reader_factory
+            let temp_reader = builder
+                .bundle()
+                .reader_factory
                 .detect(loc, &bundlebase_data::BlockId::generate(), builder)
                 .await?;
             let format = temp_reader.format();
-            let op = AttachBlockOp::setup(&join_pack_id, loc, format, None, None, None, builder).await?;
+            let op =
+                AttachBlockOp::setup(&join_pack_id, loc, format, None, None, None, builder, None)
+                    .await?;
             builder.apply_operation(op.into()).await?;
         }
 
@@ -158,9 +169,9 @@ impl BundleBuilderCommand for JoinCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_join_inner() {
@@ -201,7 +212,10 @@ mod parsing_tests {
             JoinTypeOption::Inner,
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "JOIN 'orders.parquet' AS orders ON customer_id = orders.cust_id");
+        assert_eq!(
+            statement,
+            "JOIN 'orders.parquet' AS orders ON customer_id = orders.cust_id"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
@@ -224,7 +238,10 @@ mod parsing_tests {
             JoinTypeOption::Left,
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "LEFT JOIN 'items.csv' AS items ON item_id = items.id");
+        assert_eq!(
+            statement,
+            "LEFT JOIN 'items.csv' AS items ON item_id = items.id"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

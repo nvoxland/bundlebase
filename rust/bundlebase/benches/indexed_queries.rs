@@ -13,11 +13,11 @@ use bench_data::ALL_FORMATS;
 use bench_helpers::{create_benchmark_bundle, create_runtime};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::{BundleBuilder, BundlebaseError};
+use bundlebase_command::BundleBuilderExt;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K};
 use futures::StreamExt;
 use std::sync::Arc;
-use bundlebase_command::BundleBuilderExt;
 
 /// Create a committed bundle with a column index on the specified column.
 async fn create_bundle_with_btree_index(
@@ -29,7 +29,6 @@ async fn create_bundle_with_btree_index(
     bundle.rebuild_index(column).await?;
     Ok(bundle)
 }
-
 
 fn bench_order_by(c: &mut Criterion) {
     let rt = create_runtime();
@@ -51,11 +50,7 @@ fn bench_order_by(c: &mut Criterion) {
                         let bundle = no_index_bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query(
-                                    "SELECT * FROM bundle ORDER BY id LIMIT 1000",
-                                    vec![],
-                                    None,
-                                )
+                                .query("SELECT * FROM bundle ORDER BY id LIMIT 1000", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -78,11 +73,7 @@ fn bench_order_by(c: &mut Criterion) {
                         let bundle = indexed_bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query(
-                                    "SELECT * FROM bundle ORDER BY id LIMIT 1000",
-                                    vec![],
-                                    None,
-                                )
+                                .query("SELECT * FROM bundle ORDER BY id LIMIT 1000", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -134,7 +125,11 @@ fn bench_limit_with_filter(c: &mut Criterion) {
 
             // Column index on filter_value
             let indexed_bundle = rt
-                .block_on(create_bundle_with_btree_index(rows, &format, "filter_value"))
+                .block_on(create_bundle_with_btree_index(
+                    rows,
+                    &format,
+                    "filter_value",
+                ))
                 .expect("indexed bundle creation");
             group.bench_with_input(
                 BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
@@ -183,11 +178,7 @@ fn bench_distinct(c: &mut Criterion) {
                         let bundle = no_index_bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query(
-                                    "SELECT DISTINCT category FROM bundle",
-                                    vec![],
-                                    None,
-                                )
+                                .query("SELECT DISTINCT category FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -210,11 +201,7 @@ fn bench_distinct(c: &mut Criterion) {
                         let bundle = indexed_bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query(
-                                    "SELECT DISTINCT category FROM bundle",
-                                    vec![],
-                                    None,
-                                )
+                                .query("SELECT DISTINCT category FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -356,11 +343,7 @@ fn bench_aggregations(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query(
-                                    "SELECT MIN(amount), MAX(amount) FROM bundle",
-                                    vec![],
-                                    None,
-                                )
+                                .query("SELECT MIN(amount), MAX(amount) FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {

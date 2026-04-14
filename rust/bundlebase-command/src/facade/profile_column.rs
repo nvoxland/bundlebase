@@ -8,10 +8,10 @@
 use crate::parser::extract_identifier;
 use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase::BundleFacade;
-use bundlebase_common::BundlebaseError;
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -94,7 +94,9 @@ impl BundleFacadeCommand for ProfileColumnCommand {
                         Arc::new(Int64Array::from(counts)) as ArrayRef,
                     ],
                 )
-                .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+                .map_err(|e| {
+                    BundlebaseError::from(format!("Failed to create record batch: {}", e))
+                })?;
                 return single_batch_stream(output_schema, batch);
             }
         }
@@ -143,9 +145,11 @@ impl BundleFacadeCommand for ProfileColumnCommand {
                 .as_any()
                 .downcast_ref::<Int64Array>()
                 .ok_or_else(|| BundlebaseError::from("Expected Int64 column for counts"))?;
-            let formatter =
-                arrow::util::display::ArrayFormatter::try_new(val_col.as_ref(), &Default::default())
-                    .map_err(|e| BundlebaseError::from(format!("Failed to format values: {}", e)))?;
+            let formatter = arrow::util::display::ArrayFormatter::try_new(
+                val_col.as_ref(),
+                &Default::default(),
+            )
+            .map_err(|e| BundlebaseError::from(format!("Failed to format values: {}", e)))?;
 
             for i in 0..batch.num_rows() {
                 values.push(if val_col.is_null(i) {
@@ -276,7 +280,10 @@ mod tests {
 
     #[test]
     fn test_round_trip_basic() {
-        let cmd = ProfileColumnCommand { name: "value".to_string(), for_cast_to: None };
+        let cmd = ProfileColumnCommand {
+            name: "value".to_string(),
+            for_cast_to: None,
+        };
         let stmt = cmd.to_statement();
         assert_eq!(stmt, r#"PROFILE COLUMN "value""#);
         let parsed = parse_command(&stmt).unwrap();
@@ -291,7 +298,10 @@ mod tests {
 
     #[test]
     fn test_round_trip_for_cast() {
-        let cmd = ProfileColumnCommand { name: "value".to_string(), for_cast_to: Some("Float64".to_string()) };
+        let cmd = ProfileColumnCommand {
+            name: "value".to_string(),
+            for_cast_to: Some("Float64".to_string()),
+        };
         let stmt = cmd.to_statement();
         assert_eq!(stmt, r#"PROFILE COLUMN "value" FOR CAST TO Float64"#);
         let parsed = parse_command(&stmt).unwrap();

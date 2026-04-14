@@ -16,10 +16,10 @@
 //! ```
 
 use crate::bundle::bundle_schema;
-use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack, resolve_cast_ops};
+use crate::bundle::{resolve_cast_ops, AnyOperation, BundleFacade, Operation, Pack};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
-use crate::index::TextIndex;
 use crate::index::IndexDefinition;
+use crate::index::TextIndex;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadFile;
 use arrow::array::{Float64Array, RecordBatch, UInt64Array};
@@ -49,9 +49,7 @@ use std::sync::Arc;
 fn extract_string_literal(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(s)), _) => Some(s.clone()),
-        Expr::Literal(datafusion::common::ScalarValue::Utf8View(Some(s)), _) => {
-            Some(s.to_string())
-        }
+        Expr::Literal(datafusion::common::ScalarValue::Utf8View(Some(s)), _) => Some(s.to_string()),
         _ => None,
     }
 }
@@ -76,7 +74,9 @@ impl SearchTableFunction {
 impl TableFunctionImpl for SearchTableFunction {
     fn call(&self, args: &[Expr]) -> datafusion::common::Result<Arc<dyn TableProvider>> {
         let facade = self.facade.upgrade().ok_or_else(|| {
-            DataFusionError::Internal("Bundle has been dropped (while calling search() table function)".to_string())
+            DataFusionError::Internal(
+                "Bundle has been dropped (while calling search() table function)".to_string(),
+            )
         })?;
 
         let indexes = facade.indexes();
@@ -90,8 +90,7 @@ impl TableFunctionImpl for SearchTableFunction {
                     )
                 })?;
 
-                let text_indexes: Vec<_> =
-                    indexes.iter().filter(|idx| idx.is_inverted()).collect();
+                let text_indexes: Vec<_> = indexes.iter().filter(|idx| idx.is_inverted()).collect();
 
                 match text_indexes.len() {
                     0 => {
@@ -101,8 +100,10 @@ impl TableFunctionImpl for SearchTableFunction {
                     }
                     1 => (text_indexes[0].name().to_string(), query),
                     n => {
-                        let names: Vec<String> =
-                            text_indexes.iter().map(|idx| idx.name().to_string()).collect();
+                        let names: Vec<String> = text_indexes
+                            .iter()
+                            .map(|idx| idx.name().to_string())
+                            .collect();
                         return Err(DataFusionError::Plan(format!(
                             "search() with 1 argument requires exactly one text index, but {} exist: {}. Use search('index_name', 'query') to specify which index.",
                             n,
@@ -237,7 +238,8 @@ impl SearchResultTableProvider {
             }
 
             // Final rename: internal names → user-visible names
-            df = bundle_schema.rename_to_real_names(df)
+            df = bundle_schema
+                .rename_to_real_names(df)
                 .map_err(|e| DataFusionError::External(e))?;
 
             Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
@@ -259,7 +261,10 @@ impl SearchResultTableProvider {
         let mut user_to_internal_name: HashMap<String, String> = HashMap::new();
         for col_id in index_column_ids.iter() {
             if let Some(current_name) = self.bundle_schema.get(col_id) {
-                let internal_name = self.bundle_schema.internal_name(col_id).expect("column ID from schema");
+                let internal_name = self
+                    .bundle_schema
+                    .internal_name(col_id)
+                    .expect("column ID from schema");
                 user_to_internal_name.insert(current_name.clone(), internal_name);
             }
         }
@@ -270,10 +275,7 @@ impl SearchResultTableProvider {
 
         let mut result = query.to_string();
         for (user_name, internal_name) in &user_to_internal_name {
-            result = result.replace(
-                &format!("{}:", user_name),
-                &format!("{}:", internal_name),
-            );
+            result = result.replace(&format!("{}:", user_name), &format!("{}:", internal_name));
         }
         result
     }
@@ -342,26 +344,20 @@ impl TableProvider for SearchResultTableProvider {
         for indexed_blocks in &all_indexed_blocks {
             let index_path = indexed_blocks.path();
 
-            let index_file = ObjectStoreFile::from_str(
-                index_path,
-                self.data_dir.as_ref(),
-                self.config.clone(),
-            )
-            .map_err(|e| DataFusionError::External(e))?;
+            let index_file =
+                ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())
+                    .map_err(|e| DataFusionError::External(e))?;
 
             let index_bytes = index_file
                 .read_bytes()
                 .await
                 .map_err(|e| DataFusionError::External(e))?
                 .ok_or_else(|| {
-                    DataFusionError::Execution(format!(
-                        "Text index file not found: {}",
-                        index_path
-                    ))
+                    DataFusionError::Execution(format!("Text index file not found: {}", index_path))
                 })?;
 
-            let text_index = TextIndex::deserialize(index_bytes)
-                .map_err(|e| DataFusionError::External(e))?;
+            let text_index =
+                TextIndex::deserialize(index_bytes).map_err(|e| DataFusionError::External(e))?;
 
             let results = text_index
                 .search(&rewritten_query, search_limit)
@@ -424,9 +420,7 @@ impl SearchResultTableProvider {
         projection: Option<&Vec<usize>>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let projected_schema = project_schema(schema, projection)?;
-        let data_source = EmptySearchDataSource {
-            projected_schema,
-        };
+        let data_source = EmptySearchDataSource { projected_schema };
         Ok(Arc::new(DataSourceExec::new(Arc::new(data_source))))
     }
 }
@@ -550,8 +544,7 @@ impl DataSource for SearchDataSource {
                     .map_err(|e| DataFusionError::External(e))?;
 
                 while let Some(batch_result) = rowid_stream.next().await {
-                    let rowid_batch = batch_result
-                        .map_err(|e| DataFusionError::External(e))?;
+                    let rowid_batch = batch_result.map_err(|e| DataFusionError::External(e))?;
 
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
@@ -586,14 +579,18 @@ impl DataSource for SearchDataSource {
                     for (unified_pos, maybe_block_idx) in unified_to_block.iter().enumerate() {
                         match maybe_block_idx {
                             Some(block_idx) => {
-                                let filtered = compute::take(&batch.columns()[*block_idx], &indices, None)
-                                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                                let filtered =
+                                    compute::take(&batch.columns()[*block_idx], &indices, None)
+                                        .map_err(|e| {
+                                            DataFusionError::ArrowError(Box::new(e), None)
+                                        })?;
                                 aligned_columns.push(filtered);
                             }
                             None => {
                                 // Block doesn't have this column — insert null array of correct type
                                 let field = physical_output_schema.field(unified_pos);
-                                let null_array = arrow::array::new_null_array(field.data_type(), num_matching);
+                                let null_array =
+                                    arrow::array::new_null_array(field.data_type(), num_matching);
                                 aligned_columns.push(null_array);
                             }
                         }
@@ -603,11 +600,9 @@ impl DataSource for SearchDataSource {
                     let score_array = Float64Array::from(matching_scores);
                     aligned_columns.push(Arc::new(score_array));
 
-                    let result_batch = RecordBatch::try_new(
-                        physical_output_schema.clone(),
-                        aligned_columns,
-                    )
-                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                    let result_batch =
+                        RecordBatch::try_new(physical_output_schema.clone(), aligned_columns)
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
                     raw_batches.push(result_batch);
                 }
@@ -615,7 +610,9 @@ impl DataSource for SearchDataSource {
 
             if raw_batches.is_empty() {
                 // Return empty batch with the correct output schema
-                return Ok(stream::iter(Vec::<datafusion::common::Result<RecordBatch>>::new()));
+                return Ok(stream::iter(
+                    Vec::<datafusion::common::Result<RecordBatch>>::new(),
+                ));
             }
 
             // Step 2: Apply operations to transform raw batches into logical output
@@ -625,7 +622,8 @@ impl DataSource for SearchDataSource {
                 config.options_mut().sql_parser.enable_ident_normalization = false;
                 let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
 
-                let mem_table = MemTable::try_new(physical_output_schema.clone(), vec![raw_batches])?;
+                let mem_table =
+                    MemTable::try_new(physical_output_schema.clone(), vec![raw_batches])?;
                 op_ctx.register_table("bundle", Arc::new(mem_table))?;
                 let mut df = op_ctx.table("bundle").await?;
 
@@ -637,19 +635,16 @@ impl DataSource for SearchDataSource {
                         df = op
                             .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
                             .await
-                            .map_err(|e: crate::BundlebaseError| {
-                                DataFusionError::External(e)
-                            })?;
+                            .map_err(|e: crate::BundlebaseError| DataFusionError::External(e))?;
                     }
                 }
 
                 // Final rename: internal names → user-visible names
-                df = bundle_schema.rename_to_real_names(df)
+                df = bundle_schema
+                    .rename_to_real_names(df)
                     .map_err(|e| DataFusionError::External(e))?;
 
-                let result_batches: Vec<RecordBatch> = df
-                    .collect()
-                    .await?;
+                let result_batches: Vec<RecordBatch> = df.collect().await?;
 
                 result_batches
             } else {
@@ -657,11 +652,9 @@ impl DataSource for SearchDataSource {
                 // by re-mapping the physical batches to use the logical schema
                 let mut result_batches = Vec::new();
                 for batch in raw_batches {
-                    let result_batch = RecordBatch::try_new(
-                        output_schema.clone(),
-                        batch.columns().to_vec(),
-                    )
-                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                    let result_batch =
+                        RecordBatch::try_new(output_schema.clone(), batch.columns().to_vec())
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
                     result_batches.push(result_batch);
                 }
                 result_batches
@@ -704,7 +697,11 @@ impl DataSource for SearchDataSource {
         self
     }
 
-    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result {
         write!(f, "SearchDataSource")
     }
 
@@ -772,7 +769,11 @@ impl DataSource for EmptySearchDataSource {
         self
     }
 
-    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result {
         write!(f, "EmptySearchDataSource")
     }
 

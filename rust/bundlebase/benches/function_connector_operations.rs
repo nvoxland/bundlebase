@@ -38,7 +38,10 @@ fn ffi_lib_path() -> String {
     } else {
         "libtest_lib_function.so"
     };
-    format!("{}/tests/test_lib_function/target/debug/{}", manifest_dir, lib_name)
+    format!(
+        "{}/tests/test_lib_function/target/debug/{}",
+        manifest_dir, lib_name
+    )
 }
 
 /// Path to the Python IPC function script.
@@ -77,7 +80,10 @@ fn go_available() -> bool {
 /// Path to the Java IPC function wrapper script.
 fn java_function_path() -> String {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{}/benches/bench_functions/double_val_java.sh", manifest_dir)
+    format!(
+        "{}/benches/bench_functions/double_val_java.sh",
+        manifest_dir
+    )
 }
 
 /// Check if Java function is available (wrapper script exists and produces manifest).
@@ -99,7 +105,9 @@ fn java_available() -> bool {
 /// Uses local filesystem (not throttled) because FFI needs real dlopen paths.
 fn setup_ffi_bundle(rows: usize, format: &bench_data::Format) -> Option<Arc<BundleBuilder>> {
     if !ffi_lib_exists() {
-        eprintln!("SKIP: FFI test library not built. Run: cd tests/test_lib_function && cargo build");
+        eprintln!(
+            "SKIP: FFI test library not built. Run: cd tests/test_lib_function && cargo build"
+        );
         return None;
     }
     let ffi_path = ffi_lib_path();
@@ -110,7 +118,9 @@ fn setup_ffi_bundle(rows: usize, format: &bench_data::Format) -> Option<Arc<Bund
                 .build()
                 .expect("setup runtime");
             rt.block_on(async {
-                let bundle = create_local_benchmark_bundle(rows, format).await.expect("bundle");
+                let bundle = create_local_benchmark_bundle(rows, format)
+                    .await
+                    .expect("bundle");
                 bundle
                     .import_function("bench.double_val", &format!("ffi::{}", ffi_path), "*/*")
                     .await
@@ -138,7 +148,9 @@ fn setup_python_bundle(rows: usize, format: &bench_data::Format) -> Option<Arc<B
                 .build()
                 .expect("setup runtime");
             rt.block_on(async {
-                let bundle = create_local_benchmark_bundle(rows, format).await.expect("bundle");
+                let bundle = create_local_benchmark_bundle(rows, format)
+                    .await
+                    .expect("bundle");
                 bundle
                     .import_function("bench.double_val", &format!("python::{}", py_path), "*/*")
                     .await
@@ -168,25 +180,21 @@ fn bench_native_sql(c: &mut Criterion) {
             .expect("bundle");
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("native_sql", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("native_sql", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query("SELECT id * 2 AS doubled FROM bundle", vec![], None)
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query("SELECT id * 2 AS doubled FROM bundle", vec![], None)
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -209,29 +217,25 @@ fn bench_ffi_scalar(c: &mut Criterion) {
         };
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("ffi", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("ffi", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query(
-                                "SELECT bench.double_val(id) AS doubled FROM bundle",
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query(
+                            "SELECT bench.double_val(id) AS doubled FROM bundle",
+                            vec![],
+                            None,
+                        )
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -256,7 +260,9 @@ fn bench_ffi_aggregate(c: &mut Criterion) {
                     .build()
                     .expect("setup runtime");
                 srt.block_on(async {
-                    let b = create_local_benchmark_bundle(rows, &format).await.expect("bundle");
+                    let b = create_local_benchmark_bundle(rows, &format)
+                        .await
+                        .expect("bundle");
                     b.import_function("bench.int_sum", &format!("ffi::{}", ffi_path), "*/*")
                         .await
                         .expect("import FFI aggregate");
@@ -268,29 +274,25 @@ fn bench_ffi_aggregate(c: &mut Criterion) {
         });
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("ffi", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("ffi", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query(
-                                "SELECT bench.int_sum(id) AS total FROM bundle",
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query(
+                            "SELECT bench.int_sum(id) AS total FROM bundle",
+                            vec![],
+                            None,
+                        )
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -313,29 +315,25 @@ fn bench_python_scalar(c: &mut Criterion) {
         };
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("python_ipc", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("python_ipc", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query(
-                                "SELECT bench.double_val(id) AS doubled FROM bundle",
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query(
+                            "SELECT bench.double_val(id) AS doubled FROM bundle",
+                            vec![],
+                            None,
+                        )
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -365,9 +363,12 @@ fn bench_go_scalar(c: &mut Criterion) {
                     .build()
                     .expect("setup runtime");
                 srt.block_on(async {
-                    let b = create_local_benchmark_bundle(rows, &format).await.expect("bundle");
+                    let b = create_local_benchmark_bundle(rows, &format)
+                        .await
+                        .expect("bundle");
                     b.import_temp_function("bench.*", &format!("ipc::{}", go_path), "*/*")
-                        .await.expect("import Go function");
+                        .await
+                        .expect("import Go function");
                     b
                 })
             })
@@ -376,29 +377,25 @@ fn bench_go_scalar(c: &mut Criterion) {
         });
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("go_ipc", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("go_ipc", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query(
-                                "SELECT bench.double_val(id) AS doubled FROM bundle",
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query(
+                            "SELECT bench.double_val(id) AS doubled FROM bundle",
+                            vec![],
+                            None,
+                        )
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -430,7 +427,8 @@ fn bench_java_scalar(c: &mut Criterion) {
                 srt.block_on(async {
                     let b = create_local_benchmark_bundle(rows, &format).await.ok()?;
                     b.import_temp_function("bench.*", &java_from, "*/*")
-                        .await.ok()?;
+                        .await
+                        .ok()?;
                     Some(b)
                 })
             })
@@ -448,29 +446,25 @@ fn bench_java_scalar(c: &mut Criterion) {
         };
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("java_ipc", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("java_ipc", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query(
-                                "SELECT bench.double_val(id) AS doubled FROM bundle",
-                                vec![],
-                                None,
-                            )
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query(
+                            "SELECT bench.double_val(id) AS doubled FROM bundle",
+                            vec![],
+                            None,
+                        )
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -564,42 +558,43 @@ fn bench_http_connector(c: &mut Criterion) {
             let (url, _handle) = start_mock_http_server(data.clone(), std::time::Duration::ZERO);
 
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new("no_latency", rows),
-                &rows,
-                |b, &rows| {
-                    let url = url.clone();
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            std::thread::scope(|s| {
-                                s.spawn(|| {
-                                    let srt = tokio::runtime::Builder::new_current_thread()
-                                        .enable_all()
-                                        .build()
-                                        .expect("runtime");
-                                    throttled_store::register_throttle_scheme();
-                                    srt.block_on(create_benchmark_bundle(rows, &bench_data::Format::Parquet))
-                                        .expect("bundle")
-                                })
-                                .join()
-                                .expect("setup")
+            group.bench_with_input(BenchmarkId::new("no_latency", rows), &rows, |b, &rows| {
+                let url = url.clone();
+                b.to_async(&rt).iter_batched(
+                    || {
+                        std::thread::scope(|s| {
+                            s.spawn(|| {
+                                let srt = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .expect("runtime");
+                                throttled_store::register_throttle_scheme();
+                                srt.block_on(create_benchmark_bundle(
+                                    rows,
+                                    &bench_data::Format::Parquet,
+                                ))
+                                .expect("bundle")
                             })
-                        },
-                        |bundle| {
-                            let url = url.clone();
-                            async move {
-                                bundle
-                                    .create_source("http", std::collections::HashMap::from([
-                                        ("url".to_string(), url),
-                                    ]), None)
-                                    .await
-                                    .expect("create_source");
-                            }
-                        },
-                        criterion::BatchSize::SmallInput,
-                    );
-                },
-            );
+                            .join()
+                            .expect("setup")
+                        })
+                    },
+                    |bundle| {
+                        let url = url.clone();
+                        async move {
+                            bundle
+                                .create_source(
+                                    "http",
+                                    std::collections::HashMap::from([("url".to_string(), url)]),
+                                    None,
+                                )
+                                .await
+                                .expect("create_source");
+                        }
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            });
         }
 
         // 50ms latency (simulating moderate API)
@@ -608,42 +603,43 @@ fn bench_http_connector(c: &mut Criterion) {
                 start_mock_http_server(data.clone(), std::time::Duration::from_millis(50));
 
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new("50ms_latency", rows),
-                &rows,
-                |b, &rows| {
-                    let url = url.clone();
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            std::thread::scope(|s| {
-                                s.spawn(|| {
-                                    let srt = tokio::runtime::Builder::new_current_thread()
-                                        .enable_all()
-                                        .build()
-                                        .expect("runtime");
-                                    throttled_store::register_throttle_scheme();
-                                    srt.block_on(create_benchmark_bundle(rows, &bench_data::Format::Parquet))
-                                        .expect("bundle")
-                                })
-                                .join()
-                                .expect("setup")
+            group.bench_with_input(BenchmarkId::new("50ms_latency", rows), &rows, |b, &rows| {
+                let url = url.clone();
+                b.to_async(&rt).iter_batched(
+                    || {
+                        std::thread::scope(|s| {
+                            s.spawn(|| {
+                                let srt = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .expect("runtime");
+                                throttled_store::register_throttle_scheme();
+                                srt.block_on(create_benchmark_bundle(
+                                    rows,
+                                    &bench_data::Format::Parquet,
+                                ))
+                                .expect("bundle")
                             })
-                        },
-                        |bundle| {
-                            let url = url.clone();
-                            async move {
-                                bundle
-                                    .create_source("http", std::collections::HashMap::from([
-                                        ("url".to_string(), url),
-                                    ]), None)
-                                    .await
-                                    .expect("create_source");
-                            }
-                        },
-                        criterion::BatchSize::SmallInput,
-                    );
-                },
-            );
+                            .join()
+                            .expect("setup")
+                        })
+                    },
+                    |bundle| {
+                        let url = url.clone();
+                        async move {
+                            bundle
+                                .create_source(
+                                    "http",
+                                    std::collections::HashMap::from([("url".to_string(), url)]),
+                                    None,
+                                )
+                                .await
+                                .expect("create_source");
+                        }
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
+            });
         }
     }
     group.finish();
@@ -674,25 +670,21 @@ fn bench_http_connector_query(c: &mut Criterion) {
         });
 
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(
-            BenchmarkId::new("parquet", rows),
-            &rows,
-            |b, &_rows| {
+        group.bench_with_input(BenchmarkId::new("parquet", rows), &rows, |b, &_rows| {
+            let bundle = bundle.clone();
+            b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query("SELECT * FROM bundle", vec![], None)
-                            .await
-                            .expect("query");
-                        while let Some(batch) = stream.next().await {
-                            let _ = batch.expect("batch");
-                        }
+                async move {
+                    let mut stream = bundle
+                        .query("SELECT * FROM bundle", vec![], None)
+                        .await
+                        .expect("query");
+                    while let Some(batch) = stream.next().await {
+                        let _ = batch.expect("batch");
                     }
-                });
-            },
-        );
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -721,7 +713,7 @@ fn bench_function_import(c: &mut Criterion) {
                                 .enable_all()
                                 .build()
                                 .expect("runtime");
-                                    srt.block_on(create_local_benchmark_bundle(SCALE_1K, &format))
+                            srt.block_on(create_local_benchmark_bundle(SCALE_1K, &format))
                                 .expect("bundle")
                         })
                         .join()
@@ -759,7 +751,7 @@ fn bench_function_import(c: &mut Criterion) {
                                 .enable_all()
                                 .build()
                                 .expect("runtime");
-                                    srt.block_on(create_local_benchmark_bundle(SCALE_1K, &format))
+                            srt.block_on(create_local_benchmark_bundle(SCALE_1K, &format))
                                 .expect("bundle")
                         })
                         .join()
@@ -807,8 +799,10 @@ fn bench_function_import(c: &mut Criterion) {
                 |bundle| {
                     let go_path = go_path.clone();
                     async move {
-                        bundle.import_temp_function("bench.*", &format!("ipc::{}", go_path), "*/*")
-                            .await.expect("import");
+                        bundle
+                            .import_temp_function("bench.*", &format!("ipc::{}", go_path), "*/*")
+                            .await
+                            .expect("import");
                     }
                 },
                 criterion::BatchSize::SmallInput,
@@ -839,8 +833,10 @@ fn bench_function_import(c: &mut Criterion) {
                 |bundle| {
                     let java_from = java_from.clone();
                     async move {
-                        bundle.import_temp_function("bench.*", &java_from, "*/*")
-                            .await.expect("import");
+                        bundle
+                            .import_temp_function("bench.*", &java_from, "*/*")
+                            .await
+                            .expect("import");
                     }
                 },
                 criterion::BatchSize::SmallInput,

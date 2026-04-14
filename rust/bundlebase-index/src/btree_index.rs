@@ -1,7 +1,7 @@
-use bundlebase_common::RowId;
 use crate::{Index, IndexType};
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
+use bundlebase_common::RowId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use datafusion::scalar::ScalarValue;
 use std::cmp::Ordering;
@@ -412,13 +412,12 @@ impl BTreeIndex {
         let mut current_offset = 0u64; // Will be updated when writing to file
 
         for block in &blocks {
-            let (min_value, max_value) = if let (Some(first), Some(last)) =
-                (block.entries.first(), block.entries.last())
-            {
-                (first.value.clone(), last.value.clone())
-            } else {
-                continue; // Empty block, skip
-            };
+            let (min_value, max_value) =
+                if let (Some(first), Some(last)) = (block.entries.first(), block.entries.last()) {
+                    (first.value.clone(), last.value.clone())
+                } else {
+                    continue; // Empty block, skip
+                };
 
             directory_entries.push(BlockEntry {
                 min_value,
@@ -477,12 +476,12 @@ impl BTreeIndex {
 
         // Helper to flush current value to block
         let flush_value_to_block = |value: IndexedValue,
-                                         row_ids: Vec<RowId>,
-                                         block_entries: &mut Vec<BlockEntryValue>,
-                                         block_size: &mut usize,
-                                         blocks: &mut Vec<IndexBlock>,
-                                         total_entries: &mut u64,
-                                         total_rows: &mut u64| {
+                                    row_ids: Vec<RowId>,
+                                    block_entries: &mut Vec<BlockEntryValue>,
+                                    block_size: &mut usize,
+                                    blocks: &mut Vec<IndexBlock>,
+                                    total_entries: &mut u64,
+                                    total_rows: &mut u64| {
             let entry_size = value.size_bytes() + 2 + (row_ids.len() * 8);
 
             // Check if we need to start a new block
@@ -554,13 +553,12 @@ impl BTreeIndex {
         let mut current_offset = 0u64;
 
         for block in &blocks {
-            let (min_value, max_value) = if let (Some(first), Some(last)) =
-                (block.entries.first(), block.entries.last())
-            {
-                (first.value.clone(), last.value.clone())
-            } else {
-                continue; // Empty block, skip
-            };
+            let (min_value, max_value) =
+                if let (Some(first), Some(last)) = (block.entries.first(), block.entries.last()) {
+                    (first.value.clone(), last.value.clone())
+                } else {
+                    continue; // Empty block, skip
+                };
 
             directory_entries.push(BlockEntry {
                 min_value,
@@ -1053,8 +1051,7 @@ mod tests {
         ];
 
         let index =
-            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
-                .unwrap();
+            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter()).unwrap();
 
         // Verify structure
         assert_eq!(index.column_name(), "test_col");
@@ -1082,8 +1079,7 @@ mod tests {
             vec![RowId::from(300u64), RowId::from(301u64)],
         );
 
-        let index_from_map =
-            BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let index_from_map = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         // Build same index using streaming method (entries must be sorted)
         let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![
@@ -1094,11 +1090,13 @@ mod tests {
         ];
 
         let index_from_stream =
-            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
-                .unwrap();
+            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter()).unwrap();
 
         // Verify both produce same results
-        assert_eq!(index_from_map.cardinality(), index_from_stream.cardinality());
+        assert_eq!(
+            index_from_map.cardinality(),
+            index_from_stream.cardinality()
+        );
         assert_eq!(index_from_map.total_rows(), index_from_stream.total_rows());
 
         // Verify lookups match
@@ -1118,9 +1116,8 @@ mod tests {
     fn test_build_streaming_empty() {
         let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![];
 
-        let index =
-            BTreeIndex::build_streaming("empty_col", &DataType::Int64, entries.into_iter())
-                .unwrap();
+        let index = BTreeIndex::build_streaming("empty_col", &DataType::Int64, entries.into_iter())
+            .unwrap();
 
         assert_eq!(index.cardinality(), 0);
         assert_eq!(index.total_rows(), 0);

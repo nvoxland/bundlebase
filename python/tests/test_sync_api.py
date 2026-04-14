@@ -616,6 +616,16 @@ class TestSyncSource:
         )
         assert c.name == "Test Bundle"
 
+    def test_sync_create_source_with_min_batch(self):
+        """Test defining a source with a human-readable min_batch."""
+        c = bb.create(random_bundle())
+        c.create_source(
+            "remote_dir",
+            {"url": "file:///data/", "patterns": "**/*.parquet"},
+            min_batch="15M",
+        )
+        assert c is not None
+
     def test_sync_fetch(self):
         """Test fetch synchronously with empty source."""
         c = bb.create(random_bundle())

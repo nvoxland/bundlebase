@@ -1,13 +1,14 @@
-use bundlebase_io::plugin::object_store::ObjectStoreFile;
-use bundlebase_io::IOReadFile;
 use arrow::csv::ReaderBuilder as CsvReaderBuilder;
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
+use bundlebase_io::IOReadFile;
 use datafusion::common::{project_schema, DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;
-use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
 use futures::stream::{self, StreamExt};
@@ -56,11 +57,8 @@ pub struct PageMapDataSource {
     object_store: Arc<dyn ObjectStore>,
     /// File format (CSV or JSON Lines)
     format: LineOrientedFormat,
-    /// For JSONL only: when true, nested containers are canonicalized
-    /// (key-sorted, whitespace-stripped); when false, stored verbatim.
-    /// Ignored for CSV. Set from the JSONL reader's `normalize_nested_json`
-    /// source option.
-    normalize_nested_json: bool,
+    /// Optional row fetch limit to apply after selective scan pushdown.
+    fetch: Option<usize>,
 }
 
 impl PageMapDataSource {
@@ -78,7 +76,6 @@ impl PageMapDataSource {
         byte_offsets: Vec<u64>,
         projection: Option<Vec<usize>>,
         format: LineOrientedFormat,
-        normalize_nested_json: bool,
     ) -> Self {
         let mut sorted_offsets = byte_offsets;
         sorted_offsets.sort();
@@ -98,7 +95,7 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
-            normalize_nested_json,
+            fetch: None,
         }
     }
 
@@ -120,7 +117,6 @@ impl PageMapDataSource {
         page_ranges: Vec<(u64, u64)>,
         projection: Option<Vec<usize>>,
         format: LineOrientedFormat,
-        normalize_nested_json: bool,
     ) -> Self {
         let num_rows = page_ranges.len(); // approximate; actual row count unknown until read
         let object_store = file.store();
@@ -137,7 +133,7 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
-            normalize_nested_json,
+            fetch: None,
         }
     }
 
@@ -199,7 +195,11 @@ impl PageMapDataSource {
                 current_offsets.push(row_start);
             } else {
                 // Start a new batch - use mem::take to avoid cloning
-                batches.push((current_start, current_end, std::mem::take(&mut current_offsets)));
+                batches.push((
+                    current_start,
+                    current_end,
+                    std::mem::take(&mut current_offsets),
+                ));
                 current_start = row_start;
                 current_end = row_end;
                 current_offsets.push(row_start);
@@ -211,6 +211,70 @@ impl PageMapDataSource {
 
         batches
     }
+
+    fn with_projection_and_fetch(
+        &self,
+        projection: Option<Vec<usize>>,
+        fetch: Option<usize>,
+    ) -> Self {
+        let projected_schema =
+            project_schema(&self.schema, projection.as_ref()).expect("Failed to project schema");
+        let num_rows = match fetch {
+            Some(limit) => self.num_rows.min(limit),
+            None => self.num_rows,
+        };
+
+        Self {
+            file: self.file.clone(),
+            schema: self.schema.clone(),
+            projected_schema,
+            byte_offsets: self.byte_offsets.clone(),
+            page_ranges: self.page_ranges.clone(),
+            num_rows,
+            projection,
+            object_store: self.object_store.clone(),
+            format: self.format,
+            fetch,
+        }
+    }
+
+    fn current_projection_indices(&self) -> Vec<usize> {
+        self.projection
+            .clone()
+            .unwrap_or_else(|| (0..self.schema.fields().len()).collect())
+    }
+
+    fn remap_projection(&self, projection: &ProjectionExprs) -> Option<Vec<usize>> {
+        let current_projection = self.current_projection_indices();
+        projection
+            .iter()
+            .map(|expr| {
+                let column = expr.expr.as_any().downcast_ref::<Column>()?;
+                current_projection.get(column.index()).copied()
+            })
+            .collect()
+    }
+
+    fn apply_fetch_limit(
+        batch: RecordBatch,
+        remaining_fetch: &mut Option<usize>,
+    ) -> datafusion::common::Result<RecordBatch> {
+        match remaining_fetch {
+            None => Ok(batch),
+            Some(remaining) => {
+                if *remaining == 0 {
+                    return Ok(RecordBatch::new_empty(batch.schema()));
+                }
+                if batch.num_rows() > *remaining {
+                    let limited = batch.slice(0, *remaining);
+                    *remaining = 0;
+                    return Ok(limited);
+                }
+                *remaining -= batch.num_rows();
+                Ok(batch)
+            }
+        }
+    }
 }
 
 impl Debug for PageMapDataSource {
@@ -221,6 +285,7 @@ impl Debug for PageMapDataSource {
             .field("num_offsets", &self.byte_offsets.len())
             .field("projection", &self.projection)
             .field("format", &self.format)
+            .field("fetch", &self.fetch)
             .finish()
     }
 }
@@ -249,52 +314,78 @@ impl DataSource for PageMapDataSource {
         let file_path = self.file.store_path().clone();
         let projection = self.projection.clone();
         let format = self.format;
-        let normalize_nested_json = self.normalize_nested_json;
+        let fetch = self.fetch;
 
         if !self.page_ranges.is_empty() {
             // Page-range mode: read full page byte ranges, parse all lines in each range.
             // Used for page-filtered reads (avoids reading entire file when only some pages match).
             let page_ranges = self.page_ranges.clone();
+            let stream_schema = output_schema.clone();
+            let remaining_fetch = Arc::new(parking_lot::Mutex::new(fetch));
             log::debug!(
                 "PageMapDataSource: page-range mode, {} ranges",
                 page_ranges.len()
             );
 
-            let stream = stream::iter(page_ranges).then(move |(range_start, range_end)| {
+            let stream = stream::iter(page_ranges).filter_map(move |(range_start, range_end)| {
                 let object_store = object_store.clone();
                 let file_path = file_path.clone();
                 let schema = schema.clone();
                 let projection = projection.clone();
+                let empty_schema = stream_schema.clone();
+                let remaining_fetch = remaining_fetch.clone();
 
                 async move {
-                    // Fetch the full page range in one ObjectStore call
-                    let range = GetRange::Bounded(range_start..range_end);
-                    let options = GetOptions { range: Some(range), ..Default::default() };
-
-                    let bytes = match object_store.get_opts(&file_path, options).await {
-                        Ok(r) => r.bytes().await.map_err(|e| DataFusionError::External(Box::new(e)))?,
-                        Err(e) => return Err(DataFusionError::External(Box::new(e))),
-                    };
-
-                    if bytes.is_empty() {
-                        return Ok(RecordBatch::new_empty(
-                            project_schema(&schema, projection.as_ref())
-                                ?,
-                        ));
+                    if matches!(*remaining_fetch.lock(), Some(0)) {
+                        return None;
                     }
 
-                    // Parse all lines in the range; format dictates whether to add a header.
-                    parse_bytes_to_batch(&bytes, &schema, &projection, format, normalize_nested_json)
+                    let result: datafusion::common::Result<RecordBatch> = async {
+                        // Fetch the full page range in one ObjectStore call
+                        let range = GetRange::Bounded(range_start..range_end);
+                        let options = GetOptions {
+                            range: Some(range),
+                            ..Default::default()
+                        };
+
+                        let bytes = object_store
+                            .get_opts(&file_path, options)
+                            .await
+                            .map_err(|e| DataFusionError::External(Box::new(e)))?
+                            .bytes()
+                            .await
+                            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+                        if bytes.is_empty() {
+                            return Ok(RecordBatch::new_empty(empty_schema));
+                        }
+
+                        // Parse all lines in the range; format dictates whether to add a header.
+                        parse_bytes_to_batch(&bytes, &schema, &projection, format).and_then(
+                            |batch| {
+                                let mut remaining = remaining_fetch.lock();
+                                Self::apply_fetch_limit(batch, &mut remaining)
+                            },
+                        )
+                    }
+                    .await;
+
+                    Some(result)
                 }
             });
 
-            return Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)));
+            return Ok(Box::pin(RecordBatchStreamAdapter::new(
+                output_schema,
+                stream,
+            )));
         }
 
         // Row-offset mode: read individual rows by byte offset with 4KB read-ahead.
         // Used for index-based query optimization.
         let byte_offsets = self.byte_offsets.clone();
         let batches = Self::batch_offsets(&byte_offsets);
+        let stream_schema = output_schema.clone();
+        let remaining_fetch = Arc::new(parking_lot::Mutex::new(fetch));
 
         log::debug!(
             "PageMapDataSource: row-offset mode, {} offsets → {} batches",
@@ -302,73 +393,105 @@ impl DataSource for PageMapDataSource {
             batches.len()
         );
 
-        let stream = stream::iter(batches).then(move |(batch_start, batch_end, batch_offsets)| {
-            let object_store = object_store.clone();
-            let file_path = file_path.clone();
-            let schema = schema.clone();
-            let projection = projection.clone();
+        let stream =
+            stream::iter(batches).filter_map(move |(batch_start, batch_end, mut batch_offsets)| {
+                let object_store = object_store.clone();
+                let file_path = file_path.clone();
+                let schema = schema.clone();
+                let projection = projection.clone();
+                let empty_schema = stream_schema.clone();
+                let remaining_fetch = remaining_fetch.clone();
 
-            async move {
-                let range = GetRange::Bounded(batch_start..batch_end);
-                let options = GetOptions { range: Some(range), ..Default::default() };
+                async move {
+                    let current_fetch = *remaining_fetch.lock();
+                    if matches!(current_fetch, Some(0)) {
+                        return None;
+                    }
 
-                let bytes = match object_store.get_opts(&file_path, options).await {
-                    Ok(r) => r.bytes().await.map_err(|e| DataFusionError::External(Box::new(e)))?,
-                    Err(e) => return Err(DataFusionError::External(Box::new(e))),
-                };
+                    if let Some(remaining) = current_fetch {
+                        batch_offsets.truncate(remaining);
+                    }
 
-                let lines = Self::extract_lines(&bytes, batch_start, &batch_offsets);
+                    if batch_offsets.is_empty() {
+                        return None;
+                    }
 
-                if lines.is_empty() {
-                    return Ok(RecordBatch::new_empty(
-                        project_schema(&schema, projection.as_ref())
-                            ?,
-                    ));
+                    let result: datafusion::common::Result<RecordBatch> = async {
+                        let range = GetRange::Bounded(batch_start..batch_end);
+                        let options = GetOptions {
+                            range: Some(range),
+                            ..Default::default()
+                        };
+
+                        let bytes = object_store
+                            .get_opts(&file_path, options)
+                            .await
+                            .map_err(|e| DataFusionError::External(Box::new(e)))?
+                            .bytes()
+                            .await
+                            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+                        let lines = Self::extract_lines(&bytes, batch_start, &batch_offsets);
+
+                        if lines.is_empty() {
+                            return Ok(RecordBatch::new_empty(empty_schema));
+                        }
+
+                        let projected_schema: SchemaRef = match projection.as_ref() {
+                            Some(proj) => Arc::new(schema.project(proj)?),
+                            None => schema.clone(),
+                        };
+                        let batch = match format {
+                            LineOrientedFormat::Csv => {
+                                let lines_len: usize = lines.iter().map(|l| l.len() + 1).sum();
+                                let header_len: usize =
+                                    schema.fields().iter().map(|f| f.name().len() + 1).sum();
+                                let mut csv_data = String::with_capacity(header_len + lines_len);
+                                let mut first = true;
+                                for field in schema.fields() {
+                                    if !first {
+                                        csv_data.push(',');
+                                    }
+                                    csv_data.push_str(field.name());
+                                    first = false;
+                                }
+                                csv_data.push('\n');
+                                for line in lines {
+                                    csv_data.push_str(&line);
+                                    csv_data.push('\n');
+                                }
+                                let cursor = Cursor::new(csv_data.as_bytes());
+                                let mut builder =
+                                    CsvReaderBuilder::new(schema.clone()).with_header(true);
+                                if let Some(proj) = &projection {
+                                    builder = builder.with_projection(proj.clone());
+                                }
+                                let mut reader = builder.build(cursor)?;
+                                reader.next().ok_or_else(|| {
+                                    DataFusionError::Internal("No batch produced".to_string())
+                                })??
+                            }
+                            LineOrientedFormat::JsonLines => parse_jsonl_lines(
+                                lines.iter().map(|l| l.as_bytes()),
+                                &projected_schema,
+                            )?,
+                        };
+
+                        // Projection already applied to both JSONL and CSV branches.
+                        let _ = projected_schema;
+                        let mut remaining = remaining_fetch.lock();
+                        Self::apply_fetch_limit(batch, &mut remaining)
+                    }
+                    .await;
+
+                    Some(result)
                 }
+            });
 
-                let projected_schema: SchemaRef = match projection.as_ref() {
-                    Some(proj) => Arc::new(schema.project(proj)?),
-                    None => schema.clone(),
-                };
-                let batch = match format {
-                    LineOrientedFormat::Csv => {
-                        let lines_len: usize = lines.iter().map(|l| l.len() + 1).sum();
-                        let header_len: usize = schema.fields().iter().map(|f| f.name().len() + 1).sum();
-                        let mut csv_data = String::with_capacity(header_len + lines_len);
-                        let mut first = true;
-                        for field in schema.fields() {
-                            if !first { csv_data.push(','); }
-                            csv_data.push_str(field.name());
-                            first = false;
-                        }
-                        csv_data.push('\n');
-                        for line in lines { csv_data.push_str(&line); csv_data.push('\n'); }
-                        let cursor = Cursor::new(csv_data.as_bytes());
-                        let mut builder = CsvReaderBuilder::new(schema.clone()).with_header(true);
-                        if let Some(proj) = &projection {
-                            builder = builder.with_projection(proj.clone());
-                        }
-                        let mut reader = builder.build(cursor)?;
-                        reader.next()
-                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
-                            ?
-                    }
-                    LineOrientedFormat::JsonLines => {
-                        parse_jsonl_lines(
-                            lines.iter().map(|l| l.as_bytes()),
-                            &projected_schema,
-                            normalize_nested_json,
-                        )?
-                    }
-                };
-
-                // Projection already applied to both JSONL and CSV branches.
-                let _ = projected_schema;
-                Ok(batch)
-            }
-        });
-
-        Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)))
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            output_schema,
+            stream,
+        )))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -399,21 +522,27 @@ impl DataSource for PageMapDataSource {
         Ok(stats)
     }
 
-    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
-        // TODO: Implement fetch limit support
-        None
+    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
+        Some(Arc::new(
+            self.with_projection_and_fetch(self.projection.clone(), limit),
+        ))
     }
 
     fn fetch(&self) -> Option<usize> {
-        None
+        self.fetch
     }
 
     fn try_swapping_with_projection(
         &self,
-        _projection: &ProjectionExprs,
+        projection: &ProjectionExprs,
     ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
-        // TODO: Implement projection pushdown
-        Ok(None)
+        let Some(remapped_projection) = self.remap_projection(projection) else {
+            return Ok(None);
+        };
+        Ok(Some(Arc::new(self.with_projection_and_fetch(
+            Some(remapped_projection),
+            self.fetch,
+        ))))
     }
 }
 
@@ -438,7 +567,10 @@ pub fn coalesce_page_ranges(
     }
 
     let page_end = |i: usize| -> u64 {
-        pages.get(i + 1).map(|p| p.physical_start).unwrap_or(file_size)
+        pages
+            .get(i + 1)
+            .map(|p| p.physical_start)
+            .unwrap_or(file_size)
     };
 
     let mut ranges = Vec::new();
@@ -471,7 +603,6 @@ fn parse_bytes_to_batch(
     schema: &SchemaRef,
     projection: &Option<Vec<usize>>,
     format: LineOrientedFormat,
-    normalize_nested_json: bool,
 ) -> datafusion::common::Result<RecordBatch> {
     let projected_schema: SchemaRef = match projection.as_ref() {
         Some(proj) => Arc::new(schema.project(proj)?),
@@ -486,7 +617,9 @@ fn parse_bytes_to_batch(
                 let mut h = String::new();
                 let mut first = true;
                 for field in schema.fields() {
-                    if !first { h.push(','); }
+                    if !first {
+                        h.push(',');
+                    }
                     h.push_str(field.name());
                     first = false;
                 }
@@ -518,11 +651,7 @@ fn parse_bytes_to_batch(
             // Direct JSONL → StringBuilder extraction, no Value tree.
             // Build builders only for the projected columns so a wide schema
             // doesn't cost per-row work for fields the query never reads.
-            let batch = parse_jsonl_lines(
-                bytes.split(|&b| b == b'\n'),
-                &projected_schema,
-                normalize_nested_json,
-            )?;
+            let batch = parse_jsonl_lines(bytes.split(|&b| b == b'\n'), &projected_schema)?;
             Ok(batch)
         }
     }
@@ -532,7 +661,6 @@ fn parse_bytes_to_batch(
 fn parse_jsonl_lines<'a, I>(
     lines: I,
     projected_schema: &SchemaRef,
-    normalize_nested_json: bool,
 ) -> datafusion::common::Result<RecordBatch>
 where
     I: IntoIterator<Item = &'a [u8]>,
@@ -556,12 +684,7 @@ where
         if line.is_empty() {
             continue;
         }
-        crate::jsonl_row::append_jsonl_row_to_builders(
-            line,
-            &name_to_idx,
-            &mut builders,
-            normalize_nested_json,
-        );
+        crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
     }
     let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
         .into_iter()
@@ -574,6 +697,8 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::test_config;
+    use arrow::array::StringArray;
+    use datafusion::physical_expr::projection::ProjectionExprs;
 
     use url::Url;
 
@@ -587,7 +712,8 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv, false);
+        let source =
+            PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
 
         // Verify byte offsets are sorted
         assert_eq!(source.byte_offsets[0], 100);
@@ -605,7 +731,8 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv, false);
+        let source =
+            PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
 
         let stats = source.partition_statistics(None).expect("stats");
         assert_eq!(stats.num_rows.get_value(), Some(&2));
@@ -771,7 +898,7 @@ mod tests {
     fn test_extract_lines_truncated_line() {
         // Simulate read-ahead that doesn't capture the full line
         // Buffer has 20 bytes but the line is longer
-        let data = "short\nthis_is_a_very";  // second line has no \n
+        let data = "short\nthis_is_a_very"; // second line has no \n
         let bytes = data.as_bytes();
 
         let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6]);
@@ -816,5 +943,89 @@ mod tests {
         assert_eq!(2, batches.len());
         assert_eq!(1, batches[0].2.len());
         assert_eq!(1, batches[1].2.len());
+    }
+
+    #[test]
+    fn test_with_fetch_sets_limit_and_stats() {
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("memory:///fetch.csv").expect("valid url"),
+            test_config(),
+        )
+        .expect("valid file");
+        let schema = Arc::new(arrow::datatypes::Schema::empty());
+        let source = PageMapDataSource::new(
+            &file,
+            schema,
+            vec![10, 20, 30],
+            None,
+            LineOrientedFormat::Csv,
+        );
+
+        let limited = source.with_fetch(Some(2)).expect("supports fetch");
+        let limited = limited
+            .as_any()
+            .downcast_ref::<PageMapDataSource>()
+            .expect("page map datasource");
+
+        assert_eq!(limited.fetch(), Some(2));
+        let stats = limited.partition_statistics(None).expect("stats");
+        assert_eq!(stats.num_rows.get_value(), Some(&2));
+    }
+
+    #[test]
+    fn test_try_swapping_with_projection_remaps_indices() {
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("memory:///projection.csv").expect("valid url"),
+            test_config(),
+        )
+        .expect("valid file");
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("a", arrow::datatypes::DataType::Utf8, true),
+            arrow::datatypes::Field::new("b", arrow::datatypes::DataType::Utf8, true),
+            arrow::datatypes::Field::new("c", arrow::datatypes::DataType::Utf8, true),
+        ]));
+        let source = PageMapDataSource::new(
+            &file,
+            schema,
+            vec![10, 20],
+            Some(vec![2, 0]),
+            LineOrientedFormat::Csv,
+        );
+
+        let projection = ProjectionExprs::from_indices(&[1], source.projected_schema.as_ref());
+        let swapped = source
+            .try_swapping_with_projection(&projection)
+            .expect("projection swap result")
+            .expect("projection swap supported");
+        let swapped = swapped
+            .as_any()
+            .downcast_ref::<PageMapDataSource>()
+            .expect("page map datasource");
+
+        assert_eq!(swapped.projection, Some(vec![0]));
+        assert_eq!(swapped.projected_schema.field(0).name(), "a");
+    }
+
+    #[test]
+    fn test_apply_fetch_limit_slices_batches_across_calls() {
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("value", arrow::datatypes::DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(StringArray::from(vec!["a", "b", "c"]))],
+        )
+        .expect("batch");
+        let mut remaining = Some(2);
+
+        let limited = PageMapDataSource::apply_fetch_limit(batch, &mut remaining).expect("limit");
+        assert_eq!(limited.num_rows(), 2);
+        assert_eq!(remaining, Some(0));
+
+        let second = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(vec!["d"]))])
+            .expect("batch");
+        let limited_second =
+            PageMapDataSource::apply_fetch_limit(second, &mut remaining).expect("limit");
+        assert_eq!(limited_second.num_rows(), 0);
     }
 }

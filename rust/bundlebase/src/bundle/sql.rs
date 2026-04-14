@@ -1,9 +1,9 @@
 use super::Pack;
+use crate::bundle::pack::JoinTypeOption;
 use datafusion::common::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
 use datafusion::prelude::Expr::BinaryExpr;
 use datafusion::prelude::{DataFrame, SessionContext};
-use crate::bundle::pack::JoinTypeOption;
 
 /// The name used to reference the base pack in join expressions
 pub const BASE_PACK_NAME: &str = "base";
@@ -14,10 +14,7 @@ pub const BASE_PACK_NAME: &str = "base";
 /// checking for both quoted (`"ns.func"(...)`) and unquoted (`ns.func(...)`) forms.
 /// This is more reliable than plan-based extraction since DataFusion may interpret
 /// dotted names as schema-qualified references depending on context.
-pub(crate) fn find_temp_functions_in_sql(
-    sql: &str,
-    temp_names: &[String],
-) -> Vec<String> {
+pub(crate) fn find_temp_functions_in_sql(sql: &str, temp_names: &[String]) -> Vec<String> {
     let sql_lower = sql.to_lowercase();
     temp_names
         .iter()
@@ -50,7 +47,9 @@ pub(crate) async fn parse_join_expr(
 ) -> Result<(Vec<Expr>, &'static str), DataFusionError> {
     let pack_join_type = pack.join_type().expect("Pack must have join_type for join");
     let pack_name = pack.name();
-    let pack_expression = pack.expression().expect("Pack must have expression for join");
+    let pack_expression = pack
+        .expression()
+        .expect("Pack must have expression for join");
 
     let join_type = match pack_join_type {
         JoinTypeOption::Inner => "INNER JOIN",
@@ -66,7 +65,8 @@ pub(crate) async fn parse_join_expr(
     const LEFT_ALIAS: &str = "bundle";
 
     use datafusion::catalog::{MemorySchemaProvider, SchemaProvider};
-    let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
+    let catalog = ctx
+        .catalog(crate::catalog::CATALOG_NAME)
         .or_else(|| ctx.catalog("datafusion"));
 
     if let Some(ref catalog) = catalog {
@@ -94,7 +94,10 @@ pub(crate) async fn parse_join_expr(
 
     // Clean up the temporary schema
     if let Some(catalog) = catalog {
-        let _ = catalog.register_schema(TEMP_SCHEMA, std::sync::Arc::new(MemorySchemaProvider::new()));
+        let _ = catalog.register_schema(
+            TEMP_SCHEMA,
+            std::sync::Arc::new(MemorySchemaProvider::new()),
+        );
     }
 
     let df = result?;
@@ -176,13 +179,21 @@ mod tests {
         let pack = Pack::new(join_id, "test_join", "a=x", JoinTypeOption::Inner);
         let (exprs, alias) = parse_join_expr(&ctx, "t", &pack, &base_df).await.unwrap();
         assert_eq!(alias, "bundle");
-        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        let preds = exprs
+            .iter()
+            .map(|pred| format!("{:?}", pred))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(preds.contains(r#"table: "bundle""#));
         assert!(preds.contains(r#"name: "a""#));
 
         let pack2 = Pack::new(join_id, "test_join", "a=x and x > 3", JoinTypeOption::Inner);
         let (exprs, _) = parse_join_expr(&ctx, "t", &pack2, &base_df).await.unwrap();
-        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        let preds = exprs
+            .iter()
+            .map(|pred| format!("{:?}", pred))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(preds.contains(r#"name: "a""#));
         assert!(preds.contains("Gt"));
     }
@@ -222,10 +233,19 @@ mod tests {
         let base_df = ctx.table("t").await.unwrap();
 
         // bundle.col resolves against the accumulated dataframe
-        let pack = Pack::new(join_id, "test_join", "bundle.a = test_join.x", JoinTypeOption::Inner);
+        let pack = Pack::new(
+            join_id,
+            "test_join",
+            "bundle.a = test_join.x",
+            JoinTypeOption::Inner,
+        );
         let (exprs, alias) = parse_join_expr(&ctx, "t", &pack, &base_df).await.unwrap();
         assert_eq!(alias, "bundle");
-        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        let preds = exprs
+            .iter()
+            .map(|pred| format!("{:?}", pred))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(preds.contains(r#"table: "bundle""#));
         assert!(preds.contains(r#"name: "a""#));
     }
@@ -243,20 +263,15 @@ mod tests {
     #[test]
     fn test_find_temp_functions_in_sql_quoted() {
         let temp_names = vec!["test.double_val".to_string()];
-        let matches = find_temp_functions_in_sql(
-            "SELECT \"test.double_val\"(id) FROM bundle",
-            &temp_names,
-        );
+        let matches =
+            find_temp_functions_in_sql("SELECT \"test.double_val\"(id) FROM bundle", &temp_names);
         assert_eq!(matches, vec!["test.double_val"]);
     }
 
     #[test]
     fn test_find_temp_functions_in_sql_no_match() {
         let temp_names = vec!["test.double_val".to_string()];
-        let matches = find_temp_functions_in_sql(
-            "SELECT * FROM bundle WHERE id > 10",
-            &temp_names,
-        );
+        let matches = find_temp_functions_in_sql("SELECT * FROM bundle WHERE id > 10", &temp_names);
         assert!(matches.is_empty());
     }
 

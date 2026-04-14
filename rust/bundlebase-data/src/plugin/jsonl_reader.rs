@@ -1,13 +1,13 @@
-use crate::DataContext;
+use crate::page_map::{resolve_row_numbers_to_byte_offsets, PageMap};
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
+use crate::DataContext;
 use crate::{BlockId, DataReader, LineOrientedFormat, PageMapDataSource, RowId};
-use crate::page_map::{PageMap, resolve_row_numbers_to_byte_offsets};
-use bundlebase_io::plugin::object_store::ObjectStoreFile;
-use bundlebase_io::IOReadWriteDir;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
+use bundlebase_io::IOReadWriteDir;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::json::JsonFormat;
@@ -21,23 +21,7 @@ use url::Url;
 
 /// Configuration for JSON format
 #[derive(Debug, Clone, Default)]
-pub struct JsonlFormatConfig {
-    /// When true, nested objects and arrays stored in string columns are
-    /// re-serialized into canonical JSON (keys sorted, whitespace stripped)
-    /// instead of being kept verbatim. Source option: `normalize_nested_json`.
-    pub normalize_nested_json: bool,
-}
-
-impl JsonlFormatConfig {
-    pub fn from_read_options(opts: &std::collections::HashMap<String, String>) -> Self {
-        Self {
-            normalize_nested_json: opts
-                .get("normalize_nested_json")
-                .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
-        }
-    }
-}
+pub struct JsonlFormatConfig;
 
 impl FileFormatConfig for JsonlFormatConfig {
     fn extensions(&self) -> &'static [&'static str] {
@@ -80,11 +64,8 @@ impl ReaderPlugin for JsonlPlugin {
             return Ok(None);
         }
 
-        let config = match read_options {
-            Some(opts) if !opts.is_empty() => JsonlFormatConfig::from_read_options(opts),
-            _ => self.config.clone(),
-        };
-        let plugin = FilePlugin::new(config);
+        let _ = read_options;
+        let plugin = FilePlugin::new(self.config.clone());
 
         let layout = match layout {
             None => None,
@@ -138,11 +119,7 @@ impl DataReader for JsonlReader {
     }
 
     fn read_options(&self) -> std::collections::HashMap<String, String> {
-        let mut opts = std::collections::HashMap::new();
-        if self.inner.config().normalize_nested_json {
-            opts.insert("normalize_nested_json".to_string(), "true".to_string());
-        }
-        opts
+        std::collections::HashMap::new()
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
@@ -161,13 +138,13 @@ impl DataReader for JsonlReader {
         // over the per-row cost of a wider schema.
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
-        let result = store.get_opts(&path, object_store::GetOptions::default()).await?;
+        let result = store
+            .get_opts(&path, object_store::GetOptions::default())
+            .await?;
         let bytes = result.bytes().await?;
 
         // Validate the file is JSONL (one object per line), not a JSON array.
-        let first_char = bytes.iter()
-            .find(|b| !b.is_ascii_whitespace())
-            .copied();
+        let first_char = bytes.iter().find(|b| !b.is_ascii_whitespace()).copied();
         if first_char == Some(b'[') {
             return Err(BundlebaseError::from(format!(
                 "File '{}' contains a JSON array, not JSON Lines. \
@@ -204,7 +181,8 @@ impl DataReader for JsonlReader {
         }
         if !saw_object {
             return Err(BundlebaseError::from(format!(
-                "No JSON objects found in {}", self.inner.url()
+                "No JSON objects found in {}",
+                self.inner.url()
             )));
         }
         let fields: Vec<arrow::datatypes::Field> = keys
@@ -217,8 +195,8 @@ impl DataReader for JsonlReader {
     async fn data_source(
         &self,
         projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
         row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         if let Some(ids) = row_ids {
@@ -244,7 +222,6 @@ impl DataReader for JsonlReader {
                 byte_offsets,
                 projection.cloned(),
                 LineOrientedFormat::JsonLines,
-                self.inner.config().normalize_nested_json,
             )));
         }
         // Read JSONL with serde_json and stringify all values to produce all-Utf8
@@ -259,9 +236,13 @@ impl DataReader for JsonlReader {
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let result = store.get_opts(&path, Default::default()).await
+        let result = store
+            .get_opts(&path, Default::default())
+            .await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let bytes = result.bytes().await
+        let bytes = result
+            .bytes()
+            .await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
         // Build builders only for the projected columns. Rows come in with a
@@ -271,23 +252,33 @@ impl DataReader for JsonlReader {
         // heterogeneous JSONL) as cheap as narrow ones for aggregation
         // queries that only read 1-3 columns.
         let projected_schema: SchemaRef = match projection {
-            Some(proj) => Arc::new(schema.project(proj)
-                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?),
+            Some(proj) => Arc::new(
+                schema
+                    .project(proj)
+                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+            ),
             None => schema.clone(),
         };
         let col_names: Vec<&str> = projected_schema
-            .fields().iter().map(|f| f.name().as_str()).collect();
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect();
         let name_to_idx: std::collections::HashMap<&str, usize> =
             col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
         let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
             .map(|_| arrow::array::StringBuilder::new())
             .collect();
-        let normalize = self.inner.config().normalize_nested_json;
-
         for line in bytes.split(|&b| b == b'\n') {
-            let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
-            if line.is_empty() { continue; }
-            crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders, normalize);
+            let line = if line.last() == Some(&b'\r') {
+                &line[..line.len() - 1]
+            } else {
+                line
+            };
+            if line.is_empty() {
+                continue;
+            }
+            crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
         }
 
         let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
@@ -298,9 +289,11 @@ impl DataReader for JsonlReader {
             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
         let partitions = vec![vec![batch]];
-        let source = Arc::new(
-            datafusion::datasource::memory::MemorySourceConfig::try_new(&partitions, projected_schema, None)?
-        );
+        let source = Arc::new(datafusion::datasource::memory::MemorySourceConfig::try_new(
+            &partitions,
+            projected_schema,
+            None,
+        )?);
         Ok(source as Arc<dyn DataSource>)
     }
 
@@ -390,7 +383,8 @@ impl DataReader for JsonlReader {
         };
         let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         let col_count = col_names.len();
-        let name_to_idx: HashMap<&str, usize> = col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        let name_to_idx: HashMap<&str, usize> =
+            col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
 
         // Read file bytes once — used for both page layout and column stats.
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
@@ -409,11 +403,21 @@ impl DataReader for JsonlReader {
         let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
 
         // Compute column stats with page-level tracking.
-        let mut builder = if col_count > 0 { ColumnStatsBuilder::new(col_count, &page_row_starts) } else { ColumnStatsBuilder::new(0, &[]) };
+        let mut builder = if col_count > 0 {
+            ColumnStatsBuilder::new(col_count, &page_row_starts)
+        } else {
+            ColumnStatsBuilder::new(0, &[])
+        };
 
         for line in buffer.split(|&b| b == b'\n') {
-            let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
-            if line.is_empty() { continue; }
+            let line = if line.last() == Some(&b'\r') {
+                &line[..line.len() - 1]
+            } else {
+                line
+            };
+            if line.is_empty() {
+                continue;
+            }
             match serde_json::from_slice::<serde_json::Value>(line) {
                 Ok(serde_json::Value::Object(m)) => {
                     builder.process_jsonl_row(&m, &name_to_idx, col_count);
@@ -425,9 +429,14 @@ impl DataReader for JsonlReader {
         let column_stats = builder.finish(buffer.len() as u64);
 
         // Assemble final layout with stats and write.
-        let layout = PageMap { column_stats, ..initial_layout };
+        let layout = PageMap {
+            column_stats,
+            ..initial_layout
+        };
         let index_bytes = layout.serialize()?;
-        let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
+        let data_stream = Box::pin(stream::once(
+            async move { Ok::<_, std::io::Error>(index_bytes) },
+        ));
         let address = bundlebase_common::ContentAddress::with_sub_type(
             bundlebase_common::ContentCategory::Block,
             "layout",
@@ -443,11 +452,14 @@ impl DataReader for JsonlReader {
         filters: &[datafusion::logical_expr::Expr],
         _limit: Option<usize>,
     ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
-        use bundlebase_io::IOReadFile;
         use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
-        use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
+        use crate::page_filter::{
+            extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound,
+            prune_exact_with_bloom, prune_prefix, prune_range,
+        };
         use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
+        use bundlebase_io::IOReadFile;
 
         let layout_file = match &self.layout {
             Some(f) => f,
@@ -486,7 +498,11 @@ impl DataReader for JsonlReader {
         let mut include = vec![true; num_pages];
 
         for filter in &indexable {
-            let col_idx = match schema.fields().iter().position(|f| f.name() == &filter.column) {
+            let col_idx = match schema
+                .fields()
+                .iter()
+                .position(|f| f.name() == &filter.column)
+            {
                 Some(i) => i,
                 None => continue,
             };
@@ -494,31 +510,55 @@ impl DataReader for JsonlReader {
                 Some(s) => s,
                 None => continue,
             };
-            if col_stats.page_stats.is_empty() { continue; }
+            if col_stats.page_stats.is_empty() {
+                continue;
+            }
 
             let is_increasing = col_stats.is_strictly_increasing;
             let is_decreasing = col_stats.is_strictly_decreasing;
 
             for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
-                if !include[page_idx] { continue; }
+                if !include[page_idx] {
+                    continue;
+                }
                 let bloom = page_stat.bloom_filter.as_deref();
                 let can_prune = match &filter.predicate {
-                    IndexPredicate::Exact(val) => prune_exact_with_bloom(val, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom),
-                    IndexPredicate::Range { min: fmin, max: fmax } => prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref()),
-                    IndexPredicate::In(vals) => vals.iter().all(|v| prune_exact_with_bloom(v, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom)),
+                    IndexPredicate::Exact(val) => prune_exact_with_bloom(
+                        val,
+                        page_stat.min.as_ref(),
+                        page_stat.max.as_ref(),
+                        bloom,
+                    ),
+                    IndexPredicate::Range {
+                        min: fmin,
+                        max: fmax,
+                    } => prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref()),
+                    IndexPredicate::In(vals) => vals.iter().all(|v| {
+                        prune_exact_with_bloom(
+                            v,
+                            page_stat.min.as_ref(),
+                            page_stat.max.as_ref(),
+                            bloom,
+                        )
+                    }),
                     // Per-page null counts not tracked; null pruning only works at block level
                     IndexPredicate::IsNull | IndexPredicate::IsNotNull => false,
-                    IndexPredicate::Prefix(prefix) => prune_prefix(prefix, page_stat.min.as_ref(), page_stat.max.as_ref()),
+                    IndexPredicate::Prefix(prefix) => {
+                        prune_prefix(prefix, page_stat.min.as_ref(), page_stat.max.as_ref())
+                    }
                 };
-                if can_prune { include[page_idx] = false; }
+                if can_prune {
+                    include[page_idx] = false;
+                }
             }
 
             if is_increasing {
                 if let Some(upper) = extract_upper_bound(&filter.predicate) {
                     let mut past_range = false;
                     for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
-                        if past_range { include[page_idx] = false; }
-                        else if let Some(ref pmin) = page_stat.min {
+                        if past_range {
+                            include[page_idx] = false;
+                        } else if let Some(ref pmin) = page_stat.min {
                             if is_value_above_bound(&upper, pmin) {
                                 include[page_idx] = false;
                                 past_range = true;
@@ -531,8 +571,9 @@ impl DataReader for JsonlReader {
                 if let Some(lower) = extract_lower_bound(&filter.predicate) {
                     let mut past_range = false;
                     for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
-                        if past_range { include[page_idx] = false; }
-                        else if let Some(ref pmax) = page_stat.max {
+                        if past_range {
+                            include[page_idx] = false;
+                        } else if let Some(ref pmax) = page_stat.max {
                             if is_value_below_bound(&lower, pmax) {
                                 include[page_idx] = false;
                                 past_range = true;
@@ -547,7 +588,9 @@ impl DataReader for JsonlReader {
             return Ok(None);
         }
 
-        let included: Vec<usize> = include.iter().enumerate()
+        let included: Vec<usize> = include
+            .iter()
+            .enumerate()
             .filter(|(_, &inc)| inc)
             .map(|(i, _)| i)
             .collect();
@@ -577,7 +620,6 @@ impl DataReader for JsonlReader {
             page_ranges,
             projection.cloned(),
             LineOrientedFormat::JsonLines,
-            self.inner.config().normalize_nested_json,
         ))))
     }
 }
@@ -586,7 +628,7 @@ impl DataReader for JsonlReader {
 mod tests {
     use super::*;
     use crate::plugin::ReaderPlugin;
-    use crate::test_utils::{test_datafile, test_context};
+    use crate::test_utils::{test_context, test_datafile};
     use arrow::array::{downcast_array, Array, StringArray};
     use datafusion::common::stats::Precision;
     use futures::stream::StreamExt;
@@ -598,10 +640,21 @@ mod tests {
 
         let binding = test_context();
         let result = plugin
-            .reader("file:///test.csv", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///test.csv",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
-        assert!(result.is_none(), "JsonlPlugin should reject non-JsonL format");
+        assert!(
+            result.is_none(),
+            "JsonlPlugin should reject non-JsonL format"
+        );
 
         Ok(())
     }
@@ -646,7 +699,15 @@ mod tests {
 
         let binding = test_context();
         let invalid_reader = plugin
-            .reader("file:///invalid.jsonl", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///invalid.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
         assert!(
@@ -775,10 +836,16 @@ mod tests {
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
         // Statistics should be available for a valid JSON file
-        let stats = reader.read_statistics().await?.ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
 
         // Extract the row count from statistics
-        let rows = stats.num_rows.get_value().ok_or_else(|| BundlebaseError::from("Expected row count"))?;
+        let rows = stats
+            .num_rows
+            .get_value()
+            .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
 
         // Now JSON statistics should return the actual row count by reading the file
         // objects.jsonl has 4 JSON objects (4 lines in JSONL format)

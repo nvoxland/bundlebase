@@ -43,7 +43,9 @@ pub async fn open_bundle(args: &BundleArgs) -> Result<Arc<dyn BundleFacade>, Bun
 
     let result = if args.read_only {
         info!("Opening bundle in read-only mode: {}", args.bundle);
-        Bundle::open(&args.bundle, config).await.map(|b| b as Arc<dyn BundleFacade>)
+        Bundle::open(&args.bundle, config)
+            .await
+            .map(|b| b as Arc<dyn BundleFacade>)
     } else {
         info!("Opening bundle in read-write mode: {}", args.bundle);
         match Bundle::open(&args.bundle, config).await {
@@ -72,8 +74,9 @@ pub fn load_config(path: Option<&str>) -> Result<Option<PassedBundleConfig>, Bun
         None => return Ok(None),
     };
 
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| BundlebaseError::from(format!("Failed to read config file '{}': {}", path, e)))?;
+    let contents = std::fs::read_to_string(path).map_err(|e| {
+        BundlebaseError::from(format!("Failed to read config file '{}': {}", path, e))
+    })?;
 
     let ext = Path::new(path)
         .extension()
@@ -81,10 +84,12 @@ pub fn load_config(path: Option<&str>) -> Result<Option<PassedBundleConfig>, Bun
         .unwrap_or("");
 
     let config: PassedBundleConfig = match ext {
-        "json" => serde_json::from_str(&contents)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse JSON config '{}': {}", path, e)))?,
-        "yaml" | "yml" => serde_yaml_ng::from_str(&contents)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse YAML config '{}': {}", path, e)))?,
+        "json" => serde_json::from_str(&contents).map_err(|e| {
+            BundlebaseError::from(format!("Failed to parse JSON config '{}': {}", path, e))
+        })?,
+        "yaml" | "yml" => serde_yaml_ng::from_str(&contents).map_err(|e| {
+            BundlebaseError::from(format!("Failed to parse YAML config '{}': {}", path, e))
+        })?,
         _ => {
             return Err(BundlebaseError::from(format!(
                 "Unrecognized config file extension '{}'. Use .json, .yaml, or .yml",
@@ -112,7 +117,9 @@ mod tests {
 
     fn init() {
         static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| { bundlebase_catalog::init(); });
+        INIT.call_once(|| {
+            bundlebase_catalog::init();
+        });
     }
 
     #[tokio::test]
@@ -222,7 +229,11 @@ mod tests {
         })
         .await;
 
-        assert!(result.is_ok(), "Expected create to succeed, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Expected create to succeed, got: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]
@@ -287,6 +298,10 @@ mod tests {
         })
         .await;
 
-        assert!(result.is_ok(), "Expected extend --to to succeed, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Expected extend --to to succeed, got: {:?}",
+            result.err()
+        );
     }
 }

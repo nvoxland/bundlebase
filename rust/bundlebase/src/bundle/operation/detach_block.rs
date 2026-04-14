@@ -80,7 +80,9 @@ impl Operation for DetachBlockOp {
         if let Some(block) = bundle.find_block(&self.id) {
             if let Some(source_info) = block.source_info() {
                 if let Some(source) = bundle.get_source(&source_info.id) {
-                    source.remove_attached_file(&source_info.location);
+                    for batched_source in &source_info.batch_sources {
+                        source.remove_attached_file(&batched_source.location);
+                    }
                 }
             }
         }

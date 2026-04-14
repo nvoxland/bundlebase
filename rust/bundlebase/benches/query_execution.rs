@@ -11,11 +11,11 @@ use bench_data::ALL_FORMATS;
 use bench_helpers::{create_benchmark_bundle, create_runtime, fresh_dir};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::{BundleBuilder, JoinTypeOption};
+use bundlebase_command::BundleBuilderExt;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K, SCALE_1K};
 use datafusion::common::ScalarValue;
 use futures::StreamExt;
-use bundlebase_command::BundleBuilderExt;
 
 fn bench_filter_selective(c: &mut Criterion) {
     let rt = create_runtime();
@@ -25,32 +25,24 @@ fn bench_filter_selective(c: &mut Criterion) {
         // 1% selectivity filter: filter_value < 1 (filter_value is 0-99)
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let mut stream = bundle
-                                .query(
-                                    "SELECT * FROM bundle WHERE filter_value < 1",
-                                    vec![],
-                                    None,
-                                )
-                                .await
-                                .expect("query failed");
-                            while let Some(batch_result) = stream.next().await {
-                                let _batch = batch_result.expect("batch failed");
-                            }
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let mut stream = bundle
+                            .query("SELECT * FROM bundle WHERE filter_value < 1", vec![], None)
+                            .await
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
                         }
-                    });
-                },
-            );
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -64,32 +56,24 @@ fn bench_filter_broad(c: &mut Criterion) {
         // 50% selectivity filter: filter_value < 50
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let mut stream = bundle
-                                .query(
-                                    "SELECT * FROM bundle WHERE filter_value < 50",
-                                    vec![],
-                                    None,
-                                )
-                                .await
-                                .expect("query failed");
-                            while let Some(batch_result) = stream.next().await {
-                                let _batch = batch_result.expect("batch failed");
-                            }
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let mut stream = bundle
+                            .query("SELECT * FROM bundle WHERE filter_value < 50", vec![], None)
+                            .await
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
                         }
-                    });
-                },
-            );
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -140,32 +124,28 @@ fn bench_filter_parameterized(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let mut stream = bundle
-                                .query(
-                                    "SELECT * FROM bundle WHERE filter_value < $1",
-                                    vec![ScalarValue::Int64(Some(50))],
-                                    None,
-                                )
-                                .await
-                                .expect("query failed");
-                            while let Some(batch_result) = stream.next().await {
-                                let _batch = batch_result.expect("batch failed");
-                            }
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let mut stream = bundle
+                            .query(
+                                "SELECT * FROM bundle WHERE filter_value < $1",
+                                vec![ScalarValue::Int64(Some(50))],
+                                None,
+                            )
+                            .await
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
                         }
-                    });
-                },
-            );
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -209,7 +189,12 @@ fn bench_join_small_large(c: &mut Criterion) {
                                 .await
                                 .expect("join failed");
                             let df = bundle.dataframe().await.expect("dataframe failed");
-                            let mut stream = df.as_ref().clone().execute_stream().await.expect("stream failed");
+                            let mut stream = df
+                                .as_ref()
+                                .clone()
+                                .execute_stream()
+                                .await
+                                .expect("stream failed");
                             while let Some(batch_result) = stream.next().await {
                                 let _batch = batch_result.expect("batch failed");
                             }
@@ -229,28 +214,24 @@ fn bench_projection(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let mut stream = bundle
-                                .query("SELECT id, category, amount FROM bundle", vec![], None)
-                                .await
-                                .expect("query failed");
-                            while let Some(batch_result) = stream.next().await {
-                                let _batch = batch_result.expect("batch failed");
-                            }
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let mut stream = bundle
+                            .query("SELECT id, category, amount FROM bundle", vec![], None)
+                            .await
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
                         }
-                    });
-                },
-            );
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -264,29 +245,23 @@ fn bench_plan_only(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let ctx = bundle.ctx();
-                            let _plan = ctx
-                                .state()
-                                .create_logical_plan(
-                                    "SELECT * FROM bundle WHERE filter_value < 1",
-                                )
-                                .await
-                                .expect("planning failed");
-                        }
-                    });
-                },
-            );
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let ctx = bundle.ctx();
+                        let _plan = ctx
+                            .state()
+                            .create_logical_plan("SELECT * FROM bundle WHERE filter_value < 1")
+                            .await
+                            .expect("planning failed");
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -300,41 +275,34 @@ fn bench_execute_only(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let ctx = bundle.ctx();
-                            // Plan
-                            let plan = ctx
-                                .state()
-                                .create_logical_plan(
-                                    "SELECT * FROM bundle WHERE filter_value < 1",
-                                )
-                                .await
-                                .expect("planning failed");
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let ctx = bundle.ctx();
+                        // Plan
+                        let plan = ctx
+                            .state()
+                            .create_logical_plan("SELECT * FROM bundle WHERE filter_value < 1")
+                            .await
+                            .expect("planning failed");
 
-                            // Execute + consume
-                            let df = ctx
-                                .execute_logical_plan(plan)
-                                .await
-                                .expect("execute failed");
-                            let mut stream =
-                                df.execute_stream().await.expect("stream failed");
-                            while let Some(batch_result) = stream.next().await {
-                                let _batch = batch_result.expect("batch failed");
-                            }
+                        // Execute + consume
+                        let df = ctx
+                            .execute_logical_plan(plan)
+                            .await
+                            .expect("execute failed");
+                        let mut stream = df.execute_stream().await.expect("stream failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
                         }
-                    });
-                },
-            );
+                    }
+                });
+            });
         }
     }
     group.finish();

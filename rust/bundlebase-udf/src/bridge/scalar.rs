@@ -4,10 +4,10 @@
 //! Dispatches by runtime: Python (via PyArrow), IPC/Java/Docker (via Arrow IPC),
 //! Lib (via FFI).
 
-use crate::function_entry::FunctionEntry;
 use crate::bridge::ipc_bridge::SubprocessCache;
-use bundlebase_common::BundlebaseError;
+use crate::function_entry::FunctionEntry;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::logical_expr::{
     ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
@@ -21,7 +21,9 @@ fn invoke_entry(
     args: &datafusion::logical_expr::ScalarFunctionArgs,
     subprocess_cache: &SubprocessCache,
 ) -> datafusion::common::Result<ColumnarValue> {
-    entry.from.invoke_scalar(name, &entry.name.name, args, subprocess_cache)
+    entry
+        .from
+        .invoke_scalar(name, &entry.name.name, args, subprocess_cache)
 }
 
 /// Find the overload whose input_types match the actual argument types.
@@ -29,7 +31,9 @@ fn find_matching_overload<'a>(
     overloads: &'a [FunctionEntry],
     arg_types: &[DataType],
 ) -> Option<&'a FunctionEntry> {
-    overloads.iter().find(|entry| entry.input_types == arg_types)
+    overloads
+        .iter()
+        .find(|entry| entry.input_types == arg_types)
 }
 
 /// A DataFusion scalar function backed by one or more FunctionEntry overloads.
@@ -61,7 +65,10 @@ impl Hash for ScalarFunction {
 
 impl ScalarFunction {
     /// Create a new scalar function from a single FunctionEntry.
-    pub fn new(entry: FunctionEntry, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
+    pub fn new(
+        entry: FunctionEntry,
+        subprocess_cache: SubprocessCache,
+    ) -> Result<Self, BundlebaseError> {
         let name = entry.name.to_string();
         let signature = Signature::new(
             TypeSignature::Exact(entry.input_types.clone()),
@@ -79,7 +86,10 @@ impl ScalarFunction {
     ///
     /// All entries must share the same name and be scalar kind.
     /// Uses `TypeSignature::OneOf` to advertise all accepted signatures.
-    pub fn new_composite(overloads: Vec<FunctionEntry>, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
+    pub fn new_composite(
+        overloads: Vec<FunctionEntry>,
+        subprocess_cache: SubprocessCache,
+    ) -> Result<Self, BundlebaseError> {
         if overloads.is_empty() {
             return Err("Cannot create composite scalar function with no overloads".into());
         }
@@ -89,7 +99,10 @@ impl ScalarFunction {
             .map(|e| TypeSignature::Exact(e.input_types.clone()))
             .collect();
         let signature = if type_sigs.len() == 1 {
-            Signature::new(type_sigs.into_iter().next().expect("checked non-empty"), Volatility::Volatile)
+            Signature::new(
+                type_sigs.into_iter().next().expect("checked non-empty"),
+                Volatility::Volatile,
+            )
         } else {
             Signature::new(TypeSignature::OneOf(type_sigs), Volatility::Volatile)
         };
@@ -123,8 +136,20 @@ impl ScalarUDFImpl for ScalarFunction {
         match find_matching_overload(&self.overloads, arg_types) {
             Some(entry) => Ok(entry.return_type.clone()),
             None => {
-                let available: Vec<String> = self.overloads.iter()
-                    .map(|e| format!("({}) -> {}", e.input_types.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", "), e.return_type))
+                let available: Vec<String> = self
+                    .overloads
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "({}) -> {}",
+                            e.input_types
+                                .iter()
+                                .map(|t| format!("{}", t))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            e.return_type
+                        )
+                    })
                     .collect();
                 Err(datafusion::common::DataFusionError::Plan(format!(
                     "No overload of function '{}' matches argument types {:?}. Available signatures: {}",
@@ -139,7 +164,12 @@ impl ScalarUDFImpl for ScalarFunction {
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::common::Result<ColumnarValue> {
         if self.overloads.len() == 1 {
-            return invoke_entry(&self.name, &self.overloads[0], &args, &self.subprocess_cache);
+            return invoke_entry(
+                &self.name,
+                &self.overloads[0],
+                &args,
+                &self.subprocess_cache,
+            );
         }
         // Determine actual arg types for dispatch
         let arg_types: Vec<DataType> = args.args.iter().map(|cv| cv.data_type()).collect();
@@ -155,20 +185,18 @@ impl ScalarUDFImpl for ScalarFunction {
             })?;
         invoke_entry(&self.name, entry, &args, &self.subprocess_cache)
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bundlebase_common::platform::Platform;
-        use crate::runtime::UdfRuntime;
-    use crate::function_entry::FunctionKind;
-    use bundlebase_common::object_id::ObjectId;
     use crate::bridge::ipc_bridge::new_subprocess_cache;
+    use crate::function_entry::FunctionKind;
     use crate::parse_python_entrypoint;
+    use crate::runtime::UdfRuntime;
     use bundlebase_common::namespaced_name::NamespacedName;
+    use bundlebase_common::object_id::ObjectId;
+    use bundlebase_common::platform::Platform;
 
     #[test]
     fn test_signature_construction() {
@@ -247,9 +275,13 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![entry], new_subprocess_cache()).expect("should create");
+        let func = ScalarFunction::new_composite(vec![entry], new_subprocess_cache())
+            .expect("should create");
         assert_eq!(func.name(), "acme.double_val");
-        assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
+        assert_eq!(
+            func.return_type(&[DataType::Int64]).unwrap(),
+            DataType::Int64
+        );
     }
 
     #[test]
@@ -274,11 +306,19 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache()).expect("should create");
+        let func =
+            ScalarFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache())
+                .expect("should create");
         assert_eq!(func.name(), "acme.convert");
         // return_type should dispatch based on arg types
-        assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Utf8);
-        assert_eq!(func.return_type(&[DataType::Float64]).unwrap(), DataType::Utf8);
+        assert_eq!(
+            func.return_type(&[DataType::Int64]).unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            func.return_type(&[DataType::Float64]).unwrap(),
+            DataType::Utf8
+        );
         // Non-matching should error
         assert!(func.return_type(&[DataType::Boolean]).is_err());
     }
@@ -305,8 +345,13 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![int_entry, str_entry], new_subprocess_cache()).expect("should create");
-        assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
+        let func =
+            ScalarFunction::new_composite(vec![int_entry, str_entry], new_subprocess_cache())
+                .expect("should create");
+        assert_eq!(
+            func.return_type(&[DataType::Int64]).unwrap(),
+            DataType::Int64
+        );
         assert_eq!(func.return_type(&[DataType::Utf8]).unwrap(), DataType::Utf8);
     }
 }

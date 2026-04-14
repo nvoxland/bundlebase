@@ -6,14 +6,14 @@
 
 // search_table_fn stays in the core crate (depends on BundleFacade)
 
-use bundlebase_common::RowId;
 use crate::{Index, IndexType, TokenizerConfig};
 use bundlebase_common::BundlebaseError;
+use bundlebase_common::RowId;
 use bytes::Bytes;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
-use tantivy::schema::{Schema, STORED, TextFieldIndexing, TextOptions, IndexRecordOption, Field};
 use tantivy::schema::Value;
+use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED};
 use tantivy::tokenizer::{
     Language, LowerCaser, SimpleTokenizer, Stemmer, StopWordFilter, TextAnalyzer,
 };
@@ -87,12 +87,11 @@ impl TextIndexBuilder {
         // Build schema with one text field per column + rowid field
         let mut schema_builder = Schema::builder();
 
-        let text_options = TextOptions::default()
-            .set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer(tokenizer_config.tantivy_tokenizer_name())
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            );
+        let text_options = TextOptions::default().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer(tokenizer_config.tantivy_tokenizer_name())
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        );
 
         let mut column_fields: Vec<Field> = Vec::with_capacity(columns.len());
         for col in columns {
@@ -157,9 +156,9 @@ impl TextIndexBuilder {
 
     /// Commit and finalize into a TextIndex.
     pub fn finish(mut self) -> Result<TextIndex, BundlebaseError> {
-        self.index_writer.commit().map_err(|e| {
-            BundlebaseError::from(format!("Failed to commit index: {}", e))
-        })?;
+        self.index_writer
+            .commit()
+            .map_err(|e| BundlebaseError::from(format!("Failed to commit index: {}", e)))?;
 
         Ok(TextIndex {
             name: self.name,
@@ -239,7 +238,10 @@ impl TextIndex {
         language: Language,
     ) -> Result<(), BundlebaseError> {
         let stop_words = StopWordFilter::new(language).ok_or_else(|| {
-            BundlebaseError::from(format!("Failed to create stop word filter for {:?}", language))
+            BundlebaseError::from(format!(
+                "Failed to create stop word filter for {:?}",
+                language
+            ))
         })?;
 
         tokenizer_manager.register(
@@ -263,7 +265,11 @@ impl TextIndex {
     /// # Arguments
     /// * `query` - The search query (supports Tantivy query syntax)
     /// * `limit` - Maximum number of results to return
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<TextSearchResult>, BundlebaseError> {
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<TextSearchResult>, BundlebaseError> {
         let reader = self
             .index
             .reader()
@@ -277,7 +283,9 @@ impl TextIndex {
             .map_err(|e| BundlebaseError::from(format!("RowId field not found: {}", e)))?;
 
         // Collect all text fields as default search fields
-        let default_fields: Vec<Field> = self.columns.iter()
+        let default_fields: Vec<Field> = self
+            .columns
+            .iter()
             .filter_map(|col| schema.get_field(col).ok())
             .collect();
 
@@ -287,9 +295,9 @@ impl TextIndex {
 
         // Create query parser with all column fields as default search fields
         let query_parser = QueryParser::for_index(&self.index, default_fields);
-        let parsed_query = query_parser
-            .parse_query(query)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e)))?;
+        let parsed_query = query_parser.parse_query(query).map_err(|e| {
+            BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e))
+        })?;
 
         // Execute search
         let top_docs = searcher
@@ -299,9 +307,9 @@ impl TextIndex {
         // Collect results
         let mut results = Vec::with_capacity(top_docs.len());
         for (score, doc_address) in top_docs {
-            let doc: TantivyDocument = searcher
-                .doc(doc_address)
-                .map_err(|e| BundlebaseError::from(format!("Failed to retrieve document: {}", e)))?;
+            let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| {
+                BundlebaseError::from(format!("Failed to retrieve document: {}", e))
+            })?;
 
             // Extract row ID from document
             if let Some(rowid_value) = doc.get_first(rowid_field) {
@@ -361,14 +369,19 @@ impl TextIndex {
             "tokenizer": self.tokenizer_config,
             "version": 3,
         });
-        let metadata_bytes = serde_json::to_vec(&metadata).map_err(|e| {
-            BundlebaseError::from(format!("Failed to serialize metadata: {}", e))
-        })?;
+        let metadata_bytes = serde_json::to_vec(&metadata)
+            .map_err(|e| BundlebaseError::from(format!("Failed to serialize metadata: {}", e)))?;
 
         // Get the index path from temp directory
-        let index_path = self._temp_dir.as_ref().ok_or_else(|| {
-            BundlebaseError::from("Index was not created with a file-based directory, cannot serialize")
-        })?.path();
+        let index_path = self
+            ._temp_dir
+            .as_ref()
+            .ok_or_else(|| {
+                BundlebaseError::from(
+                    "Index was not created with a file-based directory, cannot serialize",
+                )
+            })?
+            .path();
 
         // Create tar archive
         use tar::Builder;
@@ -397,7 +410,8 @@ impl TextIndex {
 
                 let path = entry.path();
                 if path.is_file() {
-                    let file_name = path.file_name()
+                    let file_name = path
+                        .file_name()
                         .ok_or_else(|| BundlebaseError::from("Invalid file name"))?
                         .to_string_lossy();
 
@@ -422,9 +436,9 @@ impl TextIndex {
                 }
             }
 
-            builder.finish().map_err(|e| {
-                BundlebaseError::from(format!("Failed to finish archive: {}", e))
-            })?;
+            builder
+                .finish()
+                .map_err(|e| BundlebaseError::from(format!("Failed to finish archive: {}", e)))?;
         }
 
         Ok(Bytes::from(archive_data))
@@ -450,13 +464,11 @@ impl TextIndex {
 
         // Read metadata
         let metadata_path = temp_path.join("_metadata.json");
-        let metadata_content = std::fs::read_to_string(&metadata_path).map_err(|e| {
-            BundlebaseError::from(format!("Failed to read metadata: {}", e))
-        })?;
+        let metadata_content = std::fs::read_to_string(&metadata_path)
+            .map_err(|e| BundlebaseError::from(format!("Failed to read metadata: {}", e)))?;
 
-        let metadata: serde_json::Value = serde_json::from_str(&metadata_content).map_err(|e| {
-            BundlebaseError::from(format!("Failed to parse metadata: {}", e))
-        })?;
+        let metadata: serde_json::Value = serde_json::from_str(&metadata_content)
+            .map_err(|e| BundlebaseError::from(format!("Failed to parse metadata: {}", e)))?;
 
         let column_name = metadata["name"]
             .as_str()
@@ -473,19 +485,17 @@ impl TextIndex {
                 BundlebaseError::from(format!("Failed to parse tokenizer config: {}", e))
             })?;
 
-        let columns: Vec<String> = serde_json::from_value(
-            metadata["columns"].clone()
-        ).map_err(|e| {
-            BundlebaseError::from(format!("Failed to parse columns from metadata: {}", e))
-        })?;
+        let columns: Vec<String> =
+            serde_json::from_value(metadata["columns"].clone()).map_err(|e| {
+                BundlebaseError::from(format!("Failed to parse columns from metadata: {}", e))
+            })?;
 
         // Remove metadata file before opening index
         std::fs::remove_file(&metadata_path).ok();
 
         // Open the index from the extracted directory
-        let index = TantivyIndex::open_in_dir(temp_path).map_err(|e| {
-            BundlebaseError::from(format!("Failed to open index: {}", e))
-        })?;
+        let index = TantivyIndex::open_in_dir(temp_path)
+            .map_err(|e| BundlebaseError::from(format!("Failed to open index: {}", e)))?;
 
         // Register tokenizers
         Self::register_tokenizers(&index)?;
@@ -536,20 +546,24 @@ mod tests {
         tokenizer_config: &TokenizerConfig,
     ) -> TextIndex {
         let columns = vec![column_name.to_string()];
-        let docs = documents.into_iter().map(move |(text, row_id)| {
-            (vec![Some(text.to_string())], RowId::from(row_id))
-        });
+        let docs = documents
+            .into_iter()
+            .map(move |(text, row_id)| (vec![Some(text.to_string())], RowId::from(row_id)));
         TextIndex::build_streaming_multi(column_name, &columns, docs, tokenizer_config)
             .expect("Failed to build index")
     }
 
     #[test]
     fn test_build_and_search() {
-        let index = build_single_column("content", vec![
-            ("The quick brown fox jumps over the lazy dog", 1),
-            ("Machine learning is transforming how we process data", 2),
-            ("The fox was very quick and agile", 3),
-        ], &TokenizerConfig::Simple);
+        let index = build_single_column(
+            "content",
+            vec![
+                ("The quick brown fox jumps over the lazy dog", 1),
+                ("Machine learning is transforming how we process data", 2),
+                ("The fox was very quick and agile", 3),
+            ],
+            &TokenizerConfig::Simple,
+        );
 
         // Search for "fox"
         let results = index.search("fox", 10).expect("Search failed");
@@ -568,11 +582,11 @@ mod tests {
 
     #[test]
     fn test_english_stemming() {
-        let index = build_single_column("content", vec![
-            ("running", 1),
-            ("run", 2),
-            ("runner", 3),
-        ], &TokenizerConfig::EnglishStem);
+        let index = build_single_column(
+            "content",
+            vec![("running", 1), ("run", 2), ("runner", 3)],
+            &TokenizerConfig::EnglishStem,
+        );
 
         // With stemming, searching for "run" should find all variants
         let results = index.search("run", 10).expect("Search failed");
@@ -581,10 +595,11 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let index = build_single_column("test_col", vec![
-            ("Hello world", 1),
-            ("Goodbye world", 2),
-        ], &TokenizerConfig::Simple);
+        let index = build_single_column(
+            "test_col",
+            vec![("Hello world", 1), ("Goodbye world", 2)],
+            &TokenizerConfig::Simple,
+        );
 
         // Serialize
         let bytes = index.serialize().expect("Serialization failed");
@@ -602,11 +617,15 @@ mod tests {
 
     #[test]
     fn test_streaming_build() {
-        let index = build_single_column("content", vec![
-            ("Document one about cats", 1),
-            ("Document two about dogs", 2),
-            ("Document three about cats and dogs", 3),
-        ], &TokenizerConfig::Simple);
+        let index = build_single_column(
+            "content",
+            vec![
+                ("Document one about cats", 1),
+                ("Document two about dogs", 2),
+                ("Document three about cats and dogs", 3),
+            ],
+            &TokenizerConfig::Simple,
+        );
 
         let results = index.search("cats", 10).expect("Search failed");
         assert_eq!(results.len(), 2);
@@ -617,9 +636,27 @@ mod tests {
         let columns = vec!["company".to_string(), "city".to_string()];
 
         let documents = vec![
-            (vec![Some("Acme Group".to_string()), Some("East Leonard".to_string())], RowId::from(1u64)),
-            (vec![Some("Beta Corp".to_string()), Some("West Haven".to_string())], RowId::from(2u64)),
-            (vec![Some("Group Holdings".to_string()), Some("East Bay".to_string())], RowId::from(3u64)),
+            (
+                vec![
+                    Some("Acme Group".to_string()),
+                    Some("East Leonard".to_string()),
+                ],
+                RowId::from(1u64),
+            ),
+            (
+                vec![
+                    Some("Beta Corp".to_string()),
+                    Some("West Haven".to_string()),
+                ],
+                RowId::from(2u64),
+            ),
+            (
+                vec![
+                    Some("Group Holdings".to_string()),
+                    Some("East Bay".to_string()),
+                ],
+                RowId::from(3u64),
+            ),
         ];
 
         let index = TextIndex::build_streaming_multi(
@@ -653,8 +690,20 @@ mod tests {
         let columns = vec!["title".to_string(), "body".to_string()];
 
         let documents = vec![
-            (vec![Some("Hello World".to_string()), Some("This is the body text".to_string())], RowId::from(1u64)),
-            (vec![Some("Goodbye World".to_string()), Some("Another body here".to_string())], RowId::from(2u64)),
+            (
+                vec![
+                    Some("Hello World".to_string()),
+                    Some("This is the body text".to_string()),
+                ],
+                RowId::from(1u64),
+            ),
+            (
+                vec![
+                    Some("Goodbye World".to_string()),
+                    Some("Another body here".to_string()),
+                ],
+                RowId::from(2u64),
+            ),
         ];
 
         let index = TextIndex::build_streaming_multi(

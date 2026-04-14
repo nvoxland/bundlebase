@@ -7,10 +7,12 @@
 //! Supports GET, POST, and PUT methods. Custom request headers can be passed
 //! via the `headers` argument (one `Name: Value` pair per line).
 
-use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, SourceFormat, DiscoveredLocation, SourceData};
-use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
-use bundlebase_common::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
+use bundlebase_common::connector::{
+    ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
+};
+use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bytes::Bytes;
 use futures::stream;
 use std::collections::{HashMap, HashSet};
@@ -34,13 +36,17 @@ pub struct HttpConnector;
 
 /// Parse the `method` arg. Returns uppercase method string, defaulting to "GET".
 fn parse_method(args: &HashMap<String, String>) -> Result<String, BundlebaseError> {
-    let method = args.get("method").map(|s| s.to_uppercase()).unwrap_or_else(|| "GET".to_string());
+    let method = args
+        .get("method")
+        .map(|s| s.to_uppercase())
+        .unwrap_or_else(|| "GET".to_string());
     match method.as_str() {
         "GET" | "POST" | "PUT" => Ok(method),
         other => Err(format!(
             "Connector 'http': unsupported method '{}'. Use GET, POST, or PUT.",
             other
-        ).into()),
+        )
+        .into()),
     }
 }
 
@@ -48,14 +54,20 @@ fn parse_method(args: &HashMap<String, String>) -> Result<String, BundlebaseErro
 ///
 /// Format: one `Name: Value` pair per line. Lines that don't contain `:` are ignored.
 fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
-    let Some(raw) = args.get("headers") else { return Vec::new() };
+    let Some(raw) = args.get("headers") else {
+        return Vec::new();
+    };
     raw.lines()
         .filter_map(|line| {
             let line = line.trim();
             let colon = line.find(':')?;
             let name = line[..colon].trim().to_string();
             let value = line[colon + 1..].trim().to_string();
-            if name.is_empty() { None } else { Some((name, value)) }
+            if name.is_empty() {
+                None
+            } else {
+                Some((name, value))
+            }
         })
         .collect()
 }
@@ -63,12 +75,18 @@ fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
 /// Returns true if the connector needs to perform the request itself
 /// (POST/PUT, or any custom headers, or a body is present).
 fn needs_custom_request(args: &HashMap<String, String>) -> bool {
-    let method = args.get("method").map(|s| s.to_uppercase()).unwrap_or_else(|| "GET".to_string());
+    let method = args
+        .get("method")
+        .map(|s| s.to_uppercase())
+        .unwrap_or_else(|| "GET".to_string());
     method != "GET" || args.contains_key("body") || args.contains_key("headers")
 }
 
 /// Perform the HTTP request using the configured method, body, and headers.
-async fn perform_request(url: &Url, args: &HashMap<String, String>) -> Result<Bytes, BundlebaseError> {
+async fn perform_request(
+    url: &Url,
+    args: &HashMap<String, String>,
+) -> Result<Bytes, BundlebaseError> {
     let method = parse_method(args)?;
     let headers = parse_headers(args);
     let body = args.get("body").cloned().unwrap_or_default();
@@ -85,7 +103,9 @@ async fn perform_request(url: &Url, args: &HashMap<String, String>) -> Result<By
         request = request.body(body);
     }
 
-    let response = request.send().await
+    let response = request
+        .send()
+        .await
         .map_err(|e| BundlebaseError::from(format!("HTTP request to '{}' failed: {}", url, e)))?;
 
     if !response.status().is_success() {
@@ -99,7 +119,12 @@ async fn perform_request(url: &Url, args: &HashMap<String, String>) -> Result<By
 
 /// Map a Content-Type header value to a data format string.
 fn format_from_content_type(content_type: &str) -> Option<&'static str> {
-    let mime = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
+    let mime = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     match mime.as_str() {
         "text/csv" => Some("csv"),
         "application/json" => Some("json"),
@@ -114,7 +139,9 @@ fn format_from_content_type(content_type: &str) -> Option<&'static str> {
 fn format_from_url_extension(url: &Url) -> Option<String> {
     let filename = shared_utils::filename_from_url(url);
     let ext = filename.rsplit('.').next()?.to_lowercase();
-    let known = ["csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods"];
+    let known = [
+        "csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods",
+    ];
     if known.contains(&ext.as_str()) {
         Some(ext)
     } else {
@@ -196,9 +223,11 @@ impl Connector for HttpConnector {
         let is_get = method == "GET";
 
         // Check if HEAD is supported (default: true). HEAD is only used for GET.
-        let head_supported = is_get && args.get("head_supported")
-            .map(|v| v.to_lowercase() != "false")
-            .unwrap_or(true);
+        let head_supported = is_get
+            && args
+                .get("head_supported")
+                .map(|v| v.to_lowercase() != "false")
+                .unwrap_or(true);
 
         // Read HEAD info (version + content-type) unless HEAD is disabled or method is non-GET.
         let head_info = if head_supported {
@@ -222,7 +251,11 @@ impl Connector for HttpConnector {
             } else {
                 "auto".to_string()
             }
-        } else if let Some(fmt) = head_info.content_type.as_deref().and_then(format_from_content_type) {
+        } else if let Some(fmt) = head_info
+            .content_type
+            .as_deref()
+            .and_then(format_from_content_type)
+        {
             fmt.to_string()
         } else if let Some(fmt) = format_from_url_extension(&url) {
             fmt
@@ -256,9 +289,9 @@ impl Connector for HttpConnector {
             ))
         })?;
         let bytes = perform_request(&url, args).await?;
-        Ok(Some(SourceData::RawBytes(Box::pin(stream::once(async move {
-            Ok::<Bytes, std::io::Error>(bytes)
-        })))))
+        Ok(Some(SourceData::RawBytes(Box::pin(stream::once(
+            async move { Ok::<Bytes, std::io::Error>(bytes) },
+        )))))
     }
 
     async fn stable_url(
@@ -292,11 +325,26 @@ mod tests {
         assert_eq!(sig.name, "http");
         assert_eq!(sig.arg_specs.len(), 6);
         assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "method" && !s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "body" && !s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "headers" && !s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "format" && !s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "head_supported" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "method" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "body" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "headers" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "format" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "head_supported" && !s.required));
     }
 
     #[test]
@@ -342,20 +390,32 @@ mod tests {
     #[test]
     fn test_parse_headers_multiple_lines() {
         let mut args = HashMap::new();
-        args.insert("headers".to_string(), "Accept: text/csv\nContent-Type: application/json".to_string());
+        args.insert(
+            "headers".to_string(),
+            "Accept: text/csv\nContent-Type: application/json".to_string(),
+        );
         let headers = parse_headers(&args);
         assert_eq!(headers.len(), 2);
         assert_eq!(headers[0], ("Accept".to_string(), "text/csv".to_string()));
-        assert_eq!(headers[1], ("Content-Type".to_string(), "application/json".to_string()));
+        assert_eq!(
+            headers[1],
+            ("Content-Type".to_string(), "application/json".to_string())
+        );
     }
 
     #[test]
     fn test_parse_headers_value_with_colon() {
         let mut args = HashMap::new();
-        args.insert("headers".to_string(), "Authorization: Bearer abc:def".to_string());
+        args.insert(
+            "headers".to_string(),
+            "Authorization: Bearer abc:def".to_string(),
+        );
         let headers = parse_headers(&args);
         assert_eq!(headers.len(), 1);
-        assert_eq!(headers[0], ("Authorization".to_string(), "Bearer abc:def".to_string()));
+        assert_eq!(
+            headers[0],
+            ("Authorization".to_string(), "Bearer abc:def".to_string())
+        );
     }
 
     #[test]
@@ -391,7 +451,10 @@ mod tests {
 
     #[test]
     fn test_format_from_content_type_csv_with_charset() {
-        assert_eq!(format_from_content_type("text/csv; charset=utf-8"), Some("csv"));
+        assert_eq!(
+            format_from_content_type("text/csv; charset=utf-8"),
+            Some("csv")
+        );
     }
 
     #[test]
@@ -401,17 +464,26 @@ mod tests {
 
     #[test]
     fn test_format_from_content_type_ndjson() {
-        assert_eq!(format_from_content_type("application/x-ndjson"), Some("jsonl"));
+        assert_eq!(
+            format_from_content_type("application/x-ndjson"),
+            Some("jsonl")
+        );
     }
 
     #[test]
     fn test_format_from_content_type_parquet() {
-        assert_eq!(format_from_content_type("application/vnd.apache.parquet"), Some("parquet"));
+        assert_eq!(
+            format_from_content_type("application/vnd.apache.parquet"),
+            Some("parquet")
+        );
     }
 
     #[test]
     fn test_format_from_content_type_tsv() {
-        assert_eq!(format_from_content_type("text/tab-separated-values"), Some("tsv"));
+        assert_eq!(
+            format_from_content_type("text/tab-separated-values"),
+            Some("tsv")
+        );
     }
 
     #[test]
@@ -457,7 +529,10 @@ mod tests {
     fn test_validate_args_valid_url() {
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://example.com/data.csv".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://example.com/data.csv".to_string(),
+        );
         assert!(connector.validate_args(&args).is_ok());
     }
 
@@ -471,12 +546,18 @@ mod tests {
 
     #[test]
     fn test_validate_args_missing_url() {
-        
         let connector = HttpConnector;
         let args = HashMap::new();
-        let result = { let sig = connector.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) };
+        let result = {
+            let sig = connector.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+        };
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("requires a 'url' argument"));
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires a 'url' argument"));
     }
 
     #[test]
@@ -486,7 +567,11 @@ mod tests {
         args.insert("url".to_string(), "ftp://example.com/data.csv".to_string());
         let result = connector.validate_args(&args);
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("must be http:// or https://"));
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be http:// or https://"));
     }
 
     #[tokio::test]
@@ -499,7 +584,10 @@ mod tests {
 
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), format!("{}/data/lake_quality.csv", server.uri()));
+        args.insert(
+            "url".to_string(),
+            format!("{}/data/lake_quality.csv", server.uri()),
+        );
         let config = crate::test_utils::test_config();
 
         let locations = connector
@@ -521,7 +609,10 @@ mod tests {
 
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), format!("{}/download?type=data", server.uri()));
+        args.insert(
+            "url".to_string(),
+            format!("{}/download?type=data", server.uri()),
+        );
         args.insert("format".to_string(), "json".to_string());
         let config = crate::test_utils::test_config();
 
@@ -539,8 +630,7 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .insert_header("content-type", "text/csv"),
+                wiremock::ResponseTemplate::new(200).insert_header("content-type", "text/csv"),
             )
             .mount(&server)
             .await;
@@ -589,8 +679,7 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .insert_header("content-type", "text/csv"),
+                wiremock::ResponseTemplate::new(200).insert_header("content-type", "text/csv"),
             )
             .mount(&server)
             .await;
@@ -720,8 +809,16 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("500"), "Error should mention status code: {}", err);
-        assert!(!err.contains("head_supported"), "HTTP status errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("500"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "HTTP status errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -738,7 +835,10 @@ mod tests {
         args.insert("head_supported".to_string(), "false".to_string());
         let config = crate::test_utils::test_config();
 
-        let locations = connector.discover(&args, &HashSet::new(), &config).await.unwrap();
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
         assert_eq!(locations.len(), 1);
         assert_eq!(locations[0].format, SourceFormat::Csv);
     }
@@ -759,8 +859,16 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("503"), "Error should mention status code: {}", err);
-        assert!(!err.contains("head_supported"), "HTTP status errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("503"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "HTTP status errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -779,9 +887,21 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("404"), "Error should mention status code: {}", err);
-        assert!(err.contains("not found"), "Error should mention not found: {}", err);
-        assert!(!err.contains("head_supported"), "4xx errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("404"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            err.contains("not found"),
+            "Error should mention not found: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "4xx errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -794,15 +914,30 @@ mod tests {
 
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), format!("{}/private/data.csv", server.uri()));
+        args.insert(
+            "url".to_string(),
+            format!("{}/private/data.csv", server.uri()),
+        );
         let config = crate::test_utils::test_config();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("401"), "Error should mention status code: {}", err);
-        assert!(err.contains("authentication"), "Error should mention authentication: {}", err);
-        assert!(!err.contains("head_supported"), "4xx errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("401"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            err.contains("authentication"),
+            "Error should mention authentication: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "4xx errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -815,15 +950,30 @@ mod tests {
 
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), format!("{}/api/search?bad=param", server.uri()));
+        args.insert(
+            "url".to_string(),
+            format!("{}/api/search?bad=param", server.uri()),
+        );
         let config = crate::test_utils::test_config();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("400"), "Error should mention status code: {}", err);
-        assert!(err.contains("rejected"), "Error should mention rejected: {}", err);
-        assert!(!err.contains("head_supported"), "400 errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("400"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            err.contains("rejected"),
+            "Error should mention rejected: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "400 errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -839,15 +989,30 @@ mod tests {
 
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), format!("{}/api/search?organization=21MNPCA", server.uri()));
+        args.insert(
+            "url".to_string(),
+            format!("{}/api/search?organization=21MNPCA", server.uri()),
+        );
         let config = crate::test_utils::test_config();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("400"), "Error should mention status code: {}", err);
-        assert!(err.contains("enumerated values"), "Error should include warning header content: {}", err);
-        assert!(!err.contains("head_supported"), "400 errors should not suggest head_supported: {}", err);
+        assert!(
+            err.contains("400"),
+            "Error should mention status code: {}",
+            err
+        );
+        assert!(
+            err.contains("enumerated values"),
+            "Error should include warning header content: {}",
+            err
+        );
+        assert!(
+            !err.contains("head_supported"),
+            "400 errors should not suggest head_supported: {}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -868,8 +1033,7 @@ mod tests {
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .and(wiremock::matchers::path("/new"))
             .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .insert_header("content-type", "text/csv"),
+                wiremock::ResponseTemplate::new(200).insert_header("content-type", "text/csv"),
             )
             .mount(&server)
             .await;
@@ -919,7 +1083,10 @@ mod tests {
         args.insert("method".to_string(), "POST".to_string());
         let config = crate::test_utils::test_config();
 
-        let url = connector.stable_url(&location, &args, &config).await.unwrap();
+        let url = connector
+            .stable_url(&location, &args, &config)
+            .await
+            .unwrap();
         assert!(url.is_none(), "POST requests should not use stable_url");
     }
 
@@ -933,11 +1100,20 @@ mod tests {
             version: "v1".to_string(),
         };
         let mut args = HashMap::new();
-        args.insert("headers".to_string(), "Authorization: Bearer token".to_string());
+        args.insert(
+            "headers".to_string(),
+            "Authorization: Bearer token".to_string(),
+        );
         let config = crate::test_utils::test_config();
 
-        let url = connector.stable_url(&location, &args, &config).await.unwrap();
-        assert!(url.is_none(), "Requests with custom headers should not use stable_url");
+        let url = connector
+            .stable_url(&location, &args, &config)
+            .await
+            .unwrap();
+        assert!(
+            url.is_none(),
+            "Requests with custom headers should not use stable_url"
+        );
     }
 
     #[tokio::test]
@@ -998,10 +1174,7 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::header("Accept", "text/csv"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_string("col1,col2\na,b"),
-            )
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("col1,col2\na,b"))
             .mount(&server)
             .await;
 
@@ -1018,7 +1191,10 @@ mod tests {
         let config = crate::test_utils::test_config();
 
         let data = connector.data(&location, &args, &config).await.unwrap();
-        assert!(data.is_some(), "GET with custom headers should return SourceData");
+        assert!(
+            data.is_some(),
+            "GET with custom headers should return SourceData"
+        );
     }
 
     #[tokio::test]
@@ -1033,7 +1209,10 @@ mod tests {
         let config = crate::test_utils::test_config();
 
         // Plain GET with no custom headers should return None (use stable_url path)
-        let data = connector.data(&location, &HashMap::new(), &config).await.unwrap();
+        let data = connector
+            .data(&location, &HashMap::new(), &config)
+            .await
+            .unwrap();
         assert!(data.is_none());
     }
 }

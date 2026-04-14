@@ -2,8 +2,8 @@ use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::JoinTypeOption;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
-use bundlebase_common::BundlebaseError;
 use bundlebase_command::BundleBuilderExt;
+use bundlebase_common::BundlebaseError;
 
 use arrow::array::StringArray;
 use futures::TryStreamExt;
@@ -12,15 +12,18 @@ mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 #[tokio::test]
 async fn test_join_basic() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Get schema before join
     let schema_before = &bundle.schema().await?;
@@ -83,7 +86,9 @@ async fn test_join_basic() -> Result<(), BundlebaseError> {
 async fn test_join_appending() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Join with sales regions on Country
     let bundle = bundle
@@ -110,7 +115,9 @@ async fn test_join_appending() -> Result<(), BundlebaseError> {
 async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Join with a left join
     let bundle = bundle
@@ -136,7 +143,9 @@ async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
 async fn test_join_without_url_then_attach() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Create join point without any initial data
     let bundle = bundle
@@ -164,7 +173,9 @@ async fn test_join_without_url_then_attach() -> Result<(), BundlebaseError> {
 async fn test_join_resolves_renamed_columns() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Rename "Country" to "country_name" before joining
     bundle.rename_column("Country", "country_name").await?;
@@ -182,15 +193,25 @@ async fn test_join_resolves_renamed_columns() -> Result<(), BundlebaseError> {
     // Verify the join worked and the renamed column is in the schema
     let schema = bundle.schema().await?;
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert!(names.contains(&"country_name"), "Should contain renamed column");
-    assert!(names.contains(&"Sales Region"), "Should contain joined column");
+    assert!(
+        names.contains(&"country_name"),
+        "Should contain renamed column"
+    );
+    assert!(
+        names.contains(&"Sales Region"),
+        "Should contain joined column"
+    );
 
     // Verify we get correct number of rows (same as un-renamed join)
     assert_eq!(99, bundle.num_rows().await?);
 
     // Verify we can query using the renamed column
     let stream = bundle
-        .query(r#"SELECT country_name, "Sales Region" FROM bundle LIMIT 1"#, vec![], None)
+        .query(
+            r#"SELECT country_name, "Sales Region" FROM bundle LIMIT 1"#,
+            vec![],
+            None,
+        )
         .await?;
     let batches: Vec<_> = stream.try_collect().await?;
     assert!(!batches.is_empty());
@@ -198,7 +219,11 @@ async fn test_join_resolves_renamed_columns() -> Result<(), BundlebaseError> {
     assert_eq!(batch.num_columns(), 2);
 
     // Verify both columns have data
-    let country_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+    let country_col = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
     assert!(!country_col.value(0).is_empty());
 
     Ok(())

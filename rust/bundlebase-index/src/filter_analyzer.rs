@@ -113,9 +113,17 @@ impl FilterAnalyzer {
             }
 
             // Handle LIKE prefix: column LIKE 'prefix%' (case-sensitive, non-negated)
-            Expr::Like(Like { negated: false, expr, pattern, case_insensitive: false, .. }) => {
-                if let (Expr::Column(col), Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(pat)), _)) =
-                    (expr.as_ref(), pattern.as_ref())
+            Expr::Like(Like {
+                negated: false,
+                expr,
+                pattern,
+                case_insensitive: false,
+                ..
+            }) => {
+                if let (
+                    Expr::Column(col),
+                    Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(pat)), _),
+                ) = (expr.as_ref(), pattern.as_ref())
                 {
                     if let Some(prefix) = extract_like_prefix(pat) {
                         return Ok(IndexableFilter {
@@ -132,10 +140,7 @@ impl FilterAnalyzer {
     }
 
     /// Extract equality predicate: column = literal
-    fn extract_equality(
-        left: &Expr,
-        right: &Expr,
-    ) -> Result<IndexableFilter, BundlebaseError> {
+    fn extract_equality(left: &Expr, right: &Expr) -> Result<IndexableFilter, BundlebaseError> {
         // Try left = literal
         if let (Expr::Column(col), Expr::Literal(scalar, _)) = (left, right) {
             let indexed_value = IndexedValue::from_scalar(scalar)?;
@@ -158,10 +163,7 @@ impl FilterAnalyzer {
     }
 
     /// Extract IN list predicate: column IN (literal1, literal2, ...)
-    fn extract_in_list(
-        expr: &Expr,
-        list: &[Expr],
-    ) -> Result<IndexableFilter, BundlebaseError> {
+    fn extract_in_list(expr: &Expr, list: &[Expr]) -> Result<IndexableFilter, BundlebaseError> {
         // Check if expr is a column reference
         if let Expr::Column(col) = expr {
             // Extract all literals from the list
@@ -257,10 +259,7 @@ impl FilterAnalyzer {
     }
 
     /// Extract range predicate from AND expression: column >= min AND column <= max
-    fn extract_range_and(
-        left: &Expr,
-        right: &Expr,
-    ) -> Result<IndexableFilter, BundlebaseError> {
+    fn extract_range_and(left: &Expr, right: &Expr) -> Result<IndexableFilter, BundlebaseError> {
         // Try to extract range predicates from both sides
         let left_filter = Self::analyze_expr(left);
         let right_filter = Self::analyze_expr(right);

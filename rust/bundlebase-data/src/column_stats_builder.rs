@@ -86,7 +86,9 @@ struct HyperLogLog {
 
 impl HyperLogLog {
     fn new() -> Self {
-        Self { registers: vec![0u8; HLL_M] }
+        Self {
+            registers: vec![0u8; HLL_M],
+        }
     }
 
     fn add(&mut self, value: &str) {
@@ -94,7 +96,11 @@ impl HyperLogLog {
         let idx = (h >> (64 - HLL_B)) as usize;
         let w = h << HLL_B;
         // rho = position of leftmost 1 bit in the remaining bits (1-indexed)
-        let rho = if w == 0 { (64 - HLL_B) as u8 + 1 } else { w.leading_zeros() as u8 + 1 };
+        let rho = if w == 0 {
+            (64 - HLL_B) as u8 + 1
+        } else {
+            w.leading_zeros() as u8 + 1
+        };
         if rho > self.registers[idx] {
             self.registers[idx] = rho;
         }
@@ -104,7 +110,11 @@ impl HyperLogLog {
         let m = HLL_M as f64;
         // alpha_m constant for b=14
         let alpha = 0.7213 / (1.0 + 1.079 / m);
-        let sum: f64 = self.registers.iter().map(|&r| 2.0f64.powi(-(r as i32))).sum();
+        let sum: f64 = self
+            .registers
+            .iter()
+            .map(|&r| 2.0f64.powi(-(r as i32)))
+            .sum();
         let raw = alpha * m * m / sum;
 
         // Small range: linear counting
@@ -196,7 +206,9 @@ impl ColumnAccumulator {
             max_len: None,
             non_ascii_count: 0,
             histogram_samples: Vec::new(),
-            page_bloom_bits: (0..page_count).map(|_| Some(vec![0u64; BLOOM_SIZE_U64S])).collect(),
+            page_bloom_bits: (0..page_count)
+                .map(|_| Some(vec![0u64; BLOOM_SIZE_U64S]))
+                .collect(),
             hll: HyperLogLog::new(),
         }
     }
@@ -372,7 +384,9 @@ impl ColumnAccumulator {
             || distinct_count <= BLOOM_DROP_LOW_DISTINCT_COUNT;
 
         // Per-page stats (including per-page bloom filters)
-        let page_stats = self.page_mins.into_iter()
+        let page_stats = self
+            .page_mins
+            .into_iter()
             .zip(self.page_maxs.into_iter())
             .zip(self.page_distinct.into_iter())
             .zip(self.page_bloom_bits.into_iter())
@@ -380,9 +394,8 @@ impl ColumnAccumulator {
                 let bloom_filter = if drop_blooms {
                     None
                 } else {
-                    bloom_bits.map(|bits| {
-                        bits.iter().flat_map(|&word| word.to_le_bytes()).collect()
-                    })
+                    bloom_bits
+                        .map(|bits| bits.iter().flat_map(|&word| word.to_le_bytes()).collect())
                 };
                 PageStats {
                     min: min.map(|s| str_to_stat_value(s, is_numeric)),
@@ -430,7 +443,9 @@ impl ColumnAccumulator {
 /// typed comparisons work during pruning. Falls back to `Utf8` if parsing fails.
 fn str_to_stat_value(s: String, is_numeric: bool) -> StatValue {
     if is_numeric {
-        s.parse::<f64>().map(StatValue::Float64).unwrap_or_else(|_| StatValue::Utf8(s))
+        s.parse::<f64>()
+            .map(StatValue::Float64)
+            .unwrap_or_else(|_| StatValue::Utf8(s))
     } else {
         StatValue::Utf8(s)
     }
@@ -504,9 +519,15 @@ pub struct ColumnStatsBuilder {
 
 impl ColumnStatsBuilder {
     pub fn new(column_count: usize, page_row_starts: &[u32]) -> Self {
-        let page_count = if page_row_starts.is_empty() { 1 } else { page_row_starts.len() };
+        let page_count = if page_row_starts.is_empty() {
+            1
+        } else {
+            page_row_starts.len()
+        };
         Self {
-            accumulators: (0..column_count).map(|_| ColumnAccumulator::new(page_count)).collect(),
+            accumulators: (0..column_count)
+                .map(|_| ColumnAccumulator::new(page_count))
+                .collect(),
             page_row_starts: page_row_starts.to_vec(),
             current_row: 0,
         }
@@ -519,7 +540,13 @@ impl ColumnStatsBuilder {
         }
         match self.page_row_starts.binary_search(&(row as u32)) {
             Ok(idx) => idx,
-            Err(idx) => if idx == 0 { 0 } else { idx - 1 },
+            Err(idx) => {
+                if idx == 0 {
+                    0
+                } else {
+                    idx - 1
+                }
+            }
         }
     }
 
@@ -585,7 +612,9 @@ impl ColumnStatsBuilder {
                     serde_json::Value::Null => acc.null_count += 1,
                     serde_json::Value::String(s) => acc.update(s, page_idx),
                     serde_json::Value::Number(n) => acc.update(&n.to_string(), page_idx),
-                    serde_json::Value::Bool(b) => acc.update(if *b { "true" } else { "false" }, page_idx),
+                    serde_json::Value::Bool(b) => {
+                        acc.update(if *b { "true" } else { "false" }, page_idx)
+                    }
                     other => acc.update(&other.to_string(), page_idx),
                 }
             }
@@ -734,7 +763,14 @@ mod tests {
     #[test]
     fn test_very_low_cardinality_drops_bloom() {
         let mut builder = ColumnStatsBuilder::new(1, &[]);
-        let pool = ["user", "assistant", "summary", "progress", "system", "attachment"];
+        let pool = [
+            "user",
+            "assistant",
+            "summary",
+            "progress",
+            "system",
+            "attachment",
+        ];
         let values: Vec<&str> = (0..1000).map(|i| pool[i % pool.len()]).collect();
         builder.process_batch(&batch(&["type"], vec![values]));
 
@@ -850,23 +886,14 @@ mod tests {
         enforce_bloom_budget(&mut stats, 0);
 
         // Col with distinct_count=400 should have all blooms dropped first.
-        let dropped_high = stats[2]
-            .page_stats
-            .iter()
-            .all(|p| p.bloom_filter.is_none());
+        let dropped_high = stats[2].page_stats.iter().all(|p| p.bloom_filter.is_none());
         assert!(
             dropped_high,
             "highest-distinct column should be fully dropped first"
         );
 
         // Col with distinct_count=10 should still have blooms.
-        let kept_low = stats[0]
-            .page_stats
-            .iter()
-            .all(|p| p.bloom_filter.is_some());
-        assert!(
-            kept_low,
-            "lowest-distinct column should keep its blooms"
-        );
+        let kept_low = stats[0].page_stats.iter().all(|p| p.bloom_filter.is_some());
+        assert!(kept_low, "lowest-distinct column should keep its blooms");
     }
 }

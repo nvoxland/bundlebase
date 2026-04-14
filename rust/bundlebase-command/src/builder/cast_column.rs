@@ -1,13 +1,13 @@
 //! CastColumn command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase_common::arrow_types::parse_arrow_type_name;
 use bundlebase::bundle::operation::CastColumnOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::arrow_types::parse_arrow_type_name;
+use bundlebase_common::BundlebaseError;
 use futures::StreamExt;
 
 /// Command to cast a column to a different data type.
@@ -23,10 +23,7 @@ pub struct CastColumnCommand {
 
 impl CastColumnCommand {
     /// Create a new CastColumnCommand with verify_existing enabled.
-    pub fn new(
-        name: impl Into<String>,
-        new_type: impl Into<String>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, new_type: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             new_type: new_type.into(),
@@ -67,7 +64,11 @@ impl CommandParsing for CastColumnCommand {
             "CAST COLUMN statement missing target type".into()
         })?;
 
-        Ok(CastColumnCommand { name, new_type, verify_existing })
+        Ok(CastColumnCommand {
+            name,
+            new_type,
+            verify_existing,
+        })
     }
 
     fn to_statement(&self) -> String {
@@ -75,7 +76,11 @@ impl CommandParsing for CastColumnCommand {
             "CAST COLUMN {} TO {}{}",
             quote_identifier(&self.name),
             self.new_type,
-            if !self.verify_existing { " NO VERIFY EXISTING" } else { "" },
+            if !self.verify_existing {
+                " NO VERIFY EXISTING"
+            } else {
+                ""
+            },
         )
     }
 }
@@ -84,7 +89,8 @@ impl BundleBuilderCommand for CastColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let id = builder.column_id(&self.name)
+        let id = builder
+            .column_id(&self.name)
             .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.name)))?;
 
         let data_type = parse_arrow_type_name(&self.new_type)?;
@@ -112,7 +118,9 @@ impl BundleBuilderCommand for CastColumnCommand {
                         col.as_ref(),
                         &Default::default(),
                     )
-                    .map_err(|e| BundlebaseError::from(format!("Failed to format values: {}", e)))?;
+                    .map_err(|e| {
+                        BundlebaseError::from(format!("Failed to format values: {}", e))
+                    })?;
                     for i in 0..batch.num_rows().min(5) {
                         if !col.is_null(i) {
                             samples.push(formatter.value(i).to_string());
@@ -128,14 +136,13 @@ impl BundleBuilderCommand for CastColumnCommand {
                      Use UPDATE or DELETE to clean the data first. \
                      Run 'PROFILE COLUMN \"{}\" FOR CAST TO {}' to see all problem values.",
                     self.name, sample_str, self.name, self.new_type
-                ).into());
+                )
+                .into());
             }
         }
 
         builder
-            .apply_operation(
-                CastColumnOp::setup(id, data_type).into(),
-            )
+            .apply_operation(CastColumnOp::setup(id, data_type).into())
             .await?;
 
         Ok(format!("Cast column {} to {}", self.name, self.new_type))
@@ -218,7 +225,11 @@ mod tests {
 
     #[test]
     fn test_round_trip_no_verify() {
-        let cmd = super::CastColumnCommand { name: "price".into(), new_type: "Int64".into(), verify_existing: false };
+        let cmd = super::CastColumnCommand {
+            name: "price".into(),
+            new_type: "Int64".into(),
+            verify_existing: false,
+        };
         let statement = cmd.to_statement();
         assert_eq!(statement, "CAST COLUMN price TO Int64 NO VERIFY EXISTING");
 

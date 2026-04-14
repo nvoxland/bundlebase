@@ -2,6 +2,7 @@
 
 use super::service::DoGetStream;
 use arrow::datatypes::Schema;
+use arrow::ipc::writer::IpcWriteOptions;
 use arrow::record_batch::RecordBatch;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::sql::{
@@ -9,19 +10,21 @@ use arrow_flight::sql::{
     CommandGetImportedKeys, CommandGetPrimaryKeys, CommandGetSqlInfo, CommandGetTableTypes,
     CommandGetTables, CommandGetXdbcTypeInfo, ProstMessageExt, SqlInfo,
 };
-use arrow::ipc::writer::IpcWriteOptions;
-use arrow_flight::{IpcMessage, SchemaAsIpc};
 use arrow_flight::{FlightDescriptor, FlightEndpoint, FlightInfo, Ticket};
+use arrow_flight::{IpcMessage, SchemaAsIpc};
+use bundlebase::{catalog_tables, BUNDLE_INFO_SCHEMA, CATALOG_NAME, DEFAULT_SCHEMA};
 use bytes::Bytes;
 use futures::TryStreamExt;
 use once_cell::sync::Lazy;
 use prost::Message;
 use std::sync::Arc;
-use bundlebase::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, catalog_tables};
 use tonic::{Request, Response, Status};
 
 /// Wrap a single RecordBatch into a DoGetStream for Flight SQL responses.
-fn single_batch_stream(schema: Arc<Schema>, batch: RecordBatch) -> Result<Response<DoGetStream>, Status> {
+fn single_batch_stream(
+    schema: Arc<Schema>,
+    batch: RecordBatch,
+) -> Result<Response<DoGetStream>, Status> {
     let stream = FlightDataEncoderBuilder::new()
         .with_schema(schema)
         .build(futures::stream::once(async { Ok(batch) }))
@@ -137,7 +140,9 @@ pub fn do_get_catalogs() -> Result<Response<DoGetStream>, Status> {
     // Return single catalog
     let batch = RecordBatch::try_new(
         schema.clone(),
-        vec![Arc::new(arrow::array::StringArray::from(vec![CATALOG_NAME]))],
+        vec![Arc::new(arrow::array::StringArray::from(vec![
+            CATALOG_NAME,
+        ]))],
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
@@ -151,11 +156,7 @@ pub fn get_flight_info_schemas(
 ) -> Result<Response<FlightInfo>, Status> {
     let schema = Arc::new(Schema::new(vec![
         arrow::datatypes::Field::new("catalog_name", arrow::datatypes::DataType::Utf8, true),
-        arrow::datatypes::Field::new(
-            "db_schema_name",
-            arrow::datatypes::DataType::Utf8,
-            false,
-        ),
+        arrow::datatypes::Field::new("db_schema_name", arrow::datatypes::DataType::Utf8, false),
     ]));
 
     let ticket = Ticket {
@@ -183,11 +184,7 @@ pub fn get_flight_info_schemas(
 pub fn do_get_schemas(function_namespaces: &[String]) -> Result<Response<DoGetStream>, Status> {
     let schema = Arc::new(Schema::new(vec![
         arrow::datatypes::Field::new("catalog_name", arrow::datatypes::DataType::Utf8, true),
-        arrow::datatypes::Field::new(
-            "db_schema_name",
-            arrow::datatypes::DataType::Utf8,
-            false,
-        ),
+        arrow::datatypes::Field::new("db_schema_name", arrow::datatypes::DataType::Utf8, false),
     ]));
 
     // Built-in schemas + function namespace schemas
@@ -258,10 +255,16 @@ fn get_tables_response_schema(include_schema: bool) -> Arc<Schema> {
 
 /// Get the Arrow schema for a table by schema and table name.
 /// If `bundle_schema` is provided, it will be used for the "default.bundle" table.
-fn get_table_schema(db_schema: &str, table_name: &str, bundle_schema: Option<&Arc<Schema>>) -> Arc<Schema> {
+fn get_table_schema(
+    db_schema: &str,
+    table_name: &str,
+    bundle_schema: Option<&Arc<Schema>>,
+) -> Arc<Schema> {
     if db_schema == DEFAULT_SCHEMA && table_name == "bundle" {
         // Use provided bundle schema if available, otherwise return empty
-        return bundle_schema.cloned().unwrap_or_else(|| Arc::new(Schema::empty()));
+        return bundle_schema
+            .cloned()
+            .unwrap_or_else(|| Arc::new(Schema::empty()));
     }
 
     if db_schema != BUNDLE_INFO_SCHEMA {
@@ -282,7 +285,11 @@ fn get_table_schema(db_schema: &str, table_name: &str, bundle_schema: Option<&Ar
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int32, false),
             arrow::datatypes::Field::new("change_id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("description", arrow::datatypes::DataType::Utf8, false),
-            arrow::datatypes::Field::new("operation_count", arrow::datatypes::DataType::Int32, false),
+            arrow::datatypes::Field::new(
+                "operation_count",
+                arrow::datatypes::DataType::Int32,
+                false,
+            ),
         ]))
     } else if table_name == catalog_tables::DETAILS {
         Arc::new(Schema::new(vec![
@@ -330,9 +337,12 @@ fn get_table_schema(db_schema: &str, table_name: &str, bundle_schema: Option<&Ar
 /// Serialize an Arrow schema to IPC format bytes.
 fn serialize_schema_to_ipc(schema: &Schema) -> Result<Vec<u8>, Status> {
     let options = IpcWriteOptions::default();
-    let ipc_message: IpcMessage = SchemaAsIpc::new(schema, &options)
-        .try_into()
-        .map_err(|e: arrow::error::ArrowError| Status::internal(format!("Failed to encode schema: {}", e)))?;
+    let ipc_message: IpcMessage =
+        SchemaAsIpc::new(schema, &options)
+            .try_into()
+            .map_err(|e: arrow::error::ArrowError| {
+                Status::internal(format!("Failed to encode schema: {}", e))
+            })?;
     Ok(ipc_message.0.to_vec())
 }
 
@@ -349,13 +359,41 @@ pub fn do_get_tables(
     // All available tables: (schema, table_name, table_type)
     let mut all_tables: Vec<(String, String, &str)> = vec![
         (DEFAULT_SCHEMA.to_string(), "bundle".to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::HISTORY.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::STATUS.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::DETAILS.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::VIEWS.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::INDEXES.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::PACKS.to_string(), "TABLE"),
-        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::BLOCKS.to_string(), "TABLE"),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::HISTORY.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::STATUS.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::DETAILS.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::VIEWS.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::INDEXES.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::PACKS.to_string(),
+            "TABLE",
+        ),
+        (
+            BUNDLE_INFO_SCHEMA.to_string(),
+            catalog_tables::BLOCKS.to_string(),
+            "TABLE",
+        ),
     ];
 
     // Add function entries as FUNCTION type
@@ -401,7 +439,10 @@ pub fn do_get_tables(
 
     // Build arrays from filtered results
     let catalogs: Vec<Option<&str>> = filtered_tables.iter().map(|_| Some(CATALOG_NAME)).collect();
-    let schemas: Vec<Option<&str>> = filtered_tables.iter().map(|(s, _, _)| Some(s.as_str())).collect();
+    let schemas: Vec<Option<&str>> = filtered_tables
+        .iter()
+        .map(|(s, _, _)| Some(s.as_str()))
+        .collect();
     let tables: Vec<&str> = filtered_tables.iter().map(|(_, t, _)| t.as_str()).collect();
     let types: Vec<&str> = filtered_tables.iter().map(|(_, _, ty)| *ty).collect();
 
@@ -521,11 +562,7 @@ pub fn do_get_primary_keys() -> Result<Response<DoGetStream>, Status> {
 fn primary_keys_schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         arrow::datatypes::Field::new("catalog_name", arrow::datatypes::DataType::Utf8, true),
-        arrow::datatypes::Field::new(
-            "db_schema_name",
-            arrow::datatypes::DataType::Utf8,
-            true,
-        ),
+        arrow::datatypes::Field::new("db_schema_name", arrow::datatypes::DataType::Utf8, true),
         arrow::datatypes::Field::new("table_name", arrow::datatypes::DataType::Utf8, false),
         arrow::datatypes::Field::new("column_name", arrow::datatypes::DataType::Utf8, false),
         arrow::datatypes::Field::new("key_sequence", arrow::datatypes::DataType::Int32, false),
@@ -564,7 +601,10 @@ fn matches_sql_pattern(pattern: &str, value: &str) -> bool {
     }
 
     // Fall back to recursive matching for complex patterns
-    matches_pattern_recursive(pattern.chars().collect::<Vec<_>>().as_slice(), value.chars().collect::<Vec<_>>().as_slice())
+    matches_pattern_recursive(
+        pattern.chars().collect::<Vec<_>>().as_slice(),
+        value.chars().collect::<Vec<_>>().as_slice(),
+    )
 }
 
 /// Recursive pattern matching for SQL LIKE patterns.
@@ -580,9 +620,7 @@ fn matches_pattern_recursive(pattern: &[char], value: &[char]) -> bool {
             // _ matches exactly one character
             matches_pattern_recursive(&pattern[1..], &value[1..])
         }
-        (Some(p), Some(v)) if *p == *v => {
-            matches_pattern_recursive(&pattern[1..], &value[1..])
-        }
+        (Some(p), Some(v)) if *p == *v => matches_pattern_recursive(&pattern[1..], &value[1..]),
         _ => false,
     }
 }
@@ -720,8 +758,16 @@ fn xdbc_type_info_schema() -> Arc<Schema> {
         arrow::datatypes::Field::new("nullable", arrow::datatypes::DataType::Int32, false),
         arrow::datatypes::Field::new("case_sensitive", arrow::datatypes::DataType::Boolean, false),
         arrow::datatypes::Field::new("searchable", arrow::datatypes::DataType::Int32, false),
-        arrow::datatypes::Field::new("unsigned_attribute", arrow::datatypes::DataType::Boolean, true),
-        arrow::datatypes::Field::new("fixed_prec_scale", arrow::datatypes::DataType::Boolean, false),
+        arrow::datatypes::Field::new(
+            "unsigned_attribute",
+            arrow::datatypes::DataType::Boolean,
+            true,
+        ),
+        arrow::datatypes::Field::new(
+            "fixed_prec_scale",
+            arrow::datatypes::DataType::Boolean,
+            false,
+        ),
         arrow::datatypes::Field::new("auto_increment", arrow::datatypes::DataType::Boolean, true),
         arrow::datatypes::Field::new("local_type_name", arrow::datatypes::DataType::Utf8, true),
         arrow::datatypes::Field::new("minimum_scale", arrow::datatypes::DataType::Int32, true),
@@ -729,7 +775,11 @@ fn xdbc_type_info_schema() -> Arc<Schema> {
         arrow::datatypes::Field::new("sql_data_type", arrow::datatypes::DataType::Int32, false),
         arrow::datatypes::Field::new("datetime_subcode", arrow::datatypes::DataType::Int32, true),
         arrow::datatypes::Field::new("num_prec_radix", arrow::datatypes::DataType::Int32, true),
-        arrow::datatypes::Field::new("interval_precision", arrow::datatypes::DataType::Int32, true),
+        arrow::datatypes::Field::new(
+            "interval_precision",
+            arrow::datatypes::DataType::Int32,
+            true,
+        ),
     ]))
 }
 
@@ -796,14 +846,118 @@ pub fn do_get_xdbc_type_info() -> Result<Response<DoGetStream>, Status> {
         Option<i32>,
         Option<i32>,
     )> = vec![
-        ("VARCHAR", SQL_VARCHAR, Some(65535), Some("'"), Some("'"), true, None, false, None, None, None, None),
-        ("INTEGER", SQL_INTEGER, Some(10), None, None, false, Some(false), false, Some(false), Some(0), Some(0), Some(10)),
-        ("BIGINT", SQL_BIGINT, Some(19), None, None, false, Some(false), false, Some(false), Some(0), Some(0), Some(10)),
-        ("DOUBLE", SQL_DOUBLE, Some(15), None, None, false, Some(false), false, Some(false), None, None, Some(10)),
-        ("BOOLEAN", SQL_BOOLEAN, Some(1), None, None, false, None, false, None, None, None, None),
-        ("DATE", SQL_DATE, Some(10), Some("'"), Some("'"), false, None, false, None, None, None, None),
-        ("TIMESTAMP", SQL_TIMESTAMP, Some(29), Some("'"), Some("'"), false, None, false, None, None, None, None),
-        ("BINARY", SQL_BINARY, Some(65535), Some("X'"), Some("'"), false, None, false, None, None, None, None),
+        (
+            "VARCHAR",
+            SQL_VARCHAR,
+            Some(65535),
+            Some("'"),
+            Some("'"),
+            true,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            "INTEGER",
+            SQL_INTEGER,
+            Some(10),
+            None,
+            None,
+            false,
+            Some(false),
+            false,
+            Some(false),
+            Some(0),
+            Some(0),
+            Some(10),
+        ),
+        (
+            "BIGINT",
+            SQL_BIGINT,
+            Some(19),
+            None,
+            None,
+            false,
+            Some(false),
+            false,
+            Some(false),
+            Some(0),
+            Some(0),
+            Some(10),
+        ),
+        (
+            "DOUBLE",
+            SQL_DOUBLE,
+            Some(15),
+            None,
+            None,
+            false,
+            Some(false),
+            false,
+            Some(false),
+            None,
+            None,
+            Some(10),
+        ),
+        (
+            "BOOLEAN",
+            SQL_BOOLEAN,
+            Some(1),
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            "DATE",
+            SQL_DATE,
+            Some(10),
+            Some("'"),
+            Some("'"),
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            "TIMESTAMP",
+            SQL_TIMESTAMP,
+            Some(29),
+            Some("'"),
+            Some("'"),
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            "BINARY",
+            SQL_BINARY,
+            Some(65535),
+            Some("X'"),
+            Some("'"),
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
     ];
 
     let type_names: Vec<&str> = types.iter().map(|t| t.0).collect();

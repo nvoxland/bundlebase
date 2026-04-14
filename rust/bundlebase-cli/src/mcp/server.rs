@@ -8,12 +8,12 @@ use bundlebase_common::progress::run_with_tracker;
 use bundlebase_common::BundlebaseError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo,
-};
+use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::schemars;
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
+use rmcp::{
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
+};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,11 +51,15 @@ pub struct SampleParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct BundlePathParams {
     /// Unique identifier for this bundle in future tool calls
-    #[schemars(description = "Unique identifier for this bundle (used to reference it in other tools)")]
+    #[schemars(
+        description = "Unique identifier for this bundle (used to reference it in other tools)"
+    )]
     pub bundle: String,
 
     /// Path or URL to the bundle
-    #[schemars(description = "Path or URL to the bundle (e.g., './my-bundle', 's3://bucket/bundle')")]
+    #[schemars(
+        description = "Path or URL to the bundle (e.g., './my-bundle', 's3://bucket/bundle')"
+    )]
     pub path: String,
 }
 
@@ -63,15 +67,21 @@ pub struct BundlePathParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct OpenBundleParams {
     /// Unique identifier for this bundle in future tool calls
-    #[schemars(description = "Unique identifier for this bundle (used to reference it in other tools)")]
+    #[schemars(
+        description = "Unique identifier for this bundle (used to reference it in other tools)"
+    )]
     pub bundle: String,
 
     /// Path or URL to the bundle
-    #[schemars(description = "Path or URL to the bundle (e.g., './my-bundle', 's3://bucket/bundle')")]
+    #[schemars(
+        description = "Path or URL to the bundle (e.g., './my-bundle', 's3://bucket/bundle')"
+    )]
     pub path: String,
 
     /// Open in read-only mode (default: false)
-    #[schemars(description = "Open in read-only mode (default: false). When true, only SELECT and EXPLAIN are allowed.")]
+    #[schemars(
+        description = "Open in read-only mode (default: false). When true, only SELECT and EXPLAIN are allowed."
+    )]
     pub read_only: Option<bool>,
 }
 
@@ -88,7 +98,9 @@ pub struct BundleKeyParams {
 pub struct GenerateReportParams {
     /// Markdown content with bundlebase code blocks.
     /// Charts and tables reference bundles by their identifier and include SQL queries.
-    #[schemars(description = "Markdown content with embedded ```bundlebase YAML code blocks. Use type: table for tables, or type: pie/bar/line/horizontal_bar/box_whisker/pyramid/error_bar/violin for charts.")]
+    #[schemars(
+        description = "Markdown content with embedded ```bundlebase YAML code blocks. Use type: table for tables, or type: pie/bar/line/horizontal_bar/box_whisker/pyramid/error_bar/violin for charts."
+    )]
     pub input: String,
 
     /// Output file path for the PDF (must end in .pdf)
@@ -104,7 +116,9 @@ pub struct GenerateReportParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpgradeBundleParams {
     /// Path or URL to the bundle to upgrade
-    #[schemars(description = "Path or URL to the bundle to upgrade (e.g., './my-bundle', 's3://bucket/bundle')")]
+    #[schemars(
+        description = "Path or URL to the bundle to upgrade (e.g., './my-bundle', 's3://bucket/bundle')"
+    )]
     pub path: String,
 }
 
@@ -165,7 +179,10 @@ impl BundlebaseMcpServer {
         match BundleBuilder::create(&params.path, None).await {
             Ok(builder) => {
                 let url = builder.url().to_string();
-                self.bundles.lock().await.insert(params.bundle.clone(), builder);
+                self.bundles
+                    .lock()
+                    .await
+                    .insert(params.bundle.clone(), builder);
                 Ok(CallToolResult::success(vec![Content::text(format!(
                     "Created bundle '{}' at {}",
                     params.bundle, url
@@ -236,7 +253,10 @@ impl BundlebaseMcpServer {
                 let url = bundle.url().to_string();
                 let version = bundle.version();
                 let commits = bundle.history().len();
-                self.bundles.lock().await.insert(params.bundle.clone(), bundle);
+                self.bundles
+                    .lock()
+                    .await
+                    .insert(params.bundle.clone(), bundle);
                 Ok(CallToolResult::success(vec![Content::text(format!(
                     "Opened bundle '{}' at {} (version {}, {} commit{})",
                     params.bundle,
@@ -321,7 +341,10 @@ impl BundlebaseMcpServer {
         }
     }
 
-    #[tool(name = "count", description = "Get the total number of rows in a bundle.")]
+    #[tool(
+        name = "count",
+        description = "Get the total number of rows in a bundle."
+    )]
     async fn count(
         &self,
         Parameters(params): Parameters<BundleKeyParams>,
@@ -476,9 +499,7 @@ impl ServerHandler for BundlebaseMcpServer {
 ///
 /// Starts with the given pre-opened bundles (may be empty).
 /// Agents can open/close additional bundles via tools.
-pub async fn start(
-    bundles: HashMap<String, Arc<dyn BundleFacade>>,
-) -> Result<(), BundlebaseError> {
+pub async fn start(bundles: HashMap<String, Arc<dyn BundleFacade>>) -> Result<(), BundlebaseError> {
     let server = BundlebaseMcpServer::new(bundles);
 
     let service = server
@@ -511,10 +532,7 @@ impl McpBundleResolver {
 
 #[async_trait::async_trait]
 impl bundlebase_report::BundleResolver for McpBundleResolver {
-    async fn resolve(
-        &self,
-        bundle_ref: &str,
-    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+    async fn resolve(&self, bundle_ref: &str) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
         self.bundles.get(bundle_ref).cloned().ok_or_else(|| {
             let available: Vec<&str> = self.bundles.keys().map(|k| k.as_str()).collect();
             BundlebaseError::from(format!(
@@ -553,7 +571,10 @@ mod tests {
         let server = BundlebaseMcpServer::new(bundles);
         let info = server.get_info();
         assert_eq!(info.server_info.name, "bundlebase");
-        assert!(info.instructions.unwrap_or_default().contains("create_bundle"));
+        assert!(info
+            .instructions
+            .unwrap_or_default()
+            .contains("create_bundle"));
     }
 
     #[tokio::test]

@@ -23,19 +23,15 @@ pub fn parse_patterns(patterns_str: &str) -> Result<Vec<Pattern>, BundlebaseErro
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|p| {
-            Pattern::new(p).map_err(|e| {
-                BundlebaseError::from(format!("Invalid glob pattern '{}': {}", p, e))
-            })
+            Pattern::new(p)
+                .map_err(|e| BundlebaseError::from(format!("Invalid glob pattern '{}': {}", p, e)))
         })
         .collect()
 }
 
 /// Get patterns from args, returning compiled patterns.
 pub fn get_patterns(args: &HashMap<String, String>) -> Result<Vec<Pattern>, BundlebaseError> {
-    let patterns_str = args
-        .get("patterns")
-        .map(|s| s.as_str())
-        .unwrap_or("**/*");
+    let patterns_str = args.get("patterns").map(|s| s.as_str()).unwrap_or("**/*");
     parse_patterns(patterns_str)
 }
 
@@ -72,9 +68,8 @@ pub fn require_url(
     function_name: &str,
 ) -> Result<Url, BundlebaseError> {
     let url_str = require_arg(args, "url", function_name)?;
-    Url::parse(url_str).map_err(|e| {
-        BundlebaseError::from(format!("Invalid URL '{}': {}", url_str, e))
-    })
+    Url::parse(url_str)
+        .map_err(|e| BundlebaseError::from(format!("Invalid URL '{}': {}", url_str, e)))
 }
 
 // ---------------------------------------------------------------------------
@@ -103,18 +98,16 @@ pub struct HttpHeadInfo {
 ///
 /// Includes the status code, reason phrase, an actionable hint, and optionally
 /// a truncated snippet of the server response body or Warning header.
-pub fn http_status_error(
-    url: &Url,
-    status: reqwest::StatusCode,
-    detail: Option<&str>,
-) -> String {
+pub fn http_status_error(url: &Url, status: reqwest::StatusCode, detail: Option<&str>) -> String {
     let hint = match status.as_u16() {
         400 => " The request was rejected by the server. Check URL parameters for invalid values.",
         401 => " The server requires authentication. Check if credentials are needed.",
         403 => " Access is forbidden. Check if the URL requires authorization or an API key.",
         404 => " The URL was not found. Verify the URL is correct and the resource exists.",
         429 => " Too many requests. Try again later or reduce request frequency.",
-        500 => " The server encountered an internal error. The service may be temporarily unavailable.",
+        500 => {
+            " The server encountered an internal error. The service may be temporarily unavailable."
+        }
         502 | 503 | 504 => " The service is temporarily unavailable. Try again later.",
         _ => " Verify the URL is correct and accessible.",
     };
@@ -145,16 +138,20 @@ pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseEr
         .head(url.as_str())
         .send()
         .await
-        .map_err(|e| BundlebaseError::from(format!(
-            "HEAD request failed for '{}': {}. \
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "HEAD request failed for '{}': {}. \
              If this server doesn't support HEAD requests, retry with: \
              head_supported = 'false'",
-            url, e
-        )))?;
+                url, e
+            ))
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
-        let warning = response.headers().get("warning")
+        let warning = response
+            .headers()
+            .get("warning")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let base_err = http_status_error(url, status, warning.as_deref());
@@ -199,8 +196,8 @@ pub async fn stream_response(
     let mut stream = response.bytes_stream();
     let mut buffer = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk
-            .map_err(|e| BundlebaseError::from(format!("Failed to read response: {}", e)))?;
+        let chunk =
+            chunk.map_err(|e| BundlebaseError::from(format!("Failed to read response: {}", e)))?;
         buffer.extend_from_slice(&chunk);
         progress.increment(chunk.len() as u64, None);
     }
@@ -321,9 +318,8 @@ pub async fn record_batch_stream_to_parquet(
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_bloom_filter_enabled(true)
             .build();
-        let mut writer =
-            parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
-                .map_err(|e| format!("Failed to create parquet writer: {}", e))?;
+        let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
+            .map_err(|e| format!("Failed to create parquet writer: {}", e))?;
 
         writer
             .write(&first_batch)
@@ -441,9 +437,10 @@ pub fn json_to_parquet_with_options(
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_bloom_filter_enabled(true)
             .build();
-        let mut writer =
-            parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
-                .map_err(|e| BundlebaseError::from(format!("Failed to create Parquet writer: {}", e)))?;
+        let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to create Parquet writer: {}", e))
+            })?;
         for batch in &batches {
             writer
                 .write(batch)
@@ -458,11 +455,15 @@ pub fn json_to_parquet_with_options(
 }
 
 /// Navigate a dot-notation path within a JSON value. An empty path returns the value itself.
-fn json_navigate_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+fn json_navigate_path<'a>(
+    value: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
     if path.is_empty() {
         return Some(value);
     }
-    path.split('.').try_fold(value, |current, key| current.get(key))
+    path.split('.')
+        .try_fold(value, |current, key| current.get(key))
 }
 
 /// Recursively flatten a JSON value into a flat map using the given separator.
@@ -495,7 +496,10 @@ fn json_flatten_value(
 ///
 /// This is the pluggable extension point for format conversion. To add support
 /// for a new input format, add a match arm here.
-pub fn convert_to_parquet(data: &[u8], format: &crate::connector::SourceFormat) -> Result<Bytes, BundlebaseError> {
+pub fn convert_to_parquet(
+    data: &[u8],
+    format: &crate::connector::SourceFormat,
+) -> Result<Bytes, BundlebaseError> {
     use crate::connector::SourceFormat;
     match format {
         SourceFormat::Parquet => Ok(Bytes::copy_from_slice(data)),
@@ -503,11 +507,10 @@ pub fn convert_to_parquet(data: &[u8], format: &crate::connector::SourceFormat) 
         SourceFormat::Tsv => csv_to_parquet(data, b'\t'),
         SourceFormat::JsonL => jsonl_to_parquet(data),
         SourceFormat::Json => json_array_to_parquet(data),
-        SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Ods => crate::excel::excel_to_parquet(data, None),
-        other => Err(format!(
-            "Cannot convert format '{}' to Parquet",
-            other
-        ).into()),
+        SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Ods => {
+            crate::excel::excel_to_parquet(data, None)
+        }
+        other => Err(format!("Cannot convert format '{}' to Parquet", other).into()),
     }
 }
 
@@ -536,8 +539,7 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
         &s[1..s.len() - 1]
     };
 
-    let stream = serde_json::Deserializer::from_str(trimmed)
-        .into_iter::<serde_json::Value>();
+    let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<serde_json::Value>();
 
     // Accumulate column schema and row data
     let mut col_order: Vec<String> = Vec::new();
@@ -546,12 +548,15 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
     let mut row_count = 0usize;
 
     for item in stream {
-        let obj = item.map_err(|e| BundlebaseError::from(format!("Failed to parse JSON object: {}", e)))?;
+        let obj =
+            item.map_err(|e| BundlebaseError::from(format!("Failed to parse JSON object: {}", e)))?;
         let map = match obj.as_object() {
             Some(m) => m,
-            None => return Err(format!(
-                "JSON array element at index {} is not an object", row_count
-            ).into()),
+            None => {
+                return Err(
+                    format!("JSON array element at index {} is not an object", row_count).into(),
+                )
+            }
         };
 
         // Register new columns, backfilling nulls for prior rows
@@ -626,11 +631,17 @@ fn csv_to_parquet(data: &[u8], delimiter: u8) -> Result<Bytes, BundlebaseError> 
     use std::io::Cursor;
 
     // Infer schema with 0 data rows — only reads the header, no type guessing.
-    let fmt = Format::default().with_header(true).with_delimiter(delimiter);
+    let fmt = Format::default()
+        .with_header(true)
+        .with_delimiter(delimiter);
     let (header_schema, _) = fmt
         .infer_schema(Cursor::new(data), Some(0))
         .map_err(|e| BundlebaseError::from(format!("CSV header read failed: {}", e)))?;
-    let col_names: Vec<String> = header_schema.fields().iter().map(|f| f.name().clone()).collect();
+    let col_names: Vec<String> = header_schema
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
 
     // Read rows as raw strings using the all-text schema.
     let schema = all_utf8_schema(&col_names);
@@ -665,7 +676,8 @@ fn jsonl_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
         }
         let names = col_names.as_ref().unwrap();
         rows.push(
-            names.iter()
+            names
+                .iter()
                 .map(|k| obj.get(k).map(json_value_to_string).unwrap_or_default())
                 .collect(),
         );
@@ -678,12 +690,16 @@ fn jsonl_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
 ///
 /// Used by JSONL and any other text-based format that has already resolved
 /// column names and stringified values.
-fn text_rows_to_parquet(col_names: &[String], rows: Vec<Vec<String>>) -> Result<Bytes, BundlebaseError> {
+fn text_rows_to_parquet(
+    col_names: &[String],
+    rows: Vec<Vec<String>>,
+) -> Result<Bytes, BundlebaseError> {
     use arrow::array::StringBuilder;
     use arrow::record_batch::RecordBatch;
 
     let schema = all_utf8_schema(col_names);
-    let mut builders: Vec<StringBuilder> = (0..col_names.len()).map(|_| StringBuilder::new()).collect();
+    let mut builders: Vec<StringBuilder> =
+        (0..col_names.len()).map(|_| StringBuilder::new()).collect();
 
     for row in &rows {
         for (i, builder) in builders.iter_mut().enumerate() {
@@ -691,8 +707,10 @@ fn text_rows_to_parquet(col_names: &[String], rows: Vec<Vec<String>>) -> Result<
         }
     }
 
-    let columns: Vec<Arc<dyn arrow::array::Array>> =
-        builders.iter_mut().map(|b| Arc::new(b.finish()) as _).collect();
+    let columns: Vec<Arc<dyn arrow::array::Array>> = builders
+        .iter_mut()
+        .map(|b| Arc::new(b.finish()) as _)
+        .collect();
 
     let batch = RecordBatch::try_new(schema.clone(), columns)
         .map_err(|e| BundlebaseError::from(format!("RecordBatch build failed: {}", e)))?;
@@ -704,7 +722,10 @@ fn text_rows_to_parquet(col_names: &[String], rows: Vec<Vec<String>>) -> Result<
 fn all_utf8_schema(col_names: &[String]) -> Arc<arrow::datatypes::Schema> {
     use arrow::datatypes::{DataType, Field, Schema};
     Arc::new(Schema::new(
-        col_names.iter().map(|n| Field::new(n, DataType::Utf8, true)).collect::<Vec<_>>(),
+        col_names
+            .iter()
+            .map(|n| Field::new(n, DataType::Utf8, true))
+            .collect::<Vec<_>>(),
     ))
 }
 
@@ -719,15 +740,13 @@ fn record_batches_to_parquet(
     let mut buffer = Vec::new();
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(
-            parquet::basic::ZstdLevel::try_new(3)
-                .unwrap_or(parquet::basic::ZstdLevel::default()),
+            parquet::basic::ZstdLevel::try_new(3).unwrap_or(parquet::basic::ZstdLevel::default()),
         ))
         .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
         .set_bloom_filter_enabled(true)
         .build();
-    let mut writer =
-        parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
-            .map_err(|e| BundlebaseError::from(format!("Parquet writer init failed: {}", e)))?;
+    let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
+        .map_err(|e| BundlebaseError::from(format!("Parquet writer init failed: {}", e)))?;
 
     for batch in batches {
         writer
@@ -814,7 +833,10 @@ mod tests {
 
     #[test]
     fn test_detect_format_jsonl_object() {
-        assert_eq!(detect_format_from_bytes(b"  {\"key\": \"value\"}"), Some("jsonl"));
+        assert_eq!(
+            detect_format_from_bytes(b"  {\"key\": \"value\"}"),
+            Some("jsonl")
+        );
     }
 
     #[test]
@@ -857,30 +879,45 @@ mod tests {
     const FLAT_JSON: &[u8] = br#"[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]"#;
 
     fn read_parquet_batches(bytes: &bytes::Bytes) -> Vec<arrow::record_batch::RecordBatch> {
-        parquet::arrow::arrow_reader::ParquetRecordBatchReader::try_new(
-            bytes.clone(), 1024,
-        )
-        .expect("valid parquet")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("read batches")
+        parquet::arrow::arrow_reader::ParquetRecordBatchReader::try_new(bytes.clone(), 1024)
+            .expect("valid parquet")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read batches")
     }
 
     #[test]
     fn test_json_to_parquet_wrapped_array_schema() {
-        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let result =
+            json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
         let batches = read_parquet_batches(&result);
         assert!(!batches.is_empty());
         let schema = batches[0].schema();
         let col_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert!(col_names.contains(&"id"), "expected 'id', got: {:?}", col_names);
-        assert!(col_names.contains(&"name"), "expected 'name', got: {:?}", col_names);
-        assert!(col_names.contains(&"info_score"), "expected 'info_score', got: {:?}", col_names);
-        assert!(!col_names.contains(&"info"), "should not have un-flattened 'info'");
+        assert!(
+            col_names.contains(&"id"),
+            "expected 'id', got: {:?}",
+            col_names
+        );
+        assert!(
+            col_names.contains(&"name"),
+            "expected 'name', got: {:?}",
+            col_names
+        );
+        assert!(
+            col_names.contains(&"info_score"),
+            "expected 'info_score', got: {:?}",
+            col_names
+        );
+        assert!(
+            !col_names.contains(&"info"),
+            "should not have un-flattened 'info'"
+        );
     }
 
     #[test]
     fn test_json_to_parquet_wrapped_array_row_count() {
-        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let result =
+            json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
         let batches = read_parquet_batches(&result);
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(4, total_rows);
@@ -888,11 +925,16 @@ mod tests {
 
     #[test]
     fn test_json_to_parquet_with_meta() {
-        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &["total"]).expect("conversion");
+        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &["total"])
+            .expect("conversion");
         let batches = read_parquet_batches(&result);
         let schema = batches[0].schema();
         let col_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert!(col_names.contains(&"total"), "expected 'total' meta column, got: {:?}", col_names);
+        assert!(
+            col_names.contains(&"total"),
+            "expected 'total' meta column, got: {:?}",
+            col_names
+        );
     }
 
     #[test]
@@ -910,14 +952,21 @@ mod tests {
 
     #[test]
     fn test_json_to_parquet_data_values() {
-        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let result =
+            json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
         let batches = read_parquet_batches(&result);
         let batch = &batches[0];
         let schema = batch.schema();
         let name_idx = schema.index_of("name").expect("name column");
         let name_col = batch.column(name_idx);
         let names: Vec<_> = (0..4)
-            .map(|i| name_col.as_any().downcast_ref::<arrow::array::StringArray>().expect("StringArray").value(i))
+            .map(|i| {
+                name_col
+                    .as_any()
+                    .downcast_ref::<arrow::array::StringArray>()
+                    .expect("StringArray")
+                    .value(i)
+            })
             .collect();
         assert_eq!(vec!["Gilbert", "Alexa", "May", "Deloise"], names);
     }
@@ -935,6 +984,4 @@ mod tests {
         let err = json_to_parquet_with_options(WRAPPED_JSON, "total", "_", &[]);
         assert!(err.is_err());
     }
-
 }
-

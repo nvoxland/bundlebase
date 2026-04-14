@@ -1,21 +1,22 @@
-use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{op_field, AnyOperation, BundleConfig};
 use bundlebase::{test_utils, Bundle};
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{readable_file_from_path, readable_file_from_url};
+use std::sync::Arc;
 use url::Url;
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 #[tokio::test]
 async fn test_basic_e2e() -> Result<(), BundlebaseError> {
@@ -33,7 +34,8 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let version = readable_file_from_url(
         &Url::parse(test_datafile("userdata.parquet"))?,
         Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
-    ).await?
+    )
+    .await?
     .version()
     .await?;
 
@@ -48,11 +50,19 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let fmt_version = bundlebase_common::format_version_string();
     assert_eq!(
         init_content.trim(),
-        format!("id: {}\nminVersion: '{}'\nmaxVersion: '{}'", bundle.bundle().id(), fmt_version, fmt_version).trim()
+        format!(
+            "id: {}\nminVersion: '{}'\nmaxVersion: '{}'",
+            bundle.bundle().id(),
+            fmt_version,
+            fmt_version
+        )
+        .trim()
     );
 
     // Find and read the versioned manifest file
-    let (contents, commit, url) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, commit, url) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     let expected = format!(
         r#"author: {}
@@ -71,7 +81,7 @@ changes:
     hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
-    schemaPath: 3b/a5bd5f9d91f9d1.block.schema.yaml
+    schema: 3b/a5bd5f9d91f9d1.block.schema.yaml
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -103,9 +113,18 @@ changes:
     assert_eq!(common::strip_column_ids(&contents), expected);
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
-    assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
-    assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
+    assert!(
+        contents.contains("columnIds:"),
+        "AttachBlock should have columnIds"
+    );
+    assert!(
+        contents.contains("type: dropColumn\n    id:"),
+        "DropColumn should have id"
+    );
+    assert!(
+        contents.contains("type: renameColumn\n    id:"),
+        "RenameColumn should have id"
+    );
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
@@ -151,7 +170,9 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     let temp_dir = random_memory_dir();
 
     let bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.drop_column("title").await?;
     bundle.drop_column("comments").await?;
     bundle.rename_column("first_name", "fname").await?;
@@ -181,7 +202,7 @@ changes:
     hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
-    schemaPath: 3b/a5bd5f9d91f9d1.block.schema.yaml
+    schema: 3b/a5bd5f9d91f9d1.block.schema.yaml
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -228,9 +249,18 @@ changes:
     assert_eq!(common::strip_column_ids(&contents).trim(), expected.trim());
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
-    assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
-    assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
+    assert!(
+        contents.contains("columnIds:"),
+        "AttachBlock should have columnIds"
+    );
+    assert!(
+        contents.contains("type: dropColumn\n    id:"),
+        "DropColumn should have id"
+    );
+    assert!(
+        contents.contains("type: renameColumn\n    id:"),
+        "RenameColumn should have id"
+    );
 
     Ok(())
 }
@@ -250,12 +280,18 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
     bundle.set_description("My Bundle Desc").await?;
 
     assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
-    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
+    assert_eq!(
+        bundle.bundle().description(),
+        Some("My Bundle Desc".to_string())
+    );
 
     bundle.commit("Commit changes").await?;
 
     assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
-    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
+    assert_eq!(
+        bundle.bundle().description(),
+        Some("My Bundle Desc".to_string())
+    );
 
     // Open and verify
     let loaded = Bundle::open(data_dir.as_str(), None).await?;
@@ -271,22 +307,19 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     bundle.commit("CSV commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
-    let layout_line = match op_field!(
-        commit.operations()[0],
-        AnyOperation::AttachBlock,
-        layout
-    ) {
-        Some(layout_val) => format!(
-            "\n    layout: {}",
-            test_utils::for_yaml(layout_val)
-        ),
+    let layout_line = match op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout) {
+        Some(layout_val) => format!("\n    layout: {}", test_utils::for_yaml(layout_val)),
         None => String::new(),
     };
 
@@ -309,7 +342,7 @@ changes:
     hash: {}{}
     numRows: 100
     bytes: 17160
-    schemaPath: 26/2b64b78fa6eff8.block.schema.yaml",
+    schema: 26/2b64b78fa6eff8.block.schema.yaml",
             commit.author,
             commit.timestamp,
             commit.changes[0].id,
@@ -333,7 +366,10 @@ changes:
     );
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
+    assert!(
+        contents.contains("columnIds:"),
+        "AttachBlock should have columnIds"
+    );
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
@@ -350,7 +386,8 @@ changes:
             &layout,
             loaded_bundle.data_dir(),
             Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
-        ).await?;
+        )
+        .await?;
         assert!(
             layout_file.exists().await?,
             "Layout file should exist at: {}",
@@ -376,7 +413,9 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     bundle.commit("JSON commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     // Verify it contains the expected operations
     assert!(contents.contains("author: "));
@@ -427,18 +466,29 @@ async fn set_init_versions(
     let mut doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml_str).unwrap();
 
     match min_version {
-        Some(v) => { doc["minVersion"] = serde_yaml_ng::Value::String(v.to_string()); }
-        None => { doc.as_mapping_mut().unwrap().remove("minVersion"); }
+        Some(v) => {
+            doc["minVersion"] = serde_yaml_ng::Value::String(v.to_string());
+        }
+        None => {
+            doc.as_mapping_mut().unwrap().remove("minVersion");
+        }
     }
     match max_version {
-        Some(v) => { doc["maxVersion"] = serde_yaml_ng::Value::String(v.to_string()); }
-        None => { doc.as_mapping_mut().unwrap().remove("maxVersion"); }
+        Some(v) => {
+            doc["maxVersion"] = serde_yaml_ng::Value::String(v.to_string());
+        }
+        None => {
+            doc.as_mapping_mut().unwrap().remove("maxVersion");
+        }
     }
 
     let new_yaml = serde_yaml_ng::to_string(&doc).unwrap();
     let manifest_dir_rw = data_dir.writable_subdir(META_DIR).unwrap();
     let init_file_write = manifest_dir_rw.writable_file(INIT_FILENAME).unwrap();
-    init_file_write.write(bytes::Bytes::from(new_yaml)).await.unwrap();
+    init_file_write
+        .write(bytes::Bytes::from(new_yaml))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -446,7 +496,9 @@ async fn test_version_check_passes_for_current_version() -> Result<(), Bundlebas
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.commit("Initial").await?;
 
     // Should open fine — versions match current
@@ -459,7 +511,9 @@ async fn test_version_check_fails_when_min_version_too_high() -> Result<(), Bund
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.commit("Initial").await?;
 
     // Set min version higher than current
@@ -469,7 +523,11 @@ async fn test_version_check_fails_when_min_version_too_high() -> Result<(), Bund
         Err(e) => e.to_string(),
         Ok(_) => panic!("Expected version check to fail"),
     };
-    assert!(err_msg.contains("requires bundlebase >= 99.0"), "Error: {}", err_msg);
+    assert!(
+        err_msg.contains("requires bundlebase >= 99.0"),
+        "Error: {}",
+        err_msg
+    );
     Ok(())
 }
 
@@ -478,7 +536,9 @@ async fn test_version_check_fails_when_max_version_too_low() -> Result<(), Bundl
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.commit("Initial").await?;
 
     // Set max version lower than current
@@ -488,8 +548,16 @@ async fn test_version_check_fails_when_max_version_too_low() -> Result<(), Bundl
         Err(e) => e.to_string(),
         Ok(_) => panic!("Expected version check to fail"),
     };
-    assert!(err_msg.contains("requires bundlebase <= 0.1"), "Error: {}", err_msg);
-    assert!(err_msg.contains("upgrade-bundle"), "Error should mention upgrade-bundle: {}", err_msg);
+    assert!(
+        err_msg.contains("requires bundlebase <= 0.1"),
+        "Error: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("upgrade-bundle"),
+        "Error should mention upgrade-bundle: {}",
+        err_msg
+    );
     Ok(())
 }
 
@@ -498,7 +566,9 @@ async fn test_version_check_allows_old_bundles_without_versions() -> Result<(), 
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.commit("Initial").await?;
 
     // Remove version fields to simulate pre-versioning bundle
@@ -514,7 +584,9 @@ async fn test_upgrade_bundle_fixes_too_old_bundle() -> Result<(), BundlebaseErro
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     bundle.commit("Initial").await?;
 
     // Set max version too low so open would fail

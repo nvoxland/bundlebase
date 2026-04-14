@@ -6,10 +6,10 @@
 
 use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase::BundleFacade;
-use bundlebase_common::BundlebaseError;
 use arrow::array::{Array, ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -152,7 +152,8 @@ fn extract_string_from_batch(batch: &RecordBatch, col_index: usize) -> Option<St
         return None;
     }
     // Use Arrow's display formatting which works for any type
-    let formatter = arrow::util::display::ArrayFormatter::try_new(col.as_ref(), &Default::default());
+    let formatter =
+        arrow::util::display::ArrayFormatter::try_new(col.as_ref(), &Default::default());
     match formatter {
         Ok(f) => Some(f.value(0).to_string()),
         Err(_) => None,
@@ -192,11 +193,9 @@ async fn extract_value_counts(
             .downcast_ref::<Int64Array>()
             .ok_or_else(|| BundlebaseError::from("Expected Int64 column for counts"))?;
 
-        let formatter = arrow::util::display::ArrayFormatter::try_new(
-            values_col.as_ref(),
-            &Default::default(),
-        )
-        .map_err(|e| BundlebaseError::from(format!("Failed to format values: {}", e)))?;
+        let formatter =
+            arrow::util::display::ArrayFormatter::try_new(values_col.as_ref(), &Default::default())
+                .map_err(|e| BundlebaseError::from(format!("Failed to format values: {}", e)))?;
 
         for i in 0..batch.num_rows() {
             if !values_col.is_null(i) {
@@ -228,7 +227,8 @@ async fn load_column_stats(
     let mut result = std::collections::HashMap::new();
 
     // Resolve column names to IDs once before iterating blocks.
-    let col_id_pairs: Vec<(&str, _)> = column_names.iter()
+    let col_id_pairs: Vec<(&str, _)> = column_names
+        .iter()
         .filter_map(|&n| facade.column_id(n).map(|id| (n, id)))
         .collect();
 
@@ -255,7 +255,9 @@ async fn load_column_stats(
                     None => continue,
                 };
 
-                let entry = result.entry(col_name.to_string()).or_insert_with(|| stat.clone());
+                let entry = result
+                    .entry(col_name.to_string())
+                    .or_insert_with(|| stat.clone());
                 // Aggregate: prefer higher distinct_count, first non-None profiles
                 if stat.distinct_count > entry.distinct_count {
                     entry.distinct_count = stat.distinct_count;
@@ -312,7 +314,10 @@ impl BundleFacadeCommand for DescribeDataCommand {
             if is_numeric(&info.data_type) {
                 select_parts.push(format!("CAST(MIN({}) AS VARCHAR) AS min_{}", q, i));
                 select_parts.push(format!("CAST(MAX({}) AS VARCHAR) AS max_{}", q, i));
-                select_parts.push(format!("CAST(AVG(CAST({} AS DOUBLE)) AS VARCHAR) AS avg_{}", q, i));
+                select_parts.push(format!(
+                    "CAST(AVG(CAST({} AS DOUBLE)) AS VARCHAR) AS avg_{}",
+                    q, i
+                ));
             } else if is_temporal(&info.data_type) {
                 select_parts.push(format!("CAST(MIN({}) AS VARCHAR) AS min_{}", q, i));
                 select_parts.push(format!("CAST(MAX({}) AS VARCHAR) AS max_{}", q, i));
@@ -338,7 +343,14 @@ impl BundleFacadeCommand for DescribeDataCommand {
         // Load pre-computed column stats (available for CSV/JSONL blocks with layout files).
         // For each requested column, aggregate across all blocks: max distinct count,
         // first non-None string_profile, first non-empty histogram, bloom present in any page.
-        let col_stats_map = load_column_stats(facade, &col_infos.iter().map(|c| c.name.as_str()).collect::<Vec<_>>()).await;
+        let col_stats_map = load_column_stats(
+            facade,
+            &col_infos
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .await;
 
         let mut real_names: Vec<String> = Vec::new();
         let mut col_data_types: Vec<String> = Vec::new();
@@ -405,15 +417,25 @@ impl BundleFacadeCommand for DescribeDataCommand {
                         "max_len": sp.max_len,
                         "avg_len": sp.avg_len,
                         "pct_ascii": sp.pct_ascii,
-                    })).ok()
+                    }))
+                    .ok()
                 }));
                 histograms.push(if col_stat.histogram.is_empty() {
                     None
                 } else {
-                    serde_json::to_string(&col_stat.histogram.iter().map(|b| serde_json::json!({
-                        "lower_bound": b.lower_bound.display(),
-                        "count": b.count,
-                    })).collect::<Vec<_>>()).ok()
+                    serde_json::to_string(
+                        &col_stat
+                            .histogram
+                            .iter()
+                            .map(|b| {
+                                serde_json::json!({
+                                    "lower_bound": b.lower_bound.display(),
+                                    "count": b.count,
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .ok()
                 });
             } else {
                 distinct_counts.push(None);

@@ -6,11 +6,11 @@
 use crate::parser::{extract_identifier, extract_string_content};
 use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::array::{ArrayRef, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::connector::{Connector, SourceData};
 use bundlebase_common::BundlebaseError;
-use arrow::array::{ArrayRef, RecordBatch, StringArray};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 use std::collections::{HashMap, HashSet};
@@ -96,7 +96,11 @@ impl CommandParsing for TestConnectorCommand {
 
         if from.is_some() {
             // Temp mode: TEST TEMP CONNECTOR '<runtime>::<entrypoint>' [WITH ...]
-            Ok(TestConnectorCommand { name: None, temp: from, args })
+            Ok(TestConnectorCommand {
+                name: None,
+                temp: from,
+                args,
+            })
         } else {
             // Name mode: TEST CONNECTOR <name> [WITH ...]
             let connector_name = if has_dotted {
@@ -119,18 +123,26 @@ impl CommandParsing for TestConnectorCommand {
             if self.args.is_empty() {
                 return format!("TEST TEMP CONNECTOR {}", escape_string(from));
             }
-            let mut args_str: Vec<String> = self.args.iter()
+            let mut args_str: Vec<String> = self
+                .args
+                .iter()
                 .map(|(k, v)| format!("{} = {}", quote_identifier(k), escape_string(v)))
                 .collect();
             args_str.sort();
-            return format!("TEST TEMP CONNECTOR {} WITH ({})", escape_string(from), args_str.join(", "));
+            return format!(
+                "TEST TEMP CONNECTOR {} WITH ({})",
+                escape_string(from),
+                args_str.join(", ")
+            );
         }
 
         let name = self.name.as_deref().unwrap_or("?");
         if self.args.is_empty() {
             format!("TEST CONNECTOR {}", name)
         } else {
-            let mut args_str: Vec<String> = self.args.iter()
+            let mut args_str: Vec<String> = self
+                .args
+                .iter()
                 .map(|(k, v)| format!("{} = {}", quote_identifier(k), escape_string(v)))
                 .collect();
             args_str.sort();
@@ -153,43 +165,48 @@ impl BundleFacadeCommand for TestConnectorCommand {
         let mut values = Vec::new();
 
         // Resolve the connector
-        let (func, resolved_args): (Arc<dyn Connector>, HashMap<String, String>) =
-            if let Some(ref from_str) = self.temp {
-                // TEST TEMP CONNECTOR mode — parse runtime and create inline instance
-                let udf_runtime = bundlebase_udf::UdfRuntime::parse_from(from_str)?;
-                let runtime_type = udf_runtime.runtime_type();
+        let (func, resolved_args): (Arc<dyn Connector>, HashMap<String, String>) = if let Some(
+            ref from_str,
+        ) = self.temp
+        {
+            // TEST TEMP CONNECTOR mode — parse runtime and create inline instance
+            let udf_runtime = bundlebase_udf::UdfRuntime::parse_from(from_str)?;
+            let runtime_type = udf_runtime.runtime_type();
+            let registry = facade.connector_registry();
+            let reg = registry.read();
+            let func = reg
+                .create_instance(runtime_type)
+                .ok_or_else(|| format!("Unknown connector runtime in '{}'", from_str))?;
+
+            let mut merged = self.args.clone();
+            merged.insert("call".to_string(), from_str.clone());
+            (func, merged)
+        } else if let Some(ref name) = self.name {
+            if name.contains('.') {
+                // Custom connector — resolve from registry
                 let registry = facade.connector_registry();
                 let reg = registry.read();
-                let func = reg.create_instance(runtime_type)
-                    .ok_or_else(|| format!("Unknown connector runtime in '{}'", from_str))?;
-
+                let entry = reg.resolve_entry(name)?;
+                let runtime_type = entry.from.runtime_type();
+                let func = reg
+                    .create_instance(runtime_type)
+                    .ok_or_else(|| format!("Unknown connector type for '{}'", name))?;
+                let resolved_from = entry.from.resolve_path(&facade.data_dir());
                 let mut merged = self.args.clone();
-                merged.insert("call".to_string(), from_str.clone());
+                merged.insert("call".to_string(), resolved_from.build_call_string());
                 (func, merged)
-            } else if let Some(ref name) = self.name {
-                if name.contains('.') {
-                    // Custom connector — resolve from registry
-                    let registry = facade.connector_registry();
-                    let reg = registry.read();
-                    let entry = reg.resolve_entry(name)?;
-                    let runtime_type = entry.from.runtime_type();
-                    let func = reg.create_instance(runtime_type)
-                        .ok_or_else(|| format!("Unknown connector type for '{}'", name))?;
-                    let resolved_from = entry.from.resolve_path(&facade.data_dir());
-                    let mut merged = self.args.clone();
-                    merged.insert("call".to_string(), resolved_from.build_call_string());
-                    (func, merged)
-                } else {
-                    // Built-in connector
-                    let registry = facade.connector_registry();
-                    let reg = registry.read();
-                    let func = reg.get(name)
-                        .ok_or_else(|| format!("Unknown connector '{}'", name))?;
-                    (func, self.args.clone())
-                }
             } else {
-                return Err("TEST CONNECTOR requires a connector name; use TEST TEMP CONNECTOR for inline testing".into());
-            };
+                // Built-in connector
+                let registry = facade.connector_registry();
+                let reg = registry.read();
+                let func = reg
+                    .get(name)
+                    .ok_or_else(|| format!("Unknown connector '{}'", name))?;
+                (func, self.args.clone())
+            }
+        } else {
+            return Err("TEST CONNECTOR requires a connector name; use TEST TEMP CONNECTOR for inline testing".into());
+        };
 
         // Step 1: Discover
         let discover_start = Instant::now();
@@ -210,14 +227,18 @@ impl BundleFacadeCommand for TestConnectorCommand {
         for (i, loc) in locations.iter().take(5).enumerate() {
             sections.push("discover".to_string());
             keys.push(format!("location_{}", i));
-            values.push(Some(format!("{} (format: {}, version: {})",
-                loc.location, loc.format, loc.version)));
+            values.push(Some(format!(
+                "{} (format: {}, version: {})",
+                loc.location, loc.format, loc.version
+            )));
         }
 
         if locations.is_empty() {
             sections.push("result".to_string());
             keys.push("status".to_string());
-            values.push(Some("No locations discovered — connector returned empty list".to_string()));
+            values.push(Some(
+                "No locations discovered — connector returned empty list".to_string(),
+            ));
         } else {
             // Step 2: Fetch data from first location
             let data_start = Instant::now();
@@ -261,7 +282,9 @@ impl BundleFacadeCommand for TestConnectorCommand {
             } else {
                 sections.push("data".to_string());
                 keys.push("error".to_string());
-                values.push(Some("Connector returned neither data nor stable_url".to_string()));
+                values.push(Some(
+                    "Connector returned neither data nor stable_url".to_string(),
+                ));
             }
 
             // Result
@@ -271,15 +294,17 @@ impl BundleFacadeCommand for TestConnectorCommand {
             values.push(Some(format!("Connector test passed ({}ms)", total_ms)));
         }
 
-        let values_array: Vec<Option<&str>> = values.iter()
-            .map(|v| v.as_deref())
-            .collect();
+        let values_array: Vec<Option<&str>> = values.iter().map(|v| v.as_deref()).collect();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
             vec![
-                Arc::new(StringArray::from(sections.iter().map(|s| s.as_str()).collect::<Vec<_>>())) as ArrayRef,
-                Arc::new(StringArray::from(keys.iter().map(|s| s.as_str()).collect::<Vec<_>>())) as ArrayRef,
+                Arc::new(StringArray::from(
+                    sections.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )) as ArrayRef,
+                Arc::new(StringArray::from(
+                    keys.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )) as ArrayRef,
                 Arc::new(StringArray::from(values_array)) as ArrayRef,
             ],
         )?;
@@ -296,12 +321,16 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_test_connector_by_name() {
-        let cmd = parse_command("TEST CONNECTOR http WITH (url = 'https://example.com/data.csv')").unwrap();
+        let cmd = parse_command("TEST CONNECTOR http WITH (url = 'https://example.com/data.csv')")
+            .unwrap();
         match cmd {
             BundleCommand::TestConnector(c) => {
                 assert_eq!(c.name, Some("http".to_string()));
                 assert!(c.temp.is_none());
-                assert_eq!(c.args.get("url"), Some(&"https://example.com/data.csv".to_string()));
+                assert_eq!(
+                    c.args.get("url"),
+                    Some(&"https://example.com/data.csv".to_string())
+                );
             }
             _ => panic!("Expected TestConnector"),
         }
@@ -338,11 +367,17 @@ mod parsing_tests {
             temp: None,
             args: {
                 let mut m = HashMap::new();
-                m.insert("url".to_string(), "https://example.com/data.csv".to_string());
+                m.insert(
+                    "url".to_string(),
+                    "https://example.com/data.csv".to_string(),
+                );
                 m
             },
         };
         let stmt = cmd.to_statement();
-        assert_eq!(stmt, "TEST CONNECTOR http WITH (url = 'https://example.com/data.csv')");
+        assert_eq!(
+            stmt,
+            "TEST CONNECTOR http WITH (url = 'https://example.com/data.csv')"
+        );
     }
 }

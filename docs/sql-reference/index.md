@@ -395,8 +395,10 @@ See [Custom Connectors](../guide/custom-connectors/index.md) for details.
 Defines a source for automatic file discovery.
 
 ```sql
-CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>]
+CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>] [MIN BATCH <size>]
 ```
+
+Use `MIN BATCH` with a human-readable size such as `15M` or `3G` when you want small fetched files merged into larger parquet batches.
 
 See [Data Sources](../guide/sources.md) for details.
 

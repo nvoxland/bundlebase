@@ -134,7 +134,11 @@ impl CommandResponse for SchemaRef {
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let columns: Vec<&str> = self.fields().iter().map(|f| f.name().as_str()).collect();
-        let types: Vec<String> = self.fields().iter().map(|f| f.data_type().to_string()).collect();
+        let types: Vec<String> = self
+            .fields()
+            .iter()
+            .map(|f| f.data_type().to_string())
+            .collect();
         let nullables: Vec<&str> = self
             .fields()
             .iter()
@@ -145,11 +149,11 @@ impl CommandResponse for SchemaRef {
         let types_array: ArrayRef = Arc::new(StringArray::from(types));
         let nullables_array: ArrayRef = Arc::new(StringArray::from(nullables));
 
-        let batch =
-            RecordBatch::try_new(Self::schema(), vec![columns_array, types_array, nullables_array])
-                .map_err(|e| {
-                    BundlebaseError::from(format!("Failed to create record batch: {}", e))
-                })?;
+        let batch = RecordBatch::try_new(
+            Self::schema(),
+            vec![columns_array, types_array, nullables_array],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
         single_batch_stream(Self::schema(), batch)
     }
 
@@ -159,7 +163,11 @@ impl CommandResponse for SchemaRef {
 /// Implement CommandResponse for usize to allow count outputs.
 impl CommandResponse for usize {
     fn schema() -> SchemaRef {
-        Arc::new(Schema::new(vec![Field::new("count", DataType::Int64, false)]))
+        Arc::new(Schema::new(vec![Field::new(
+            "count",
+            DataType::Int64,
+            false,
+        )]))
     }
 
     fn output_shape() -> OutputShape {
@@ -210,13 +218,19 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
             self.iter().map(|r| r.pack.as_str()).collect::<Vec<_>>(),
         ));
         let added_count: ArrayRef = Arc::new(UInt64Array::from(
-            self.iter().map(|r| r.added.len() as u64).collect::<Vec<_>>(),
+            self.iter()
+                .map(|r| r.added.len() as u64)
+                .collect::<Vec<_>>(),
         ));
         let replaced_count: ArrayRef = Arc::new(UInt64Array::from(
-            self.iter().map(|r| r.replaced.len() as u64).collect::<Vec<_>>(),
+            self.iter()
+                .map(|r| r.replaced.len() as u64)
+                .collect::<Vec<_>>(),
         ));
         let removed_count: ArrayRef = Arc::new(UInt64Array::from(
-            self.iter().map(|r| r.removed.len() as u64).collect::<Vec<_>>(),
+            self.iter()
+                .map(|r| r.removed.len() as u64)
+                .collect::<Vec<_>>(),
         ));
         let rows_before: ArrayRef = Arc::new(UInt64Array::from(
             self.iter().map(|r| r.rows_before).collect::<Vec<_>>(),

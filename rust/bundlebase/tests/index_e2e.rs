@@ -1,23 +1,24 @@
-use bundlebase_command::BundleFacadeCommandExt;
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, Operation};
+use bundlebase_command::BundleBuilderExt;
+use bundlebase_command::BundleFacadeCommandExt;
 use bundlebase_common::BundlebaseError;
 use bundlebase_index::{IndexType, TokenizerConfig};
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::ExplainFormat;
 use futures::{StreamExt, TryStreamExt};
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 /// Helper to collect the physical plan text from an explain stream.
 async fn get_physical_plan<T: BundleFacadeCommandExt + Sync>(
@@ -56,7 +57,9 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     bundle.commit("No index").await?;
 
     // Query without index
@@ -72,23 +75,25 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     assert_eq!(1, num_rows, "Query should return 1 row matching the email");
 
     //todo: support explain passing a query
-//     let explain = bundle.explain().await?;
-//     assert_regexp!(
-//         r#"
-// \*\*\* logical_plan \*\*\*
-// Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
-//   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
-//     TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
-//
-// \*\*\* physical_plan \*\*\*
-// FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d+\]
-//   RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
-//     DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv\]\]\}, projection=\[Index, City, Email\], file_type=csv, has_header=true
-// "#,
-//         explain
-//     );
+    //     let explain = bundle.explain().await?;
+    //     assert_regexp!(
+    //         r#"
+    // \*\*\* logical_plan \*\*\*
+    // Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
+    //   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
+    //     TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
+    //
+    // \*\*\* physical_plan \*\*\*
+    // FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d+\]
+    //   RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
+    //     DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv\]\]\}, projection=\[Index, City, Email\], file_type=csv, has_header=true
+    // "#,
+    //         explain
+    //     );
 
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
 
     let status = bundle.status();
     assert_eq!(1, status.changes().len());
@@ -138,22 +143,25 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
         .await?;
     let rs: Vec<_> = stream.try_collect().await?;
     let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
-    assert_eq!(1, num_rows, "Query with index should return 1 row matching the email");
+    assert_eq!(
+        1, num_rows,
+        "Query with index should return 1 row matching the email"
+    );
 
     //todo explain query
-//       let explain = rs.bundle().explain().await?;
-//     assert_regexp!(
-//         r#"
-// \*\*\* logical_plan \*\*\*
-// Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
-//   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
-//     TableScan: packs.__pack_\w\w projection=\[Index, City, Email\], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)\]
-//
-// \*\*\* physical_plan \*\*\*
-// FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
-//   CooperativeExec
-//     DataSourceExec: PageMapDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
-// "#,
+    //       let explain = rs.bundle().explain().await?;
+    //     assert_regexp!(
+    //         r#"
+    // \*\*\* logical_plan \*\*\*
+    // Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
+    //   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
+    //     TableScan: packs.__pack_\w\w projection=\[Index, City, Email\], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)\]
+    //
+    // \*\*\* physical_plan \*\*\*
+    // FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
+    //   CooperativeExec
+    //     DataSourceExec: PageMapDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
+    // "#,
 
     Ok(())
 }
@@ -166,10 +174,14 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Create index on Email column
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with exact match on indexed column
@@ -204,10 +216,14 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Create index on Email column
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with IN list on indexed column
@@ -239,7 +255,9 @@ async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data but DON'T create index
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     bundle.commit("Attached data without index").await?;
 
@@ -271,10 +289,14 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Create index on Email but query on City (not indexed)
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
     bundle.commit("Created index on Email").await?;
 
     // Query on non-indexed column should fall back to full scan
@@ -303,10 +325,14 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Create index on Customer Id (should be unique)
-    bundle.create_index(&["Customer Id"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Customer Id"], IndexType::BTree, None)
+        .await?;
     bundle.commit("Created index on Customer Id").await?;
 
     // Query for specific customer
@@ -556,7 +582,10 @@ async fn test_query_path_index_with_parameterized_filter() -> Result<(), Bundleb
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
     let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
-    assert_eq!(1, num_rows, "Expected exactly 1 match for parameterized query");
+    assert_eq!(
+        1, num_rows,
+        "Expected exactly 1 match for parameterized query"
+    );
 
     Ok(())
 }
@@ -608,7 +637,11 @@ async fn test_search_single_column() -> Result<(), BundlebaseError> {
 
     // Create a named text index on Company
     bundle
-        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
         .await?;
     bundle.commit("Text index created").await?;
 
@@ -663,7 +696,11 @@ async fn test_search_no_results() -> Result<(), BundlebaseError> {
         .await?;
 
     bundle
-        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
         .await?;
     bundle.commit("Text index created").await?;
 
@@ -702,7 +739,8 @@ async fn test_search_multi_column() -> Result<(), BundlebaseError> {
     bundle
         .create_index(
             &["Company", "City"],
-            IndexType::text(TokenizerConfig::default()), Some("multi_search"),
+            IndexType::text(TokenizerConfig::default()),
+            Some("multi_search"),
         )
         .await?;
     bundle.commit("Multi-column text index created").await?;
@@ -758,7 +796,11 @@ async fn test_search_with_score_ordering() -> Result<(), BundlebaseError> {
         .await?;
 
     bundle
-        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
         .await?;
     bundle.commit("Text index created").await?;
 
@@ -814,7 +856,8 @@ async fn test_search_tantivy_boolean_syntax() -> Result<(), BundlebaseError> {
     bundle
         .create_index(
             &["Company", "City"],
-            IndexType::text(TokenizerConfig::default()), Some("multi_search"),
+            IndexType::text(TokenizerConfig::default()),
+            Some("multi_search"),
         )
         .await?;
     bundle.commit("Text index created").await?;
@@ -871,7 +914,11 @@ async fn test_search_with_additional_where() -> Result<(), BundlebaseError> {
         .await?;
 
     bundle
-        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
         .await?;
     bundle.commit("Text index created").await?;
 
@@ -938,11 +985,7 @@ async fn test_search_single_arg_with_one_text_index() -> Result<(), BundlebaseEr
 
     // Single-arg search — should auto-detect the only text index
     let stream = bundle
-        .query(
-            "SELECT \"Company\" FROM search('Group')",
-            vec![],
-            None,
-        )
+        .query("SELECT \"Company\" FROM search('Group')", vec![], None)
         .await?;
 
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -986,11 +1029,7 @@ async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(),
 
     // Single-arg search should error when multiple text indexes exist
     let result = bundle
-        .query(
-            "SELECT \"Company\" FROM search('Group')",
-            vec![],
-            None,
-        )
+        .query("SELECT \"Company\" FROM search('Group')", vec![], None)
         .await;
 
     assert!(
@@ -1357,11 +1396,7 @@ async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
 
     // Query with integer filter
     let stream = bundle
-        .query(
-            "SELECT * FROM bundle WHERE \"Index\" = 1",
-            vec![],
-            None,
-        )
+        .query("SELECT * FROM bundle WHERE \"Index\" = 1", vec![], None)
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
     let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
@@ -1436,11 +1471,7 @@ async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError
 
     // Query with integer filter
     let stream = bundle
-        .query(
-            "SELECT * FROM bundle WHERE \"Index\" = 1",
-            vec![],
-            None,
-        )
+        .query("SELECT * FROM bundle WHERE \"Index\" = 1", vec![], None)
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
     let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
@@ -1764,15 +1795,15 @@ async fn test_create_btree_index_on_added_column_after_rename() -> Result<(), Bu
 
     // Rename Company → company, then add computed column referencing the renamed name
     bundle.rename_column("Company", "company").await?;
-    bundle
-        .add_column("company_upper", "upper(company)")
-        .await?;
+    bundle.add_column("company_upper", "upper(company)").await?;
 
     // Create column index on the computed column
     bundle
         .create_index(&["company_upper"], IndexType::BTree, None)
         .await?;
-    bundle.commit("Index on computed column after rename").await?;
+    bundle
+        .commit("Index on computed column after rename")
+        .await?;
 
     // Verify the index works
     let stream = bundle

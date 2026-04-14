@@ -3,12 +3,12 @@
 //! Provides infrastructure to sort large datasets that don't fit in memory
 //! by using temporary files for intermediate storage.
 
-use bundlebase_common::RowId;
 use crate::btree_index::IndexedValue;
 use bundlebase_common::BundlebaseError;
+use bundlebase_common::RowId;
 use bytes::{BufMut, BytesMut};
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
@@ -80,7 +80,8 @@ impl SortEntry {
 
         // Read value bytes
         let mut value_bytes = vec![0u8; value_len];
-        reader.read_exact(&mut value_bytes)
+        reader
+            .read_exact(&mut value_bytes)
             .map_err(|e| format!("Failed to read entry value: {}", e))?;
 
         let mut cursor = std::io::Cursor::new(value_bytes.as_slice());
@@ -88,7 +89,8 @@ impl SortEntry {
 
         // Read row_id
         let mut rowid_buf = [0u8; 8];
-        reader.read_exact(&mut rowid_buf)
+        reader
+            .read_exact(&mut rowid_buf)
             .map_err(|e| format!("Failed to read row_id: {}", e))?;
         let row_id = RowId::from(u64::from_be_bytes(rowid_buf));
 
@@ -153,7 +155,9 @@ impl ExternalSortWriter {
         let entry_size = entry.size_bytes();
 
         // Check if we need to flush before adding
-        if self.current_size + entry_size > self.config.memory_limit_bytes && !self.buffer.is_empty() {
+        if self.current_size + entry_size > self.config.memory_limit_bytes
+            && !self.buffer.is_empty()
+        {
             self.flush_run()?;
         }
 
@@ -172,7 +176,10 @@ impl ExternalSortWriter {
         self.buffer.sort();
 
         // Create run file
-        let run_path = self.config.temp_dir.join(format!("run_{:06}.bin", self.run_counter));
+        let run_path = self
+            .config
+            .temp_dir
+            .join(format!("run_{:06}.bin", self.run_counter));
         self.run_counter += 1;
 
         let file = OpenOptions::new()
@@ -185,17 +192,20 @@ impl ExternalSortWriter {
         let mut writer = BufWriter::new(file);
 
         // Write entry count
-        writer.write_all(&(self.buffer.len() as u64).to_be_bytes())
+        writer
+            .write_all(&(self.buffer.len() as u64).to_be_bytes())
             .map_err(|e| format!("Failed to write entry count: {}", e))?;
 
         // Write all entries
         for entry in &self.buffer {
             let bytes = entry.serialize();
-            writer.write_all(&bytes)
+            writer
+                .write_all(&bytes)
                 .map_err(|e| format!("Failed to write entry: {}", e))?;
         }
 
-        writer.flush()
+        writer
+            .flush()
             .map_err(|e| format!("Failed to flush run file: {}", e))?;
 
         self.run_files.push(run_path);
@@ -223,7 +233,9 @@ impl ExternalSortWriter {
         self.flush_run()?;
 
         // Create k-way merge iterator
-        Ok(SortedEntryIterator::Merge(MergeIterator::new(self.run_files)?))
+        Ok(SortedEntryIterator::Merge(MergeIterator::new(
+            self.run_files,
+        )?))
     }
 
     /// Get the number of run files created so far.
@@ -316,12 +328,16 @@ impl MergeIterator {
 
             // Skip entry count (we don't need it for iteration)
             let mut count_buf = [0u8; 8];
-            reader.read_exact(&mut count_buf)
+            reader
+                .read_exact(&mut count_buf)
                 .map_err(|e| format!("Failed to read entry count: {}", e))?;
 
             // Read first entry from each run
             if let Some(entry) = SortEntry::deserialize(&mut reader)? {
-                heap.push(HeapEntry { entry, run_index: idx });
+                heap.push(HeapEntry {
+                    entry,
+                    run_index: idx,
+                });
                 readers.push(Some(reader));
             } else {
                 readers.push(None);
@@ -395,7 +411,9 @@ mod tests {
 
         // Add entries in reverse order
         for i in (0..100).rev() {
-            writer.add(IndexedValue::Int64(i), RowId::from(i as u64)).unwrap();
+            writer
+                .add(IndexedValue::Int64(i), RowId::from(i as u64))
+                .unwrap();
         }
 
         // Should have no run files (everything fits in memory)
@@ -425,11 +443,16 @@ mod tests {
         // Add entries in random-ish order
         let values: Vec<i64> = vec![50, 10, 90, 30, 70, 20, 80, 40, 60, 100, 5, 95];
         for (idx, &val) in values.iter().enumerate() {
-            writer.add(IndexedValue::Int64(val), RowId::from(idx as u64)).unwrap();
+            writer
+                .add(IndexedValue::Int64(val), RowId::from(idx as u64))
+                .unwrap();
         }
 
         // Should have created some run files (each entry is ~40 bytes, limit is 100 bytes)
-        assert!(writer.run_count() > 0, "Expected multiple runs with 100 byte limit and 12 entries");
+        assert!(
+            writer.run_count() > 0,
+            "Expected multiple runs with 100 byte limit and 12 entries"
+        );
 
         let iter = writer.finish().unwrap();
         let entries: Vec<_> = iter.map(|r| r.unwrap()).collect();

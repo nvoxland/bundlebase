@@ -50,7 +50,6 @@ pub enum ContentFormat {
     Rowmap,
     /// Serialized RowId set format
     Rowids,
-    /// YAML
     Yaml,
 }
 
@@ -148,7 +147,11 @@ impl ContentAddress {
         format: ContentFormat,
     ) -> Result<Self, BundlebaseError> {
         if sub_type.contains('.') {
-            return Err(format!("Content address sub_type must not contain dots: {}", sub_type).into());
+            return Err(format!(
+                "Content address sub_type must not contain dots: {}",
+                sub_type
+            )
+            .into());
         }
         Ok(Self {
             category,
@@ -221,12 +224,9 @@ mod tests {
 
     #[test]
     fn test_overlay_tomb_rowids() {
-        let addr = ContentAddress::with_sub_type(
-            ContentCategory::Overlay,
-            "tomb",
-            ContentFormat::Rowids,
-        )
-        .unwrap();
+        let addr =
+            ContentAddress::with_sub_type(ContentCategory::Overlay, "tomb", ContentFormat::Rowids)
+                .unwrap();
         assert_eq!(addr.extension(), "overlay.tomb.rowids");
     }
 

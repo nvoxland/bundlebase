@@ -231,7 +231,11 @@ mod tests {
             .await
             .expect("Failed to create empty bundle");
 
-        let schema = builder.bundle().schema().await.expect("Failed to get schema");
+        let schema = builder
+            .bundle()
+            .schema()
+            .await
+            .expect("Failed to get schema");
 
         // Empty bundle should have only the sentinel no_data field
         assert_eq!(schema.fields().len(), 1);

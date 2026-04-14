@@ -1,10 +1,10 @@
 use crate::DataContext;
 use crate::LineOrientedFormat;
+use arrow::datatypes::SchemaRef;
+use bundlebase_common::BundlebaseError;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::plugin::versioned_object_store::VersionedObjectStoreFile;
 use bundlebase_io::IOReadFile;
-use bundlebase_common::BundlebaseError;
-use arrow::datatypes::SchemaRef;
 use datafusion::common::DataFusionError;
 use datafusion::datasource::file_format::FileFormat;
 use datafusion::datasource::listing::PartitionedFile;
@@ -122,7 +122,10 @@ impl<C: FileFormatConfig> FilePlugin<C> {
 
     /// Check if this plugin handles the given URL (by extension)
     pub fn handles(&self, source: &str) -> bool {
-        self.config.extensions().iter().any(|ext| source.ends_with(ext))
+        self.config
+            .extensions()
+            .iter()
+            .any(|ext| source.ends_with(ext))
     }
 
     /// Create a reader for the given source.
@@ -139,8 +142,11 @@ impl<C: FileFormatConfig> FilePlugin<C> {
         schema: Option<SchemaRef>,
         expected_version: Option<String>,
     ) -> Result<FileReader<C>, BundlebaseError> {
-        let object_file =
-            ObjectStoreFile::from_str(source, bundle.data_context_dir().as_ref(), bundle.config_provider())?;
+        let object_file = ObjectStoreFile::from_str(
+            source,
+            bundle.data_context_dir().as_ref(),
+            bundle.config_provider(),
+        )?;
 
         let file = match expected_version {
             Some(v) => MaybeVersionedFile::Versioned(VersionedObjectStoreFile::new(object_file, v)),
@@ -244,23 +250,26 @@ impl<C: FileFormatConfig> FileReader<C> {
         _filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
-        let metadata = self.file.object_meta().await.map_err(|e| {
-            DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
-        })?.ok_or_else(|| {
-            DataFusionError::Internal(format!(
-                "File metadata not available for: {}",
-                self.file.url()
-            ))
-        })?;
+        let metadata = self
+            .file
+            .object_meta()
+            .await
+            .map_err(|e| {
+                DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
+            })?
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!(
+                    "File metadata not available for: {}",
+                    self.file.url()
+                ))
+            })?;
 
         let partitioned_file = PartitionedFile::from(metadata);
 
         let schema = self.schema.clone().expect("No schema set");
-        let mut builder = FileScanConfigBuilder::new(
-            self.file.store_url(),
-            self.config.file_source(schema),
-        )
-        .with_file(partitioned_file);
+        let mut builder =
+            FileScanConfigBuilder::new(self.file.store_url(), self.config.file_source(schema))
+                .with_file(partitioned_file);
 
         if let Some(proj) = projection {
             builder = builder.with_projection_indices(Some(proj.to_vec()))?;

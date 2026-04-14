@@ -1,11 +1,11 @@
 //! UDF entrypoint trait and shared helpers.
 
-use async_trait::async_trait;
 use crate::bridge::ipc_bridge::SubprocessCache;
 pub use crate::bridge::manifest::{Manifest, ManifestEntry};
-use bundlebase_io::IOReadWriteDir;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::DataType;
+use async_trait::async_trait;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteDir;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
@@ -137,10 +137,8 @@ pub trait UdfEntrypoint: Send + Sync + std::fmt::Debug {
             .unwrap_or("bin");
         let format = bundlebase_common::ContentFormat::from_extension(ext_str)
             .unwrap_or(bundlebase_common::ContentFormat::Bin);
-        let address = bundlebase_common::ContentAddress::new(
-            bundlebase_common::ContentCategory::Udf,
-            format,
-        );
+        let address =
+            bundlebase_common::ContentAddress::new(bundlebase_common::ContentCategory::Udf, format);
 
         let stream = futures::stream::once(async move {
             Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::from(file_bytes))
@@ -219,7 +217,9 @@ pub(crate) fn find_in_manifest(
                 format!(
                     "Function '{}' not found in manifest from '{}'. \
                      Available functions: {}",
-                    function_name, entrypoint, available_names.join(", ")
+                    function_name,
+                    entrypoint,
+                    available_names.join(", ")
                 )
             }
             .into()

@@ -78,14 +78,26 @@ pub fn serve_functions_io(provider: &dyn FunctionProvider, r: &mut dyn BufRead, 
         let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
             Err(e) => {
-                let _ = write_error(w, &serde_json::Value::Null, -32700, &format!("Parse error: {}", e));
+                let _ = write_error(
+                    w,
+                    &serde_json::Value::Null,
+                    -32700,
+                    &format!("Parse error: {}", e),
+                );
                 let _ = w.flush();
                 continue;
             }
         };
 
-        let should_stop =
-            handle_request(provider, &req, r, w, &mut states, &mut state_last_access, &mut next_state_id);
+        let should_stop = handle_request(
+            provider,
+            &req,
+            r,
+            w,
+            &mut states,
+            &mut state_last_access,
+            &mut next_state_id,
+        );
         let _ = w.flush();
         if should_stop {
             return;
@@ -111,7 +123,9 @@ fn handle_request(
         }
         "manifest" => handle_manifest(provider, req, w),
         "invoke" => handle_invoke(provider, req, r, w),
-        "create_state" => handle_create_state(provider, req, w, states, state_last_access, next_state_id),
+        "create_state" => {
+            handle_create_state(provider, req, w, states, state_last_access, next_state_id)
+        }
         "accumulate" => handle_accumulate(provider, req, r, w, states, state_last_access),
         "merge" => handle_merge(provider, req, w, states, state_last_access),
         "evaluate" => handle_evaluate(provider, req, w, states, state_last_access),
@@ -133,9 +147,7 @@ fn handle_request(
 
 /// Read a length-prefixed Arrow IPC frame from the reader.
 /// Returns the column arrays from the first batch.
-fn read_arrow_ipc_columns(
-    r: &mut dyn BufRead,
-) -> Result<Vec<arrow::array::ArrayRef>, String> {
+fn read_arrow_ipc_columns(r: &mut dyn BufRead) -> Result<Vec<arrow::array::ArrayRef>, String> {
     let mut len_buf = [0u8; 4];
     r.read_exact(&mut len_buf)
         .map_err(|e| format!("Failed to read Arrow IPC length prefix: {}", e))?;
@@ -179,7 +191,12 @@ fn handle_manifest(provider: &dyn FunctionProvider, req: &JsonRpcRequest, w: &mu
             let _ = write_response(w, &req.id, val);
         }
         Err(e) => {
-            let _ = write_error(w, &req.id, -32000, &format!("Failed to serialize manifest: {}", e));
+            let _ = write_error(
+                w,
+                &req.id,
+                -32000,
+                &format!("Failed to serialize manifest: {}", e),
+            );
         }
     }
 }
@@ -484,11 +501,7 @@ fn handle_merge(
     match agg.merge_dyn(state_a, state_b) {
         Ok(()) => {
             state_last_access.remove(state_id2);
-            let _ = write_response(
-                w,
-                &req.id,
-                serde_json::json!({"state_id": state_id1}),
-            );
+            let _ = write_response(w, &req.id, serde_json::json!({"state_id": state_id1}));
         }
         Err(e) => {
             let _ = write_error(
@@ -705,7 +718,10 @@ mod tests {
             "method": method,
             "params": params,
         });
-        format!("{}\n", serde_json::to_string(&req).expect("serialize request"))
+        format!(
+            "{}\n",
+            serde_json::to_string(&req).expect("serialize request")
+        )
     }
 
     fn read_response(data: &[u8], offset: usize) -> (serde_json::Value, usize) {
@@ -787,34 +803,26 @@ mod tests {
     #[test]
     fn test_invoke_scalar() {
         // Build Arrow IPC frame for input
-        let schema = Arc::new(Schema::new(vec![Field::new("arg_0", DataType::Int64, true)]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![Arc::new(Int64Array::from(vec![1, 2, 3]))],
-        )
-        .expect("create batch");
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "arg_0",
+            DataType::Int64,
+            true,
+        )]));
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))])
+            .expect("create batch");
         let ipc_frame = make_arrow_ipc_frame(&batch);
 
-        let json_part = make_request(
-            "invoke",
-            serde_json::json!({"function": "double"}),
-            1,
-        );
+        let json_part = make_request("invoke", serde_json::json!({"function": "double"}), 1);
 
         let mut input_bytes = json_part.into_bytes();
         // The IPC frame comes after the JSON-RPC response is sent back.
         // We append it to the input stream so the server can read it.
         input_bytes.extend_from_slice(&ipc_frame);
-        input_bytes.extend_from_slice(
-            make_request("shutdown", serde_json::json!({}), 2).as_bytes(),
-        );
+        input_bytes
+            .extend_from_slice(make_request("shutdown", serde_json::json!({}), 2).as_bytes());
 
         let mut output = Vec::new();
-        serve_functions_io(
-            &TestProvider,
-            &mut Cursor::new(&input_bytes),
-            &mut output,
-        );
+        serve_functions_io(&TestProvider, &mut Cursor::new(&input_bytes), &mut output);
 
         let (resp, offset) = read_response(&output, 0);
         assert_eq!(resp["result"]["ok"], true);
@@ -829,11 +837,7 @@ mod tests {
         // 1. Create state
         // 2. Accumulate a batch
         // 3. Evaluate
-        let create_req = make_request(
-            "create_state",
-            serde_json::json!({"function": "my_sum"}),
-            1,
-        );
+        let create_req = make_request("create_state", serde_json::json!({"function": "my_sum"}), 1);
 
         let accumulate_req = make_request(
             "accumulate",
@@ -870,11 +874,7 @@ mod tests {
         input_bytes.extend_from_slice(shutdown_req.as_bytes());
 
         let mut output = Vec::new();
-        serve_functions_io(
-            &TestProvider,
-            &mut Cursor::new(&input_bytes),
-            &mut output,
-        );
+        serve_functions_io(&TestProvider, &mut Cursor::new(&input_bytes), &mut output);
 
         // Response 1: create_state
         let (resp, offset) = read_response(&output, 0);
@@ -898,9 +898,8 @@ mod tests {
         assert!(length > 0, "evaluate should return data");
 
         let ipc_data = &output[offset + 4..offset + 4 + length];
-        let reader =
-            arrow::ipc::reader::StreamReader::try_new(Cursor::new(ipc_data), None)
-                .expect("create reader");
+        let reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(ipc_data), None)
+            .expect("create reader");
 
         let batches: Vec<RecordBatch> = reader
             .into_iter()
@@ -918,11 +917,8 @@ mod tests {
 
     #[test]
     fn test_function_not_found() {
-        let input = make_request(
-            "invoke",
-            serde_json::json!({"function": "nonexistent"}),
-            1,
-        ) + &make_request("shutdown", serde_json::json!({}), 2);
+        let input = make_request("invoke", serde_json::json!({"function": "nonexistent"}), 1)
+            + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
         serve_functions_io(

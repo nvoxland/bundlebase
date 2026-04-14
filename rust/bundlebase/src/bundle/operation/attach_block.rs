@@ -1,4 +1,3 @@
-use crate::bundle::bundle_schema;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
@@ -18,22 +17,15 @@ use std::sync::Arc;
 
 /// Information about the source that a block was fetched from.
 ///
-/// This struct consolidates source-related fields for blocks attached via source fetch.
-/// When present, all fields are required and track the origin of the data.
+/// Each attached block tracks the exact source files that produced it. Single-file
+/// source fetches store one entry; batched blocks store many.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceInfo {
     /// The source ID that fetched this block
     pub id: ObjectId,
-    /// The original source location (e.g., remote URL) where data was fetched from
-    pub location: String,
-    /// The version of the source at fetch time (e.g., ETag, last-modified)
-    pub version: String,
-    /// Additional source locations when this block was created by batching multiple small files.
-    /// Each entry is (location, version). The primary `location` and `version` fields hold the
-    /// first file's info for backwards compatibility.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub batch_sources: Option<Vec<BatchedSource>>,
+    /// Source files that produced this block.
+    pub batch_sources: Vec<BatchedSource>,
 }
 
 /// A single source file within a batched block.
@@ -64,24 +56,17 @@ pub struct AttachBlockOp {
     pub num_rows: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes: Option<usize>,
-    /// Relative path (within the bundle's data dir) to a content-addressed
-    /// `.block.schema.yaml` file holding this block's Arrow schema. Always
-    /// set after `setup_*` runs; populated on read by
-    /// `Bundle::open` → `resolve_attach_sidecars`.
-    pub schema_path: String,
-    /// Relative path to a content-addressed `.block.columns.yaml` sidecar
-    /// file holding this block's `column_ids` list (parallel to `schema_path`).
-    /// Same dedup pattern: one file per unique column-id list hash.
-    pub column_ids_path: String,
-    /// In-memory cache of the schema referenced by `schema_path`. Never
+    pub schema: String,
+    pub column_ids: String,
+    /// In-memory cache of the schema referenced by `schema`. Never
     /// serialized — populated either at attach time (setup) or right after
     /// the manifest is parsed during `Bundle::open`.
     #[serde(skip)]
-    pub schema: Option<SchemaRef>,
-    /// In-memory cache of the column IDs referenced by `column_ids_path`.
+    pub schema_cache: Option<SchemaRef>,
+    /// In-memory cache of the column IDs referenced by `column_ids`.
     /// Never serialized — populated at attach time or by `Bundle::open`.
     #[serde(skip)]
-    pub column_ids: Vec<ColumnId>,
+    pub column_ids_cache: Vec<ColumnId>,
 }
 
 /// State shared across a batch of parallel `AttachBlockOp::setup_with_shared_context`
@@ -107,26 +92,6 @@ pub struct SharedAttachContext {
 }
 
 impl AttachBlockOp {
-    /// Build a [`SharedAttachContext`] seeded with the bundle's existing
-    /// column-name → ColumnId map. Pass into
-    /// [`setup_with_shared_context`] for a batch of parallel attaches.
-    pub fn shared_attach_context_for(
-        builder: &BundleBuilder,
-    ) -> std::sync::Arc<SharedAttachContext> {
-        let existing_ops = builder.operations();
-        let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
-        let map: HashMap<String, ColumnId> = resolved
-            .columns()
-            .iter()
-            .map(|(id, name)| (name.clone(), *id))
-            .collect();
-        std::sync::Arc::new(SharedAttachContext {
-            name_to_id: parking_lot::Mutex::new(map),
-            schema_paths: parking_lot::Mutex::new(HashMap::new()),
-            column_ids_paths: parking_lot::Mutex::new(HashMap::new()),
-        })
-    }
-
     /// Setup an AttachBlockOp for a file.
     ///
     /// Reads schema, version, statistics, and layout from the file at `location`.
@@ -138,32 +103,8 @@ impl AttachBlockOp {
     /// * `source_info` - Source tracking metadata, or `None` for directly-attached files
     /// * `expected_schema` - Optional expected columns for pre-reserved ID reuse (from CreateSourceOp)
     /// * `builder` - Bundle builder
+    /// * `shared` - Optional shared batch context for parallel setup calls
     pub async fn setup(
-        pack: &ObjectId,
-        location: &str,
-        format: AttachFormat,
-        hash: Option<&str>,
-        source_info: Option<SourceInfo>,
-        expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
-        builder: &BundleBuilder,
-    ) -> Result<Self, BundlebaseError> {
-        Self::setup_with_shared_context(
-            pack,
-            location,
-            format,
-            hash,
-            source_info,
-            expected_schema,
-            builder,
-            None,
-        )
-        .await
-    }
-
-    /// Setup variant that shares a [`SharedAttachContext`] across a batch of
-    /// parallel attaches so column-id allocation and schema-file writes are
-    /// deduplicated within the batch.
-    pub async fn setup_with_shared_context(
         pack: &ObjectId,
         location: &str,
         format: AttachFormat,
@@ -173,10 +114,7 @@ impl AttachBlockOp {
         builder: &BundleBuilder,
         shared: Option<&std::sync::Arc<SharedAttachContext>>,
     ) -> Result<Self, BundlebaseError> {
-        let progress = ProgressScope::new(
-            &format!("Attaching '{}'", location),
-            None,
-        );
+        let progress = ProgressScope::new(&format!("Attaching '{}'", location), None);
 
         let hash = match hash {
             Some(h) => h.to_string(),
@@ -185,7 +123,11 @@ impl AttachBlockOp {
 
                 // Check if this is a non-file URL - these don't support file-based hash
                 //todo: do this right
-                if location.starts_with("bundle://") || location.starts_with("bundle+") || location.starts_with("bundlebase://") || location.starts_with("bundlebase+") {
+                if location.starts_with("bundle://")
+                    || location.starts_with("bundle+")
+                    || location.starts_with("bundlebase://")
+                    || location.starts_with("bundlebase+")
+                {
                     let temp_id = BlockId::generate();
                     let adapter_factory = builder.bundle().reader_factory.clone();
                     let adapter = adapter_factory
@@ -195,7 +137,9 @@ impl AttachBlockOp {
 
                     format!("{:032x}", xxhash_rust::xxh3::xxh3_128(version.as_bytes()))
                 } else {
-                    let file = readable_file_from_path(location, builder.data_dir(), builder.config()).await?;
+                    let file =
+                        readable_file_from_path(location, builder.data_dir(), builder.config())
+                            .await?;
                     file.compute_hash().await?
                 }
             }
@@ -206,7 +150,9 @@ impl AttachBlockOp {
         progress.update(2, Some("Creating adapter"));
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(location, &format, &block_id, builder, None, None, None, None)
+            .reader(
+                location, &format, &block_id, builder, None, None, None, None,
+            )
             .await?;
 
         progress.update(3, Some("Reading version"));
@@ -217,7 +163,11 @@ impl AttachBlockOp {
 
         let read_options = {
             let opts = adapter.read_options();
-            if opts.is_empty() { None } else { Some(opts) }
+            if opts.is_empty() {
+                None
+            } else {
+                Some(opts)
+            }
         };
 
         // Build a lookup from expected_schema (case-sensitive name → pre-reserved ColumnId)
@@ -230,26 +180,33 @@ impl AttachBlockOp {
         // (microseconds each).
         let shared_arc = match shared {
             Some(arc) => arc.clone(),
-            None => Self::shared_attach_context_for(builder),
+            None => builder.shared_attach_context(),
         };
-        let column_ids: Vec<ColumnId> = schema.as_ref().map(|s| {
-            let mut map_guard = shared_arc.name_to_id.lock();
-            s.fields().iter().map(|f| {
-                if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
-                    return id;
-                }
-                *map_guard
-                    .entry(f.name().clone())
-                    .or_insert_with(ColumnId::generate)
-            }).collect()
-        }).unwrap_or_default();
+        let column_ids: Vec<ColumnId> = schema
+            .as_ref()
+            .map(|s| {
+                let mut map_guard = shared_arc.name_to_id.lock();
+                s.fields()
+                    .iter()
+                    .map(|f| {
+                        if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
+                            return id;
+                        }
+                        *map_guard
+                            .entry(f.name().clone())
+                            .or_insert_with(ColumnId::generate)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         // Persist the schema and column-id list as content-addressed sidecar
         // files under the bundle's data dir. Within a batch we dedupe via
         // the shared cache; across batches the content-addressed path makes
         // writes idempotent.
         let data_dir = builder.bundle().data_dir();
-        let schema_path = match schema.as_ref() {
+        let schema_cache = schema;
+        let schema = match schema_cache.as_ref() {
             Some(s) => Self::write_schema_file(s, &shared_arc, data_dir.as_ref()).await?,
             None => {
                 return Err(BundlebaseError::from(format!(
@@ -258,8 +215,9 @@ impl AttachBlockOp {
                 )));
             }
         };
-        let column_ids_path =
-            Self::write_column_ids_file(&column_ids, &shared_arc, data_dir.as_ref()).await?;
+        let column_ids_cache = column_ids;
+        let column_ids =
+            Self::write_column_ids_file(&column_ids_cache, &shared_arc, data_dir.as_ref()).await?;
 
         let mut op = AttachBlockOp {
             location: location.to_string(),
@@ -268,15 +226,15 @@ impl AttachBlockOp {
             bytes: None,
             version,
             hash,
-            schema_path,
-            column_ids_path,
             schema,
+            column_ids,
+            schema_cache,
             id: block_id,
             pack: *pack,
             layout: None,
             source_info,
             read_options,
-            column_ids,
+            column_ids_cache,
         };
 
         progress.update(5, Some("Reading statistics"));
@@ -323,17 +281,15 @@ impl AttachBlockOp {
         }
 
         let bytes = bytes::Bytes::from(yaml_body.into_bytes());
-        let stream = Box::pin(stream::once(async move {
-            Ok::<_, std::io::Error>(bytes)
-        }));
-        let address = ContentAddress::with_sub_type(
-            ContentCategory::Block,
-            "schema",
-            ContentFormat::Yaml,
-        )?;
+        let stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(bytes) }));
+        let address =
+            ContentAddress::with_sub_type(ContentCategory::Block, "schema", ContentFormat::Yaml)?;
         let result = data_dir.write_stream(stream, &address).await?;
         let relative = data_dir.relative_path(result.file.as_ref())?;
-        shared.schema_paths.lock().insert(body_hash, relative.clone());
+        shared
+            .schema_paths
+            .lock()
+            .insert(body_hash, relative.clone());
         Ok(relative)
     }
 
@@ -349,9 +305,8 @@ impl AttachBlockOp {
         use bundlebase_common::{ContentAddress, ContentCategory, ContentFormat};
         use futures::stream;
 
-        let yaml_body = serde_yaml_ng::to_string(column_ids).map_err(|e| {
-            BundlebaseError::from(format!("Failed to serialize column_ids: {}", e))
-        })?;
+        let yaml_body = serde_yaml_ng::to_string(column_ids)
+            .map_err(|e| BundlebaseError::from(format!("Failed to serialize column_ids: {}", e)))?;
         let body_hash = xxhash_rust::xxh3::xxh3_128(yaml_body.as_bytes());
 
         if let Some(path) = shared.column_ids_paths.lock().get(&body_hash) {
@@ -359,17 +314,15 @@ impl AttachBlockOp {
         }
 
         let bytes = bytes::Bytes::from(yaml_body.into_bytes());
-        let stream = Box::pin(stream::once(async move {
-            Ok::<_, std::io::Error>(bytes)
-        }));
-        let address = ContentAddress::with_sub_type(
-            ContentCategory::Block,
-            "columns",
-            ContentFormat::Yaml,
-        )?;
+        let stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(bytes) }));
+        let address =
+            ContentAddress::with_sub_type(ContentCategory::Block, "columns", ContentFormat::Yaml)?;
         let result = data_dir.write_stream(stream, &address).await?;
         let relative = data_dir.relative_path(result.file.as_ref())?;
-        shared.column_ids_paths.lock().insert(body_hash, relative.clone());
+        shared
+            .column_ids_paths
+            .lock()
+            .insert(body_hash, relative.clone());
         Ok(relative)
     }
 }
@@ -421,17 +374,19 @@ impl Operation for AttachBlockOp {
         h.update(b"\0");
         h.update(self.hash.as_bytes());
         h.update(b"\0");
-        for col_id in &self.column_ids {
+        for col_id in &self.column_ids_cache {
             h.update(col_id.to_string().as_bytes());
             h.update(b",");
         }
         h.update(b"\0");
         if let Some(ref src) = self.source_info {
             h.update(src.id.to_string().as_bytes());
-            h.update(b"\0");
-            h.update(src.location.as_bytes());
-            h.update(b"\0");
-            h.update(src.version.as_bytes());
+            for batched_source in &src.batch_sources {
+                h.update(b"\0");
+                h.update(batched_source.location.as_bytes());
+                h.update(b"\0");
+                h.update(batched_source.version.as_bytes());
+            }
         }
         hex::encode(h.finalize())[0..12].to_string()
     }
@@ -466,7 +421,7 @@ impl Operation for AttachBlockOp {
                 &self.format,
                 &self.id,
                 bundle,
-                self.schema.clone(),
+                self.schema_cache.clone(),
                 self.layout.clone(),
                 expected_version,
                 self.read_options.as_ref(),
@@ -475,14 +430,16 @@ impl Operation for AttachBlockOp {
 
         let block = Arc::new(DataBlock::new(
             self.id,
-            self.schema.clone().expect("BUG: schema must be set during setup"),
+            self.schema_cache
+                .clone()
+                .expect("BUG: schema must be set during setup"),
             &self.version,
             reader,
             bundle.indexes().clone(),
             bundle.data_dir(),
             bundle.config(),
             self.source_info.clone(),
-            self.column_ids.clone(),
+            self.column_ids_cache.clone(),
             self.num_rows,
         ));
 
@@ -492,27 +449,15 @@ impl Operation for AttachBlockOp {
         // Add to source's attached_files tracking
         if let Some(ref source_info) = self.source_info {
             if let Some(source) = bundle.get_source(&source_info.id) {
-                // Register the primary source location
-                source.add_attached_file(
-                    &source_info.location,
-                    AttachedFileInfo {
-                        location: self.location.clone(),
-                        version: source_info.version.clone(),
-                        bytes: self.bytes,
-                    },
-                );
-                // Register all batched source locations (if this is a batched block)
-                if let Some(ref batch_sources) = source_info.batch_sources {
-                    for batched in batch_sources {
-                        source.add_attached_file(
-                            &batched.location,
-                            AttachedFileInfo {
-                                location: self.location.clone(),
-                                version: batched.version.clone(),
-                                bytes: self.bytes,
-                            },
-                        );
-                    }
+                for batched in &source_info.batch_sources {
+                    source.add_attached_file(
+                        &batched.location,
+                        AttachedFileInfo {
+                            location: self.location.clone(),
+                            version: batched.version.clone(),
+                            bytes: self.bytes,
+                        },
+                    );
                 }
             }
         }
@@ -527,7 +472,7 @@ mod tests {
     use crate::io::plugin::object_store::ObjectStoreFile;
     use crate::io::IOReadFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
-    
+
     use url::Url;
 
     #[tokio::test]
@@ -541,13 +486,13 @@ mod tests {
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
-            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
-            schema: None,
+            schema: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
+            schema_cache: None,
             layout: None,
             source_info: None,
             read_options: None,
-            column_ids: vec![],
+            column_ids_cache: vec![],
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -557,8 +502,17 @@ mod tests {
     async fn test_setup() -> Result<(), BundlebaseError> {
         let datafile = test_datafile("userdata.parquet");
         let bundle = empty_bundle().await;
-        let op =
-            AttachBlockOp::setup(&ObjectId::generate(), datafile, AttachFormat::Parquet, None, None, None, bundle.as_ref()).await?;
+        let op = AttachBlockOp::setup(
+            &ObjectId::generate(),
+            datafile,
+            AttachFormat::Parquet,
+            None,
+            None,
+            None,
+            bundle.as_ref(),
+            None,
+        )
+        .await?;
         let block_id = String::from(op.id);
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
@@ -571,7 +525,7 @@ mod tests {
         let serialized = serde_yaml_ng::to_string(&op)?;
 
         // Check the static portion. The schema field is no longer inlined —
-        // it's persisted as a sidecar file and the op carries `schemaPath:`.
+        // it's persisted as a sidecar file and the op carries `schema:`.
         let expected_prefix = format!(
             r#"id: {}
 pack: {}
@@ -581,7 +535,7 @@ version: {}
 hash: 8c26edb7f30d7694a1431224f28e5932
 numRows: 1000
 bytes: 113629
-schemaPath: "#,
+schema: "#,
             for_yaml(block_id),
             for_yaml(pack),
             for_yaml(version),
@@ -593,27 +547,27 @@ schemaPath: "#,
         );
 
         // The serialized op should NOT contain an inline schema or columnIds
-        // block — both are persisted as sidecar files now.
+        // payload — both are persisted as sidecar files now.
         assert!(
-            !serialized.contains("\nschema:"),
+            !serialized.contains("\n  fields:"),
             "AttachBlockOp must not serialize inline schema:\n{}",
             serialized
         );
         assert!(
-            !serialized.contains("\ncolumnIds:"),
+            !serialized.contains("\n- 000000"),
             "AttachBlockOp must not serialize inline columnIds:\n{}",
             serialized
         );
 
-        // schemaPath and columnIdsPath should reference the standard sharded sidecar layout
+        // schema and columnIds should reference the standard sharded sidecar layout
         assert!(
             serialized.contains(".block.schema.yaml"),
-            "Expected schemaPath ending in .block.schema.yaml:\n{}",
+            "Expected schema ending in .block.schema.yaml:\n{}",
             serialized
         );
         assert!(
             serialized.contains(".block.columns.yaml"),
-            "Expected columnIdsPath ending in .block.columns.yaml:\n{}",
+            "Expected columnIds ending in .block.columns.yaml:\n{}",
             serialized
         );
         Ok(())
@@ -632,13 +586,13 @@ schemaPath: "#,
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
-            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
-            schema: None,
+            schema: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
+            schema_cache: None,
             layout: None,
             source_info: None,
             read_options: None,
-            column_ids: vec![],
+            column_ids_cache: vec![],
         };
 
         let version = op.version();

@@ -77,11 +77,17 @@ impl BundleBlocksTable {
             .collect();
         let source_locations: Vec<Option<&str>> = blocks
             .iter()
-            .map(|(b, _, _)| b.source_info().map(|si| si.location.as_str()))
+            .map(|(b, _, _)| {
+                b.source_info()
+                    .and_then(|si| si.batch_sources.first().map(|source| source.location.as_str()))
+            })
             .collect();
         let source_versions: Vec<Option<&str>> = blocks
             .iter()
-            .map(|(b, _, _)| b.source_info().map(|si| si.version.as_str()))
+            .map(|(b, _, _)| {
+                b.source_info()
+                    .and_then(|si| si.batch_sources.first().map(|source| source.version.as_str()))
+            })
             .collect();
 
         let batch = RecordBatch::try_new(

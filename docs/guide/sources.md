@@ -55,6 +55,33 @@ The source workflow has two steps:
     CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
+## Batching Small Files
+
+When a source produces many small files, you can merge them into larger parquet batches to reduce query overhead.
+
+=== "Sync API"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bundle = bb.create("my/data").create_source(
+        "remote_dir",
+        {"url": "s3://my-bucket/data/", "patterns": "**/*.jsonl"},
+        min_batch="15M",
+    )
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING remote_dir WITH (
+        url = 's3://my-bucket/data/',
+        patterns = '**/*.jsonl'
+    ) MIN BATCH 15M
+    ```
+
+Use a human-readable size such as `500K`, `15M`, or `3G`. `MIN BATCH` only applies when fetched data is stored as parquet (`SAVE AS AUTO` or `SAVE AS PARQUET`).
+
 ## Connectors
 
 Connectors define how to pull data from an external source into your bundle.

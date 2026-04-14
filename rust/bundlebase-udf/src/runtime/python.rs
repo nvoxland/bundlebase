@@ -5,16 +5,16 @@
 //! - **File-backed** (`python::./script.py:func`): `.py` file on disk, bundleable, executed via IPC subprocess
 
 use crate::bridge::ipc_bridge::SubprocessCache;
+use crate::bridge::manifest::{Manifest, ManifestEntry};
 use crate::bridge::python_bridge::get_python_function_bridge;
-use crate::bridge::manifest::{ManifestEntry, Manifest};
-use bundlebase_common::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
-use super::entrypoint::{validate_file_reachable, UdfEntrypoint, RuntimeType};
+use super::entrypoint::{validate_file_reachable, RuntimeType, UdfEntrypoint};
 use super::ipc_utils::create_ipc_accumulator;
 
 /// Python runtime: holds a module name and function/class name.
@@ -43,13 +43,15 @@ impl PythonRuntime {
             return Err(format!(
                 "Invalid Python entrypoint '{}'. Module before ':' cannot be empty.",
                 entrypoint
-            ).into());
+            )
+            .into());
         }
         if function.is_empty() {
             return Err(format!(
                 "Invalid Python entrypoint '{}'. Function after ':' cannot be empty.",
                 entrypoint
-            ).into());
+            )
+            .into());
         }
 
         Ok(Self {
@@ -118,10 +120,7 @@ impl UdfEntrypoint for PythonRuntime {
         if self.is_file_backed() {
             // IPC harness: `python -m bundlebase_sdk._ipc_harness <script.py>`
             // parse_call splits on whitespace, so space-delimited is correct.
-            format!(
-                "python -m bundlebase_sdk._ipc_harness {}",
-                self.module
-            )
+            format!("python -m bundlebase_sdk._ipc_harness {}", self.module)
         } else {
             format!("python:{}:{}", self.module, self.function)
         }
@@ -195,9 +194,7 @@ impl UdfEntrypoint for PythonRuntime {
                     ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
                     ColumnarValue::Scalar(scalar) => scalar
                         .to_array_of_size(args.number_rows)
-                        .map_err(|e| {
-                            datafusion::common::DataFusionError::Execution(e.to_string())
-                        }),
+                        .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
                 })
                 .collect::<DFResult<Vec<_>>>()?;
 
@@ -230,9 +227,7 @@ impl UdfEntrypoint for PythonRuntime {
                     ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
                     ColumnarValue::Scalar(scalar) => scalar
                         .to_array_of_size(args.number_rows)
-                        .map_err(|e| {
-                            datafusion::common::DataFusionError::Execution(e.to_string())
-                        }),
+                        .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
                 })
                 .collect::<DFResult<Vec<_>>>()?;
 
@@ -343,7 +338,9 @@ fn load_python_ipc_manifest(script_path: &str) -> Result<Manifest, BundlebaseErr
     let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to parse manifest JSON from Python script '{}': {}. Output: {}",
-            script_path, e, json_str.trim()
+            script_path,
+            e,
+            json_str.trim()
         ))
     })?;
 

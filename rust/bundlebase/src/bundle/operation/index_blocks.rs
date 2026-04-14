@@ -1,9 +1,9 @@
 use crate::bundle::bundle_schema;
-use crate::bundle::operation::{AnyOperation, Operation, resolve_cast_ops};
+use crate::bundle::operation::{resolve_cast_ops, AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
-    BTreeIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
+    BTreeIndex, ExternalSortConfig, ExternalSortWriter, IndexType, IndexedValue, TempDirManager,
     TextIndexBuilder, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::object_id::ColumnId;
@@ -208,7 +208,8 @@ impl IndexBlocksOp {
         let is_computed = column_ids.iter().any(|id| bs.is_computed(id));
 
         // Use stable internal names — these match the DataBlock schema
-        let columns: Vec<String> = column_ids.iter()
+        let columns: Vec<String> = column_ids
+            .iter()
             .map(|id| bundle_schema::generate_internal_name(id))
             .collect();
 
@@ -219,7 +220,8 @@ impl IndexBlocksOp {
                     BundlebaseError::from("Column index requires at least one column")
                 })?;
                 if is_computed {
-                    Self::build_computed_btree_index(index, column, blocks, bundle, operations).await
+                    Self::build_computed_btree_index(index, column, blocks, bundle, operations)
+                        .await
                 } else {
                     Self::build_btree_index(index, column, blocks, bundle).await
                 }
@@ -227,10 +229,18 @@ impl IndexBlocksOp {
             IndexType::Inverted { tokenizer, .. } => {
                 if is_computed {
                     Self::build_computed_text_index(
-                        index, &index_name, &columns, blocks, bundle, tokenizer, operations,
-                    ).await
+                        index,
+                        &index_name,
+                        &columns,
+                        blocks,
+                        bundle,
+                        tokenizer,
+                        operations,
+                    )
+                    .await
                 } else {
-                    Self::build_text_index(index, &index_name, &columns, blocks, bundle, tokenizer).await
+                    Self::build_text_index(index, &index_name, &columns, blocks, bundle, tokenizer)
+                        .await
                 }
             }
         }
@@ -286,10 +296,8 @@ impl IndexBlocksOp {
         // Create temp directory for external sort
         let temp_manager = TempDirManager::new(&bundle.data_dir(), "btree_index")?;
 
-        let sort_config = ExternalSortConfig::new(
-            DEFAULT_MEMORY_LIMIT_BYTES,
-            temp_manager.path().clone(),
-        );
+        let sort_config =
+            ExternalSortConfig::new(DEFAULT_MEMORY_LIMIT_BYTES, temp_manager.path().clone());
         let mut sorter = ExternalSortWriter::new(sort_config)?;
 
         // Stream entries to sorter (replaces HashMap accumulation)
@@ -512,8 +520,7 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path =
-            {
+        let rel_path = {
             let address = bundlebase_common::ContentAddress::with_sub_type(
                 bundlebase_common::ContentCategory::Index,
                 "inverted",
@@ -608,7 +615,12 @@ impl IndexBlocksOp {
             .iter()
             .zip(column_ids.iter())
             .map(|(field, col_id)| {
-                std::sync::Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                std::sync::Arc::new(
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_name(bundle_schema::generate_internal_name(col_id)),
+                )
             })
             .collect();
         let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -636,7 +648,9 @@ impl IndexBlocksOp {
         let cast_active = resolve_cast_ops(&operations);
         for (op, active) in operations.iter().zip(cast_active.iter()) {
             if *active {
-                df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+                df = op
+                    .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
+                    .await?;
             }
         }
 
@@ -648,7 +662,10 @@ impl IndexBlocksOp {
             .collect()
             .await
             .map_err(|e| {
-                BundlebaseError::from(format!("Failed to collect computed column '{}': {}", column, e))
+                BundlebaseError::from(format!(
+                    "Failed to collect computed column '{}': {}",
+                    column, e
+                ))
             })
     }
 
@@ -682,10 +699,8 @@ impl IndexBlocksOp {
         );
 
         let temp_manager = TempDirManager::new(&bundle.data_dir(), "btree_index")?;
-        let sort_config = ExternalSortConfig::new(
-            DEFAULT_MEMORY_LIMIT_BYTES,
-            temp_manager.path().clone(),
-        );
+        let sort_config =
+            ExternalSortConfig::new(DEFAULT_MEMORY_LIMIT_BYTES, temp_manager.path().clone());
         let mut sorter = ExternalSortWriter::new(sort_config)?;
 
         for (idx, (block, _block_id, _version)) in block_refs.iter().enumerate() {
@@ -835,7 +850,12 @@ impl IndexBlocksOp {
                     .iter()
                     .zip(block.column_ids().iter())
                     .map(|(field, col_id)| {
-                        std::sync::Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                        std::sync::Arc::new(
+                            field
+                                .as_ref()
+                                .clone()
+                                .with_name(bundle_schema::generate_internal_name(col_id)),
+                        )
                     })
                     .collect();
                 let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -843,30 +863,37 @@ impl IndexBlocksOp {
                     phys_schema.metadata().clone(),
                 ));
                 let renamed_batch = RecordBatch::try_new(id_schema, batch.columns().to_vec())
-                    .map_err(|e| BundlebaseError::from(format!("Failed to rename batch schema: {}", e)))?;
+                    .map_err(|e| {
+                        BundlebaseError::from(format!("Failed to rename batch schema: {}", e))
+                    })?;
 
                 // Apply operations and select all text columns
                 let mut config = SessionConfig::new();
                 config.options_mut().sql_parser.enable_ident_normalization = false;
-                let op_ctx =
-                    SessionContext::new_with_config_rt(config, bundle.ctx().runtime_env());
+                let op_ctx = SessionContext::new_with_config_rt(config, bundle.ctx().runtime_env());
 
                 let mem_table =
-                    MemTable::try_new(renamed_batch.schema(), vec![vec![renamed_batch.clone()]]).map_err(|e| {
-                        BundlebaseError::from(format!("Failed to create MemTable: {}", e))
+                    MemTable::try_new(renamed_batch.schema(), vec![vec![renamed_batch.clone()]])
+                        .map_err(|e| {
+                            BundlebaseError::from(format!("Failed to create MemTable: {}", e))
+                        })?;
+                op_ctx
+                    .register_table("bundle", Arc::new(mem_table))
+                    .map_err(|e| {
+                        BundlebaseError::from(format!("Failed to register table: {}", e))
                     })?;
-                op_ctx.register_table("bundle", Arc::new(mem_table)).map_err(|e| {
-                    BundlebaseError::from(format!("Failed to register table: {}", e))
-                })?;
-                let mut df = op_ctx.table("bundle").await.map_err(|e| {
-                    BundlebaseError::from(format!("Failed to get table: {}", e))
-                })?;
+                let mut df = op_ctx
+                    .table("bundle")
+                    .await
+                    .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
                 let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
                 let cast_active = resolve_cast_ops(&operations);
                 for (op, active) in operations.iter().zip(cast_active.iter()) {
                     if *active {
-                        df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+                        df = op
+                            .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
+                            .await?;
                     }
                 }
 
@@ -896,8 +923,9 @@ impl IndexBlocksOp {
                             let scalar = ScalarValue::try_from_array(array, row)?;
 
                             let text_value = match &scalar {
-                                ScalarValue::Utf8(Some(s))
-                                | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+                                ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+                                    Some(s.clone())
+                                }
                                 ScalarValue::Utf8View(Some(s)) => Some(s.to_string()),
                                 _ => None,
                             };
@@ -935,8 +963,7 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path =
-            {
+        let rel_path = {
             let address = bundlebase_common::ContentAddress::with_sub_type(
                 bundlebase_common::ContentCategory::Index,
                 "inverted",
@@ -997,10 +1024,7 @@ impl Operation for IndexBlocksOp {
         // Find the corresponding IndexDefinition by index
         let index_def = {
             let indexes = bundle.indexes.read();
-            indexes
-                .iter()
-                .find(|idx| idx.id() == &self.index)
-                .cloned()
+            indexes.iter().find(|idx| idx.id() == &self.index).cloned()
         };
 
         if let Some(index_def) = index_def {
@@ -1065,10 +1089,7 @@ mod tests {
         let block_id = BlockId::generate();
         let op = IndexBlocksOp {
             index: index_id,
-            blocks: vec![VersionedBlockId::new(
-                block_id,
-                "v1".to_string(),
-            )],
+            blocks: vec![VersionedBlockId::new(block_id, "v1".to_string())],
             path: "ab/cdef0123456789.text.idx.tar".to_string(),
             cardinality: 50,
             doc_count: Some(150),

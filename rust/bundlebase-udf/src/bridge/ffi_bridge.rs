@@ -8,10 +8,10 @@
 //! - `load_lib_manifest()` — bulk function discovery from shared libraries
 
 use crate::bridge::manifest::Manifest;
-use bundlebase_common::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
@@ -86,10 +86,7 @@ pub fn load_library(path: &str) -> Result<Arc<Library>, BundlebaseError> {
     }
 
     let lib = unsafe { Library::new(path) }.map_err(|e| {
-        BundlebaseError::from(format!(
-            "Failed to load shared library '{}': {}",
-            path, e
-        ))
+        BundlebaseError::from(format!("Failed to load shared library '{}': {}", path, e))
     })?;
 
     let lib = Arc::new(lib);
@@ -133,9 +130,8 @@ pub fn invoke_lib_scalar(
 
     for arg in args {
         let data = arg.to_data();
-        let (ffi_array, ffi_schema) = arrow::ffi::to_ffi(&data).map_err(|e| {
-            BundlebaseError::from(format!("Failed to convert arg to FFI: {}", e))
-        })?;
+        let (ffi_array, ffi_schema) = arrow::ffi::to_ffi(&data)
+            .map_err(|e| BundlebaseError::from(format!("Failed to convert arg to FFI: {}", e)))?;
         ffi_arrays.push(ffi_array);
         ffi_schemas.push(ffi_schema);
     }
@@ -180,10 +176,8 @@ pub fn invoke_lib_scalar(
     }
 
     // Convert FFI output back to ArrayRef
-    let out_data =
-        unsafe { arrow::ffi::from_ffi(out_array, &out_schema) }.map_err(|e| {
-            BundlebaseError::from(format!("Failed to convert FFI output: {}", e))
-        })?;
+    let out_data = unsafe { arrow::ffi::from_ffi(out_array, &out_schema) }
+        .map_err(|e| BundlebaseError::from(format!("Failed to convert FFI output: {}", e)))?;
 
     Ok(arrow::array::make_array(out_data))
 }
@@ -247,7 +241,11 @@ impl std::fmt::Debug for LibAccumulator {
 
 impl LibAccumulator {
     /// Create a new accumulator by calling `<symbol>_create_state()`.
-    pub fn new(lib_path: &str, symbol: &str, return_type: DataType) -> Result<Self, BundlebaseError> {
+    pub fn new(
+        lib_path: &str,
+        symbol: &str,
+        return_type: DataType,
+    ) -> Result<Self, BundlebaseError> {
         let lib = load_library(lib_path)?;
         let create_sym = format!("{}_create_state", symbol);
 
@@ -283,10 +281,9 @@ impl LibAccumulator {
 
 impl datafusion::logical_expr::Accumulator for LibAccumulator {
     fn update_batch(&mut self, values: &[ArrayRef]) -> datafusion::common::Result<()> {
-        let accumulate_fn: Symbol<AccumulateFn> =
-            self.get_symbol("accumulate").map_err(|e| {
-                datafusion::common::DataFusionError::Execution(e.to_string())
-            })?;
+        let accumulate_fn: Symbol<AccumulateFn> = self
+            .get_symbol("accumulate")
+            .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string()))?;
 
         let mut ffi_arrays: Vec<FFI_ArrowArray> = Vec::with_capacity(values.len());
         let mut ffi_schemas: Vec<FFI_ArrowSchema> = Vec::with_capacity(values.len());
@@ -347,9 +344,9 @@ impl datafusion::logical_expr::Accumulator for LibAccumulator {
     }
 
     fn evaluate(&mut self) -> datafusion::common::Result<ScalarValue> {
-        let evaluate_fn: Symbol<EvaluateFn> = self.get_symbol("evaluate").map_err(|e| {
-            datafusion::common::DataFusionError::Execution(e.to_string())
-        })?;
+        let evaluate_fn: Symbol<EvaluateFn> = self
+            .get_symbol("evaluate")
+            .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string()))?;
 
         let mut out_array = FFI_ArrowArray::empty();
         let mut out_schema = FFI_ArrowSchema::empty();
@@ -406,9 +403,7 @@ impl Drop for LibAccumulator {
     fn drop(&mut self) {
         if !self.state.is_null() {
             let free_sym = format!("{}_free_state", self.symbol);
-            if let Ok(free_fn) = unsafe {
-                self.lib.get::<FreeStateFn>(free_sym.as_bytes())
-            } {
+            if let Ok(free_fn) = unsafe { self.lib.get::<FreeStateFn>(free_sym.as_bytes()) } {
                 unsafe { free_fn(self.state) };
             }
         }
@@ -440,11 +435,7 @@ pub fn load_lib_manifest(lib_path: &str) -> Result<Manifest, BundlebaseError> {
 
     let ptr = unsafe { manifest_fn() };
     if ptr.is_null() {
-        return Err(format!(
-            "bundlebase_functions() in '{}' returned null",
-            lib_path
-        )
-        .into());
+        return Err(format!("bundlebase_functions() in '{}' returned null", lib_path).into());
     }
 
     let json_str = unsafe { CStr::from_ptr(ptr) }
@@ -455,9 +446,7 @@ pub fn load_lib_manifest(lib_path: &str) -> Result<Manifest, BundlebaseError> {
         .to_string();
 
     // Free the manifest string if the library provides a free function
-    if let Ok(free_fn) = unsafe {
-        lib.get::<FreeManifestFn>(b"bundlebase_free_manifest")
-    } {
+    if let Ok(free_fn) = unsafe { lib.get::<FreeManifestFn>(b"bundlebase_free_manifest") } {
         unsafe { free_fn(ptr) };
     }
 

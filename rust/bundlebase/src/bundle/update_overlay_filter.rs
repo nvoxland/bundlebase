@@ -55,7 +55,9 @@ impl UpdateOverlayDataSource {
         schema: &SchemaRef,
     ) -> Self {
         // Build ColumnId → schema column index mapping
-        let col_id_to_idx: HashMap<ColumnId, usize> = column_ids.iter().enumerate()
+        let col_id_to_idx: HashMap<ColumnId, usize> = column_ids
+            .iter()
+            .enumerate()
             .filter_map(|(i, cid)| {
                 if i < schema.fields().len() {
                     Some((*cid, i))
@@ -72,7 +74,10 @@ impl UpdateOverlayDataSource {
             if let Some(&col_idx) = col_id_to_idx.get(col_id) {
                 columns.insert(col_idx, (values.clone(), is_set.clone()));
             } else {
-                log::warn!("Overlay column {:?} not found in block schema — skipping", col_id);
+                log::warn!(
+                    "Overlay column {:?} not found in block schema — skipping",
+                    col_id
+                );
             }
         }
 
@@ -95,7 +100,12 @@ impl UpdateOverlayDataSource {
 
 impl fmt::Debug for MergedOverlay {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "MergedOverlay({} rows, {} columns)", self.row_numbers.len(), self.columns.len())
+        write!(
+            f,
+            "MergedOverlay({} rows, {} columns)",
+            self.row_numbers.len(),
+            self.columns.len()
+        )
     }
 }
 
@@ -126,7 +136,11 @@ impl DataSource for UpdateOverlayDataSource {
     }
 
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
-        write!(f, "UpdateOverlayDataSource({} rows)", self.updated_row_count)
+        write!(
+            f,
+            "UpdateOverlayDataSource({} rows)",
+            self.updated_row_count
+        )
     }
 
     fn output_partitioning(&self) -> Partitioning {
@@ -175,7 +189,11 @@ struct UpdateOverlayStream {
 }
 
 impl UpdateOverlayStream {
-    fn apply_overlay(&self, batch: &RecordBatch, offset: u32) -> datafusion::common::Result<RecordBatch> {
+    fn apply_overlay(
+        &self,
+        batch: &RecordBatch,
+        offset: u32,
+    ) -> datafusion::common::Result<RecordBatch> {
         let num_rows = batch.num_rows() as u32;
 
         if batch.num_columns() == 0 || num_rows == 0 {
@@ -184,7 +202,10 @@ impl UpdateOverlayStream {
 
         // Binary search to find overlay rows in [offset, offset + num_rows)
         let start = self.overlay.row_numbers.partition_point(|&r| r < offset);
-        let end = self.overlay.row_numbers.partition_point(|&r| r < offset + num_rows);
+        let end = self
+            .overlay
+            .row_numbers
+            .partition_point(|&r| r < offset + num_rows);
 
         if start == end {
             // No overlay rows in this batch range
@@ -216,7 +237,9 @@ impl UpdateOverlayStream {
             }
 
             // Cast overlay values to match base column type if needed
-            let overlay_values: &dyn arrow::array::Array = if values.data_type() == base_col.data_type() {
+            let overlay_values: &dyn arrow::array::Array = if values.data_type()
+                == base_col.data_type()
+            {
                 values.as_ref()
             } else {
                 // Type mismatch — fall back to base column (overlay values incompatible)
@@ -233,7 +256,9 @@ impl UpdateOverlayStream {
             let base_data = base_col.to_data();
             let overlay_data = overlay_values.to_data();
             let mut builder = arrow::array::MutableArrayData::new(
-                vec![&base_data, &overlay_data], false, num_rows as usize,
+                vec![&base_data, &overlay_data],
+                false,
+                num_rows as usize,
             );
 
             let mut overlay_pos = start;

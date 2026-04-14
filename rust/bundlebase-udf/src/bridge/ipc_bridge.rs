@@ -13,15 +13,15 @@
 //! - **Aggregate evaluate**: JSON-RPC `evaluate` request with state ID → returns
 //!   result as Arrow IPC.
 
-use bundlebase_common::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
+use bundlebase_common::BundlebaseError;
+use dashmap::DashMap;
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
-use dashmap::DashMap;
 use std::io::{BufRead, BufReader, BufWriter, Read as IoRead, Write as IoWrite};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -103,18 +103,21 @@ pub fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
             image.to_string(),
         ])
     } else {
-        let parts: Vec<String> = call.split_whitespace().map(|s| {
-            // Strip :symbol suffix from path components (added by wildcard import).
-            // e.g., "/path/binary:double_val" → "/path/binary"
-            // Only applies to tokens that look like file paths (contain / or .)
-            if let Some(colon_pos) = s.rfind(':') {
-                let before = &s[..colon_pos];
-                if before.contains('/') || before.contains('.') {
-                    return before.to_string();
+        let parts: Vec<String> = call
+            .split_whitespace()
+            .map(|s| {
+                // Strip :symbol suffix from path components (added by wildcard import).
+                // e.g., "/path/binary:double_val" → "/path/binary"
+                // Only applies to tokens that look like file paths (contain / or .)
+                if let Some(colon_pos) = s.rfind(':') {
+                    let before = &s[..colon_pos];
+                    if before.contains('/') || before.contains('.') {
+                        return before.to_string();
+                    }
                 }
-            }
-            s.to_string()
-        }).collect();
+                s.to_string()
+            })
+            .collect();
         if parts.is_empty() {
             return Err("Function entrypoint/call string must not be empty".into());
         }
@@ -224,21 +227,32 @@ impl SyncSubprocessHandle {
 
         let response: JsonRpcResponse =
             serde_json::from_str(response_line.trim()).map_err(|e| {
-                format!("Failed to parse handshake response: {} (raw: {})", e, response_line.trim())
+                format!(
+                    "Failed to parse handshake response: {} (raw: {})",
+                    e,
+                    response_line.trim()
+                )
             })?;
 
         if let Some(err) = response.error {
             if err.code == -32601 {
                 log::warn!("IPC function subprocess does not support handshake (method_not_found), proceeding without version check");
             } else {
-                log::warn!("IPC function subprocess handshake returned error (code {}): {}", err.code, err.message);
+                log::warn!(
+                    "IPC function subprocess handshake returned error (code {}): {}",
+                    err.code,
+                    err.message
+                );
             }
             return Ok(());
         }
 
         if let Some(result) = response.result {
             if let Some(version) = result.get("protocol_version").and_then(|v| v.as_str()) {
-                log::info!("IPC function subprocess handshake successful, protocol_version={}", version);
+                log::info!(
+                    "IPC function subprocess handshake successful, protocol_version={}",
+                    version
+                );
             }
         }
 
@@ -441,15 +455,14 @@ impl SyncSubprocessHandle {
     fn write_arrow_ipc(&mut self, batch: &RecordBatch) -> Result<(), BundlebaseError> {
         let mut buf = Vec::new();
         {
-            let mut writer = StreamWriter::try_new(&mut buf, &batch.schema()).map_err(|e| {
-                format!("Failed to create Arrow IPC writer: {}", e)
-            })?;
-            writer.write(batch).map_err(|e| {
-                format!("Failed to write Arrow IPC batch: {}", e)
-            })?;
-            writer.finish().map_err(|e| {
-                format!("Failed to finish Arrow IPC stream: {}", e)
-            })?;
+            let mut writer = StreamWriter::try_new(&mut buf, &batch.schema())
+                .map_err(|e| format!("Failed to create Arrow IPC writer: {}", e))?;
+            writer
+                .write(batch)
+                .map_err(|e| format!("Failed to write Arrow IPC batch: {}", e))?;
+            writer
+                .finish()
+                .map_err(|e| format!("Failed to finish Arrow IPC stream: {}", e))?;
         }
 
         let len = buf.len() as u32;
@@ -670,10 +683,7 @@ const HEALTH_CHECK_TIMEOUT_SECS: u64 = 5;
 /// Gets or spawns the subprocess, sends a JSON-RPC `ping` request, and expects
 /// a response with result `"pong"`. Returns `Ok(())` if healthy, or an error
 /// if the subprocess is unreachable or responds incorrectly.
-pub fn ipc_health_check(
-    cache: &SubprocessCache,
-    entrypoint: &str,
-) -> Result<(), BundlebaseError> {
+pub fn ipc_health_check(cache: &SubprocessCache, entrypoint: &str) -> Result<(), BundlebaseError> {
     let timeout = Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS);
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
@@ -719,13 +729,15 @@ pub fn invoke_ipc_scalar(
     let mut guard = acquire_lock(&handle);
 
     // Send invoke request
-    guard.send_request(
-        "invoke",
-        serde_json::json!({
-            "function": function_name,
-            "kind": "scalar",
-        }),
-    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
+    guard
+        .send_request(
+            "invoke",
+            serde_json::json!({
+                "function": function_name,
+                "kind": "scalar",
+            }),
+        )
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Build input RecordBatch from args
     let fields: Vec<Field> = args
@@ -734,15 +746,15 @@ pub fn invoke_ipc_scalar(
         .map(|(i, arr)| Field::new(format!("arg_{}", i), arr.data_type().clone(), true))
         .collect();
     let schema = Arc::new(Schema::new(fields));
-    let input_batch = RecordBatch::try_new(schema, args.to_vec()).map_err(|e| {
-        format!("Failed to create input RecordBatch for IPC function: {}", e)
-    })?;
+    let input_batch = RecordBatch::try_new(schema, args.to_vec())
+        .map_err(|e| format!("Failed to create input RecordBatch for IPC function: {}", e))?;
 
     // Write input Arrow IPC
     guard.write_arrow_ipc(&input_batch)?;
 
     // Read output Arrow IPC
-    let ipc_data = guard.read_arrow_ipc()
+    let ipc_data = guard
+        .read_arrow_ipc()
         .map_err(|e| timeout_context_error(function_name, timeout, e))?
         .ok_or_else(|| {
             BundlebaseError::from(format!(
@@ -760,22 +772,19 @@ pub fn invoke_ipc_scalar(
         )
     })?;
 
-    let batches: Vec<RecordBatch> = reader
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            format!(
-                "Failed to read Arrow IPC batch from function '{}': {}",
-                function_name, e
-            )
-        })?;
+    let batches: Vec<RecordBatch> =
+        reader
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                format!(
+                    "Failed to read Arrow IPC batch from function '{}': {}",
+                    function_name, e
+                )
+            })?;
 
     if batches.is_empty() || batches[0].num_columns() == 0 {
-        return Err(format!(
-            "IPC function '{}' returned no data columns",
-            function_name
-        )
-        .into());
+        return Err(format!("IPC function '{}' returned no data columns", function_name).into());
     }
 
     // Return the first (and only) column from the first batch
@@ -802,12 +811,14 @@ pub fn ipc_aggregate_create_state(
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
-    let result = guard.send_request(
-        "create_state",
-        serde_json::json!({
-            "function": function_name,
-        }),
-    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
+    let result = guard
+        .send_request(
+            "create_state",
+            serde_json::json!({
+                "function": function_name,
+            }),
+        )
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     let state_id = result
         .get("state_id")
@@ -840,13 +851,15 @@ pub fn ipc_aggregate_accumulate(
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
-    guard.send_request(
-        "accumulate",
-        serde_json::json!({
-            "function": function_name,
-            "state_id": state_id,
-        }),
-    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
+    guard
+        .send_request(
+            "accumulate",
+            serde_json::json!({
+                "function": function_name,
+                "state_id": state_id,
+            }),
+        )
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Build and write the input batch
     let fields: Vec<Field> = values
@@ -855,9 +868,8 @@ pub fn ipc_aggregate_accumulate(
         .map(|(i, arr)| Field::new(format!("val_{}", i), arr.data_type().clone(), true))
         .collect();
     let schema = Arc::new(Schema::new(fields));
-    let batch = RecordBatch::try_new(schema, values.to_vec()).map_err(|e| {
-        format!("Failed to create batch for accumulate: {}", e)
-    })?;
+    let batch = RecordBatch::try_new(schema, values.to_vec())
+        .map_err(|e| format!("Failed to create batch for accumulate: {}", e))?;
 
     guard.write_arrow_ipc(&batch)?;
 
@@ -880,14 +892,16 @@ pub fn ipc_aggregate_merge(
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
-    let result = guard.send_request(
-        "merge",
-        serde_json::json!({
-            "function": function_name,
-            "state_id1": state_id1,
-            "state_id2": state_id2,
-        }),
-    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
+    let result = guard
+        .send_request(
+            "merge",
+            serde_json::json!({
+                "function": function_name,
+                "state_id1": state_id1,
+                "state_id2": state_id2,
+            }),
+        )
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     let merged_id = result
         .get("state_id")
@@ -920,16 +934,19 @@ pub fn ipc_aggregate_evaluate(
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
-    guard.send_request(
-        "evaluate",
-        serde_json::json!({
-            "function": function_name,
-            "state_id": state_id,
-        }),
-    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
+    guard
+        .send_request(
+            "evaluate",
+            serde_json::json!({
+                "function": function_name,
+                "state_id": state_id,
+            }),
+        )
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Read Arrow IPC result
-    let ipc_data = guard.read_arrow_ipc()
+    let ipc_data = guard
+        .read_arrow_ipc()
         .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     match ipc_data {
@@ -1026,10 +1043,7 @@ mod tests {
     #[test]
     fn test_parse_call_docker() {
         let result = parse_call("docker:my-image").expect("should parse");
-        assert_eq!(
-            result,
-            vec!["docker", "run", "-i", "--rm", "my-image"]
-        );
+        assert_eq!(result, vec!["docker", "run", "-i", "--rm", "my-image"]);
     }
 
     #[test]
@@ -1050,11 +1064,21 @@ mod tests {
     #[test]
     fn test_timeout_context_error_with_timeout_message() {
         let timeout = Duration::from_secs(30);
-        let err = BundlebaseError::from("IPC subprocess timed out after 30 seconds. The subprocess may be stuck.".to_string());
+        let err = BundlebaseError::from(
+            "IPC subprocess timed out after 30 seconds. The subprocess may be stuck.".to_string(),
+        );
         let result = timeout_context_error("my_func", timeout, err);
         let msg = result.to_string();
-        assert!(msg.contains("my_func"), "should contain function name: {}", msg);
-        assert!(msg.contains("30 seconds"), "should contain timeout: {}", msg);
+        assert!(
+            msg.contains("my_func"),
+            "should contain function name: {}",
+            msg
+        );
+        assert!(
+            msg.contains("30 seconds"),
+            "should contain timeout: {}",
+            msg
+        );
     }
 
     #[test]
@@ -1063,7 +1087,15 @@ mod tests {
         let err = BundlebaseError::from("some other error".to_string());
         let result = timeout_context_error("my_func", timeout, err);
         let msg = result.to_string();
-        assert!(msg.contains("some other error"), "should preserve original message: {}", msg);
-        assert!(!msg.contains("my_func"), "should not add function name: {}", msg);
+        assert!(
+            msg.contains("some other error"),
+            "should preserve original message: {}",
+            msg
+        );
+        assert!(
+            !msg.contains("my_func"),
+            "should not add function name: {}",
+            msg
+        );
     }
 }

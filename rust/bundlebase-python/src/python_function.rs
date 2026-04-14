@@ -25,22 +25,18 @@ impl PyFunctionBridge {
         let py_module = py
             .import(module)
             .map_err(|e| format!("Failed to import Python module '{}': {}", module, e))?;
-        let py_class = py_module
-            .getattr(class_name)
-            .map_err(|e| {
-                format!(
-                    "Failed to find class '{}' in module '{}': {}",
-                    class_name, module, e
-                )
-            })?;
-        let instance = py_class
-            .call0()
-            .map_err(|e| {
-                format!(
-                    "Failed to instantiate class '{}' from module '{}': {}",
-                    class_name, module, e
-                )
-            })?;
+        let py_class = py_module.getattr(class_name).map_err(|e| {
+            format!(
+                "Failed to find class '{}' in module '{}': {}",
+                class_name, module, e
+            )
+        })?;
+        let instance = py_class.call0().map_err(|e| {
+            format!(
+                "Failed to instantiate class '{}' from module '{}': {}",
+                class_name, module, e
+            )
+        })?;
         Ok(instance)
     }
 
@@ -67,7 +63,8 @@ impl PyFunctionBridge {
             .map_err(|e| format!("Failed to get pyarrow.scalar: {}", e))?;
 
         // Extract the Python value from index 0 of the array
-        let idx = 0i64.into_pyobject(py)
+        let idx = 0i64
+            .into_pyobject(py)
             .map_err(|e| format!("Failed to create index: {}", e))?;
         let element = py_array
             .call_method1("__getitem__", (idx,))
@@ -211,12 +208,8 @@ impl PyFunctionBridge {
                 // Parse precision and scale from type string like "decimal128(38, 10)"
                 let inner = s.trim_start_matches("decimal128(").trim_end_matches(')');
                 let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
-                let precision: u8 = parts.first()
-                    .and_then(|p| p.parse().ok())
-                    .unwrap_or(38);
-                let scale: i8 = parts.get(1)
-                    .and_then(|p| p.parse().ok())
-                    .unwrap_or(0);
+                let precision: u8 = parts.first().and_then(|p| p.parse().ok()).unwrap_or(38);
+                let scale: i8 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
                 // Multiply the decimal by 10^scale to get the unscaled integer,
                 // then extract as an i128
                 let py = as_py.py();
@@ -233,7 +226,8 @@ impl PyFunctionBridge {
                     as_py.call_method1("__mul__", (&multiplier,))
                 } else {
                     as_py.call_method1("__truediv__", (&multiplier,))
-                }.map_err(|e| format!("Failed to compute unscaled decimal: {}", e))?;
+                }
+                .map_err(|e| format!("Failed to compute unscaled decimal: {}", e))?;
                 let unscaled_int = unscaled
                     .call_method0("__int__")
                     .map_err(|e| format!("Failed to convert decimal to int: {}", e))?;
@@ -288,37 +282,36 @@ impl PythonFunctionBridge for PyFunctionBridge {
             let py_module = py
                 .import(module.as_str())
                 .map_err(|e| format!("Failed to import Python module '{}': {}", module, e))?;
-            let py_func = py_module
-                .getattr(function.as_str())
-                .map_err(|e| {
-                    format!(
-                        "Failed to find function '{}' in module '{}': {}",
-                        function, module, e
-                    )
-                })?;
+            let py_func = py_module.getattr(function.as_str()).map_err(|e| {
+                format!(
+                    "Failed to find function '{}' in module '{}': {}",
+                    function, module, e
+                )
+            })?;
 
             let py_args: Vec<Bound<'_, PyAny>> = args
                 .iter()
                 .map(|arr| {
-                    arr.to_data()
-                        .to_pyarrow(py)
-                        .map_err(|e| {
-                            BundlebaseError::from(format!(
-                                "Failed to convert Arrow array to PyArrow: {}",
-                                e
-                            ))
-                        })
+                    arr.to_data().to_pyarrow(py).map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to convert Arrow array to PyArrow: {}",
+                            e
+                        ))
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
             let py_tuple = PyTuple::new(py, &py_args)
                 .map_err(|e| format!("Failed to create Python args tuple: {}", e))?;
-            let result = py_func
-                .call1(py_tuple)
-                .map_err(|e| format!("Python function '{}:{}' raised an error: {}", module, function, e))?;
+            let result = py_func.call1(py_tuple).map_err(|e| {
+                format!(
+                    "Python function '{}:{}' raised an error: {}",
+                    module, function, e
+                )
+            })?;
 
-            let result_data = arrow::array::ArrayData::from_pyarrow_bound(&result)
-                .map_err(|e| {
+            let result_data =
+                arrow::array::ArrayData::from_pyarrow_bound(&result).map_err(|e| {
                     format!(
                         "Failed to convert Python function result to Arrow: {}. \
                          The function must return a PyArrow Array.",
@@ -341,14 +334,12 @@ impl PythonFunctionBridge for PyFunctionBridge {
 
         Python::attach(|py| {
             let instance = Self::instantiate_class(py, &module, &class_name)?;
-            let result = instance
-                .call_method0("create_state")
-                .map_err(|e| {
-                    format!(
-                        "Python aggregate '{}:{}' create_state() failed: {}",
-                        module, class_name, e
-                    )
-                })?;
+            let result = instance.call_method0("create_state").map_err(|e| {
+                format!(
+                    "Python aggregate '{}:{}' create_state() failed: {}",
+                    module, class_name, e
+                )
+            })?;
             Self::pyarrow_to_scalar(&result)
         })
     }
@@ -375,14 +366,12 @@ impl PythonFunctionBridge for PyFunctionBridge {
             let py_args: Vec<Bound<'_, PyAny>> = args
                 .iter()
                 .map(|arr| {
-                    arr.to_data()
-                        .to_pyarrow(py)
-                        .map_err(|e| {
-                            BundlebaseError::from(format!(
-                                "Failed to convert Arrow array to PyArrow: {}",
-                                e
-                            ))
-                        })
+                    arr.to_data().to_pyarrow(py).map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to convert Arrow array to PyArrow: {}",
+                            e
+                        ))
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -391,14 +380,12 @@ impl PythonFunctionBridge for PyFunctionBridge {
             all_args.extend(py_args);
             let py_tuple = PyTuple::new(py, &all_args)
                 .map_err(|e| format!("Failed to create args tuple: {}", e))?;
-            let result = instance
-                .call_method1("accumulate", py_tuple)
-                .map_err(|e| {
-                    format!(
-                        "Python aggregate '{}:{}' accumulate() failed: {}",
-                        module, class_name, e
-                    )
-                })?;
+            let result = instance.call_method1("accumulate", py_tuple).map_err(|e| {
+                format!(
+                    "Python aggregate '{}:{}' accumulate() failed: {}",
+                    module, class_name, e
+                )
+            })?;
             Self::pyarrow_to_scalar(&result)
         })
     }

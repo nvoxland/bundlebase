@@ -6,7 +6,10 @@ use crate::query::BoundedQueryResult;
 use bundlebase_common::BundlebaseError;
 
 /// Generate Typst markup for a chart block with its query results.
-pub fn render_chart(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+pub fn render_chart(
+    chart: &ChartBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     if data.columns.len() < 2 {
         return Err(BundlebaseError::from(format!(
             "Chart query must return at least 2 columns, got {}",
@@ -139,7 +142,14 @@ fn render_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, B
         params.push(format!("  legend: \"{}\"", v));
     }
     if let Some(labels) = get_yaml_str_array(opts, "labels") {
-        params.push(format!("  labels: ({})", labels.iter().map(|l| format!("\"{}\"", l)).collect::<Vec<_>>().join(", ")));
+        params.push(format!(
+            "  labels: ({})",
+            labels
+                .iter()
+                .map(|l| format!("\"{}\"", l))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
 
     lines.push(format!("  columnchart(\n{}\n  )", params.join(",\n")));
@@ -166,37 +176,75 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
     }
 
     // Axis ranges
-    if let Some(v) = get_yaml_number(opts, "x_min") { plot_params.push(format!("    x-min: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "x_max") { plot_params.push(format!("    x-max: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "y_min") { plot_params.push(format!("    y-min: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "y_max") { plot_params.push(format!("    y-max: {}", v)); }
+    if let Some(v) = get_yaml_number(opts, "x_min") {
+        plot_params.push(format!("    x-min: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "x_max") {
+        plot_params.push(format!("    x-max: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "y_min") {
+        plot_params.push(format!("    y-min: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "y_max") {
+        plot_params.push(format!("    y-max: {}", v));
+    }
 
     // Tick steps
-    if let Some(v) = get_yaml_number(opts, "x_tick_step") { plot_params.push(format!("    x-tick-step: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "y_tick_step") { plot_params.push(format!("    y-tick-step: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "x_minor_tick_step") { plot_params.push(format!("    x-minor-tick-step: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "y_minor_tick_step") { plot_params.push(format!("    y-minor-tick-step: {}", v)); }
+    if let Some(v) = get_yaml_number(opts, "x_tick_step") {
+        plot_params.push(format!("    x-tick-step: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "y_tick_step") {
+        plot_params.push(format!("    y-tick-step: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "x_minor_tick_step") {
+        plot_params.push(format!("    x-minor-tick-step: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "y_minor_tick_step") {
+        plot_params.push(format!("    y-minor-tick-step: {}", v));
+    }
 
     // Grid
-    if let Some(v) = get_yaml_str(opts, "x_grid") { plot_params.push(format!("    x-grid: \"{}\"", v)); }
-    if let Some(v) = get_yaml_str(opts, "y_grid") { plot_params.push(format!("    y-grid: \"{}\"", v)); }
+    if let Some(v) = get_yaml_str(opts, "x_grid") {
+        plot_params.push(format!("    x-grid: \"{}\"", v));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_grid") {
+        plot_params.push(format!("    y-grid: \"{}\"", v));
+    }
 
     // Axis labels
-    if let Some(v) = get_yaml_str(opts, "x_label") { plot_params.push(format!("    x-label: [{}]", escape_typst(&v))); }
-    if let Some(v) = get_yaml_str(opts, "y_label") { plot_params.push(format!("    y-label: [{}]", escape_typst(&v))); }
+    if let Some(v) = get_yaml_str(opts, "x_label") {
+        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_label") {
+        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+    }
 
     // Axis format
-    if let Some(v) = get_yaml_str(opts, "x_format") { plot_params.push(format!("    x-format: \"{}\"", v)); }
-    if let Some(v) = get_yaml_str(opts, "y_format") { plot_params.push(format!("    y-format: \"{}\"", v)); }
+    if let Some(v) = get_yaml_str(opts, "x_format") {
+        plot_params.push(format!("    x-format: \"{}\"", v));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_format") {
+        plot_params.push(format!("    y-format: \"{}\"", v));
+    }
 
     // Units and decimals
-    if let Some(v) = get_yaml_str(opts, "x_unit") { plot_params.push(format!("    x-unit: [{}]", v)); }
-    if let Some(v) = get_yaml_str(opts, "y_unit") { plot_params.push(format!("    y-unit: [{}]", v)); }
-    if let Some(v) = get_yaml_number(opts, "x_decimals") { plot_params.push(format!("    x-decimals: {}", v)); }
-    if let Some(v) = get_yaml_number(opts, "y_decimals") { plot_params.push(format!("    y-decimals: {}", v)); }
+    if let Some(v) = get_yaml_str(opts, "x_unit") {
+        plot_params.push(format!("    x-unit: [{}]", v));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_unit") {
+        plot_params.push(format!("    y-unit: [{}]", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "x_decimals") {
+        plot_params.push(format!("    x-decimals: {}", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "y_decimals") {
+        plot_params.push(format!("    y-decimals: {}", v));
+    }
 
     // Legend
-    if let Some(v) = get_yaml_str(opts, "legend") { plot_params.push(format!("    legend: \"{}\"", v)); }
+    if let Some(v) = get_yaml_str(opts, "legend") {
+        plot_params.push(format!("    legend: \"{}\"", v));
+    }
 
     // Build data points for plot.add
     let points = build_point_data(data)?;
@@ -207,7 +255,10 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
 
     // Line styling
     if let Some(stroke_opts) = opts.get("stroke") {
-        add_params.push(format!("      style: (stroke: {})", yaml_to_typst_value(stroke_opts)));
+        add_params.push(format!(
+            "      style: (stroke: {})",
+            yaml_to_typst_value(stroke_opts)
+        ));
     } else {
         let color = CHART_COLORS.first().copied().unwrap_or("#4e79a7");
         add_params.push(format!("      style: (stroke: rgb(\"{}\") + 1.5pt)", color));
@@ -221,20 +272,34 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
     }
 
     // Markers
-    if let Some(v) = get_yaml_str(opts, "mark") { add_params.push(format!("      mark: \"{}\"", v)); }
-    if let Some(v) = get_yaml_number(opts, "mark_size") { add_params.push(format!("      mark-size: {}", v)); }
+    if let Some(v) = get_yaml_str(opts, "mark") {
+        add_params.push(format!("      mark: \"{}\"", v));
+    }
+    if let Some(v) = get_yaml_number(opts, "mark_size") {
+        add_params.push(format!("      mark-size: {}", v));
+    }
     if let Some(mark_style) = opts.get("mark_style") {
-        add_params.push(format!("      mark-style: {}", yaml_to_typst_dict(mark_style)));
+        add_params.push(format!(
+            "      mark-style: {}",
+            yaml_to_typst_dict(mark_style)
+        ));
     }
 
-    lines.push(format!("  plot.plot(\n{},\n    {{\n    plot.add(\n{}\n    )\n  }})", plot_params.join(",\n"), add_params.join(",\n")));
+    lines.push(format!(
+        "  plot.plot(\n{},\n    {{\n    plot.add(\n{}\n    )\n  }})",
+        plot_params.join(",\n"),
+        add_params.join(",\n")
+    ));
     lines.push("})".to_string());
 
     Ok(lines.join("\n"))
 }
 
 /// Render a horizontal bar chart using cetz-plot chart.barchart.
-fn render_horizontal_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+fn render_horizontal_bar(
+    chart: &ChartBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     let opts = &chart.options;
     let mut lines = Vec::new();
 
@@ -279,7 +344,14 @@ fn render_horizontal_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Resul
         params.push(format!("  legend: \"{}\"", v));
     }
     if let Some(labels) = get_yaml_str_array(opts, "labels") {
-        params.push(format!("  labels: ({})", labels.iter().map(|l| format!("\"{}\"", l)).collect::<Vec<_>>().join(", ")));
+        params.push(format!(
+            "  labels: ({})",
+            labels
+                .iter()
+                .map(|l| format!("\"{}\"", l))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
 
     lines.push(format!("  barchart(\n{}\n  )", params.join(",\n")));
@@ -291,7 +363,10 @@ fn render_horizontal_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Resul
 /// Render a box-and-whisker chart using cetz-plot chart.boxwhisker.
 ///
 /// Expects query columns: label, min, q1, q2 (median), q3, max.
-fn render_box_whisker(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+fn render_box_whisker(
+    chart: &ChartBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     if data.columns.len() < 6 {
         return Err(BundlebaseError::from(format!(
             "Box whisker chart requires at least 6 columns (label, min, q1, q2, q3, max), got {}",
@@ -309,7 +384,9 @@ fn render_box_whisker(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<S
     let mut dicts = Vec::new();
     for (idx, row) in data.rows.iter().enumerate() {
         if row.len() < 6 {
-            return Err(BundlebaseError::from("Each row must have at least 6 columns for box whisker"));
+            return Err(BundlebaseError::from(
+                "Each row must have at least 6 columns for box whisker",
+            ));
         }
         let mut entries = Vec::new();
         entries.push(format!("label: {}", json_to_typst_value(&row[0])));
@@ -345,7 +422,10 @@ fn render_box_whisker(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<S
 /// Render a pyramid/funnel chart using cetz-plot chart.pyramid.
 ///
 /// Expects query columns: label, value.
-fn render_pyramid(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+fn render_pyramid(
+    chart: &ChartBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     let opts = &chart.options;
     let mut lines = Vec::new();
 
@@ -384,7 +464,10 @@ fn render_pyramid(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<Strin
 ///
 /// Expects query columns: x, y, y_error (and optionally x_error as 4th column).
 /// Also renders the data points as a line plot for context.
-fn render_error_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+fn render_error_bar(
+    chart: &ChartBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     if data.columns.len() < 3 {
         return Err(BundlebaseError::from(format!(
             "Error bar chart requires at least 3 columns (x, y, y_error), got {}",
@@ -407,9 +490,15 @@ fn render_error_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<Str
         plot_params.push("    size: (10, 6)".to_string());
     }
 
-    if let Some(v) = get_yaml_str(opts, "x_label") { plot_params.push(format!("    x-label: [{}]", escape_typst(&v))); }
-    if let Some(v) = get_yaml_str(opts, "y_label") { plot_params.push(format!("    y-label: [{}]", escape_typst(&v))); }
-    if let Some(v) = get_yaml_str(opts, "legend") { plot_params.push(format!("    legend: \"{}\"", v)); }
+    if let Some(v) = get_yaml_str(opts, "x_label") {
+        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_label") {
+        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+    }
+    if let Some(v) = get_yaml_str(opts, "legend") {
+        plot_params.push(format!("    legend: \"{}\"", v));
+    }
 
     // Build data points for the line
     let points = build_point_data(data)?;
@@ -441,7 +530,11 @@ fn render_error_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<Str
         points, color, add_calls.join("\n")
     );
 
-    lines.push(format!("  plot.plot(\n{},\n    {{\n{}\n  }})", plot_params.join(",\n"), body));
+    lines.push(format!(
+        "  plot.plot(\n{},\n    {{\n{}\n  }})",
+        plot_params.join(",\n"),
+        body
+    ));
     lines.push("})".to_string());
 
     Ok(lines.join("\n"))
@@ -460,7 +553,8 @@ fn render_violin(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String
 
     // Group rows by first column (category), preserving insertion order
     let mut categories: Vec<String> = Vec::new();
-    let mut category_values: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut category_values: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
 
     for row in &data.rows {
         if row.len() < 2 {
@@ -496,9 +590,15 @@ fn render_violin(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String
         plot_params.push("    size: (10, 6)".to_string());
     }
 
-    if let Some(v) = get_yaml_str(opts, "x_label") { plot_params.push(format!("    x-label: [{}]", escape_typst(&v))); }
-    if let Some(v) = get_yaml_str(opts, "y_label") { plot_params.push(format!("    y-label: [{}]", escape_typst(&v))); }
-    if let Some(v) = get_yaml_str(opts, "legend") { plot_params.push(format!("    legend: \"{}\"", v)); }
+    if let Some(v) = get_yaml_str(opts, "x_label") {
+        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+    }
+    if let Some(v) = get_yaml_str(opts, "y_label") {
+        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+    }
+    if let Some(v) = get_yaml_str(opts, "legend") {
+        plot_params.push(format!("    legend: \"{}\"", v));
+    }
 
     // add-violin params
     let mut add_params = Vec::new();
@@ -536,7 +636,9 @@ fn build_tuple_data(data: &BoundedQueryResult) -> Result<String, BundlebaseError
     let mut tuples = Vec::new();
     for row in &data.rows {
         if row.len() < 2 {
-            return Err(BundlebaseError::from("Each row must have at least 2 columns"));
+            return Err(BundlebaseError::from(
+                "Each row must have at least 2 columns",
+            ));
         }
         let label = json_to_typst_value(&row[0]);
         let value = json_to_typst_value(&row[1]);
@@ -550,7 +652,9 @@ fn build_point_data(data: &BoundedQueryResult) -> Result<String, BundlebaseError
     let mut points = Vec::new();
     for (idx, row) in data.rows.iter().enumerate() {
         if row.len() < 2 {
-            return Err(BundlebaseError::from("Each row must have at least 2 columns"));
+            return Err(BundlebaseError::from(
+                "Each row must have at least 2 columns",
+            ));
         }
         // For line charts, if x is a string, use the row index as x
         let x = match &row[0] {
@@ -610,7 +714,10 @@ fn get_color_list(opts: &serde_yaml_ng::Value, key: &str) -> String {
             .collect();
         format!("({})", items.join(", "))
     } else {
-        let items: Vec<String> = CHART_COLORS.iter().map(|c| format!("rgb(\"{}\")", c)).collect();
+        let items: Vec<String> = CHART_COLORS
+            .iter()
+            .map(|c| format!("rgb(\"{}\")", c))
+            .collect();
         format!("({})", items.join(", "))
     }
 }
@@ -653,7 +760,11 @@ fn get_yaml_str_array(opts: &serde_yaml_ng::Value, key: &str) -> Option<Vec<Stri
                     _ => None,
                 })
                 .collect();
-            if items.is_empty() { None } else { Some(items) }
+            if items.is_empty() {
+                None
+            } else {
+                Some(items)
+            }
         }
         _ => None,
     })
@@ -835,19 +946,29 @@ mod tests {
     fn test_render_box_whisker_basic() {
         let data = BoundedQueryResult {
             columns: vec![
-                "group".to_string(), "min".to_string(), "q1".to_string(),
-                "q2".to_string(), "q3".to_string(), "max".to_string(),
+                "group".to_string(),
+                "min".to_string(),
+                "q1".to_string(),
+                "q2".to_string(),
+                "q3".to_string(),
+                "max".to_string(),
             ],
             rows: vec![
                 vec![
-                    serde_json::json!("A"), serde_json::json!(10),
-                    serde_json::json!(25), serde_json::json!(35),
-                    serde_json::json!(50), serde_json::json!(60),
+                    serde_json::json!("A"),
+                    serde_json::json!(10),
+                    serde_json::json!(25),
+                    serde_json::json!(35),
+                    serde_json::json!(50),
+                    serde_json::json!(60),
                 ],
                 vec![
-                    serde_json::json!("B"), serde_json::json!(5),
-                    serde_json::json!(20), serde_json::json!(30),
-                    serde_json::json!(45), serde_json::json!(55),
+                    serde_json::json!("B"),
+                    serde_json::json!(5),
+                    serde_json::json!(20),
+                    serde_json::json!(30),
+                    serde_json::json!(45),
+                    serde_json::json!(55),
                 ],
             ],
         };
@@ -910,9 +1031,21 @@ mod tests {
         let data = BoundedQueryResult {
             columns: vec!["x".to_string(), "y".to_string(), "y_error".to_string()],
             rows: vec![
-                vec![serde_json::json!(1), serde_json::json!(10), serde_json::json!(2)],
-                vec![serde_json::json!(2), serde_json::json!(20), serde_json::json!(3)],
-                vec![serde_json::json!(3), serde_json::json!(15), serde_json::json!(1)],
+                vec![
+                    serde_json::json!(1),
+                    serde_json::json!(10),
+                    serde_json::json!(2),
+                ],
+                vec![
+                    serde_json::json!(2),
+                    serde_json::json!(20),
+                    serde_json::json!(3),
+                ],
+                vec![
+                    serde_json::json!(3),
+                    serde_json::json!(15),
+                    serde_json::json!(1),
+                ],
             ],
         };
         let chart = ChartBlock {
@@ -932,15 +1065,17 @@ mod tests {
     fn test_render_error_bar_with_x_error() {
         let data = BoundedQueryResult {
             columns: vec![
-                "x".to_string(), "y".to_string(),
-                "y_error".to_string(), "x_error".to_string(),
+                "x".to_string(),
+                "y".to_string(),
+                "y_error".to_string(),
+                "x_error".to_string(),
             ],
-            rows: vec![
-                vec![
-                    serde_json::json!(1), serde_json::json!(10),
-                    serde_json::json!(2), serde_json::json!(0.5),
-                ],
-            ],
+            rows: vec![vec![
+                serde_json::json!(1),
+                serde_json::json!(10),
+                serde_json::json!(2),
+                serde_json::json!(0.5),
+            ]],
         };
         let chart = ChartBlock {
             bundle: "test".to_string(),

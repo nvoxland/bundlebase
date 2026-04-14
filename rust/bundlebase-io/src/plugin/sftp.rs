@@ -4,15 +4,15 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::registry::IOFactory;
+use crate::{BundlebaseError, ConfigProvider};
 use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
-use crate::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
+use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use russh::client::{self, AuthResult, Handle};
-use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, ssh_key};
+use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
 use std::fmt::Debug;
 use std::path::Path;
@@ -27,7 +27,6 @@ config_scopes!(sftp_scopes, {
 config_keys!(sftp_keys, {
     pub const KEY_PATH_CFG: ConfigKey = SFTP_SCOPE.define("key_path");
 });
-
 
 /// SSH client handler for russh.
 struct SshHandler;
@@ -82,10 +81,8 @@ pub fn parse_sftp_url(url: &Url) -> Result<(String, String, u16, String), Bundle
 ///
 /// Constructs a URL in the format: `sftp://user@host:port/path`
 fn build_sftp_url(user: &str, host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
-    Url::parse(&format!(
-        "sftp://{}@{}:{}{}",
-        user, host, port, path
-    )).map_err(|e| format!("Failed to build SFTP URL: {}", e).into())
+    Url::parse(&format!("sftp://{}@{}:{}{}", user, host, port, path))
+        .map_err(|e| format!("Failed to build SFTP URL: {}", e).into())
 }
 
 /// SFTP client for SSH file operations.
@@ -151,9 +148,10 @@ impl SftpClient {
             )));
         }
 
-        let channel = session.channel_open_session().await.map_err(|e| {
-            BundlebaseError::from(format!("Failed to open SSH channel: {}", e))
-        })?;
+        let channel = session
+            .channel_open_session()
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to open SSH channel: {}", e)))?;
 
         channel.request_subsystem(true, "sftp").await.map_err(|e| {
             BundlebaseError::from(format!("Failed to request SFTP subsystem: {}", e))
@@ -175,7 +173,8 @@ impl SftpClient {
         port: u16,
     ) -> Result<Vec<FileInfo>, BundlebaseError> {
         let mut all_files = Vec::new();
-        self.list_dir_recursive_inner(path, user, host, port, &mut all_files).await?;
+        self.list_dir_recursive_inner(path, user, host, port, &mut all_files)
+            .await?;
         Ok(all_files)
     }
 
@@ -209,7 +208,8 @@ impl SftpClient {
             let size = entry.metadata().size.unwrap_or(0);
 
             if is_dir {
-                Box::pin(self.list_dir_recursive_inner(&full_path, user, host, port, files)).await?;
+                Box::pin(self.list_dir_recursive_inner(&full_path, user, host, port, files))
+                    .await?;
             } else {
                 let url = build_sftp_url(user, host, port, &full_path)?;
                 files.push(FileInfo::new(url).with_size(size));
@@ -226,9 +226,9 @@ impl SftpClient {
         })?;
 
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).await.map_err(|e| {
-            BundlebaseError::from(format!("Failed to read from '{}': {}", path, e))
-        })?;
+        file.read_to_end(&mut buffer)
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to read from '{}': {}", path, e)))?;
 
         Ok(Bytes::from(buffer))
     }
@@ -245,9 +245,10 @@ impl SftpClient {
 
     /// Close the SFTP session and SSH connection.
     pub async fn close(self) -> Result<(), BundlebaseError> {
-        self.sftp.close().await.map_err(|e| {
-            BundlebaseError::from(format!("Failed to close SFTP session: {}", e))
-        })?;
+        self.sftp
+            .close()
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to close SFTP session: {}", e)))?;
 
         self.session
             .disconnect(russh::Disconnect::ByApplication, "", "en")
@@ -340,17 +341,25 @@ impl IOReadFile for SftpFile {
         // Stream from SFTP into a temp file
         let mut remote_file = client.open_file(&self.path).await?;
         let temp = tempfile::NamedTempFile::new().map_err(|e| {
-            BundlebaseError::from(format!("Failed to create temp file for SFTP download: {}", e))
-        })?;
-        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
-            BundlebaseError::from(format!("Failed to reopen temp file for SFTP download: {}", e))
-        })?);
-        tokio::io::copy(&mut remote_file, &mut async_temp).await.map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to download SFTP file '{}': {}",
-                self.path, e
+                "Failed to create temp file for SFTP download: {}",
+                e
             ))
         })?;
+        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to reopen temp file for SFTP download: {}",
+                e
+            ))
+        })?);
+        tokio::io::copy(&mut remote_file, &mut async_temp)
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to download SFTP file '{}': {}",
+                    self.path, e
+                ))
+            })?;
 
         client.close().await?;
 
@@ -453,7 +462,9 @@ impl IOReadDir for SftpDir {
 
     async fn list_files(&self) -> Result<Vec<FileInfo>, BundlebaseError> {
         let client = self.connect().await?;
-        let files = client.list_files_recursive(&self.path, &self.user, &self.host, self.port).await?;
+        let files = client
+            .list_files_recursive(&self.path, &self.user, &self.host, self.port)
+            .await?;
         client.close().await?;
         Ok(files)
     }
@@ -573,10 +584,7 @@ mod tests {
         let url = Url::parse("http://example.com/data").unwrap();
         let result = parse_sftp_url(&url);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected 'sftp'"));
+        assert!(result.unwrap_err().to_string().contains("Expected 'sftp'"));
     }
 
     #[test]
@@ -584,7 +592,10 @@ mod tests {
         let url = Url::parse("sftp://user@example.com").unwrap();
         let result = parse_sftp_url(&url);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must include a path"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must include a path"));
     }
 
     #[test]

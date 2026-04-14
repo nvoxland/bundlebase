@@ -3,14 +3,14 @@
 //! Discovers and downloads dataset files from Kaggle via their REST API.
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
+use async_trait::async_trait;
 use bundlebase_common::connector::{
-    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::progress::ProgressScope;
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
-use bundlebase_common::{ConfigProvider, BundlebaseError, Scope};
-use async_trait::async_trait;
+use bundlebase_common::{BundlebaseError, ConfigProvider, Scope};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use std::collections::{HashMap, HashSet};
@@ -28,10 +28,7 @@ config_scopes!(scopes, {
         /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some("kaggle/zillow/zecon")
         fn url_to_name(scope: &ConfigScope, input: &str) -> Option<String> {
             if let Ok(url) = Url::parse(input) {
-                let mut segments = url.path()
-                    .split('/')
-                    .filter(|s| !s.is_empty())
-                    .peekable();
+                let mut segments = url.path().split('/').filter(|s| !s.is_empty()).peekable();
                 // Skip leading "datasets" path prefix used in browser URLs
                 if segments.peek() == Some(&"datasets") {
                     segments.next();
@@ -40,10 +37,7 @@ config_scopes!(scopes, {
                 if owner_dataset.is_empty() {
                     Some(scope.name.to_string())
                 } else {
-                    Some(format!(
-                        "{}/{}",
-                        scope.name, owner_dataset.join("/")
-                    ))
+                    Some(format!("{}/{}", scope.name, owner_dataset.join("/")))
                 }
             } else {
                 None
@@ -59,12 +53,15 @@ config_keys!(configs, {
         .with_default("https://www.kaggle.com");
     pub const USERNAME_CFG: ConfigKey = KAGGLE_SCOPE
         .define("username")
-        .with_default_fn("username in ~/.kaggle/kaggle.json", || read_kaggle_json_field("username"));
+        .with_default_fn("username in ~/.kaggle/kaggle.json", || {
+            read_kaggle_json_field("username")
+        });
     pub const API_KEY_CFG: ConfigKey = KAGGLE_SCOPE
         .define_secure("key")
-        .with_default_fn("key in ~/.kaggle/kaggle.json", || read_kaggle_json_field("key"));
+        .with_default_fn("key in ~/.kaggle/kaggle.json", || {
+            read_kaggle_json_field("key")
+        });
 });
-
 
 pub(super) fn dataset_scope(dataset: &str) -> Result<Scope, bundlebase_common::BundlebaseError> {
     Scope::from_name(format!("{}/{}", KAGGLE_SCOPE.name, dataset))
@@ -74,7 +71,9 @@ fn read_kaggle_json_field(field: &str) -> Option<String> {
     let path = shellexpand::tilde("~/.kaggle/kaggle.json").to_string();
     let content = std::fs::read_to_string(&path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    json.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+    json.get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Built-in "kaggle" connector.
@@ -97,7 +96,8 @@ impl Connector for KaggleConnector {
             arg_specs: vec![
                 ArgSpec {
                     name: "dataset",
-                    description: "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
+                    description:
+                        "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
                     required: true,
                     default: None,
                 },
@@ -162,23 +162,14 @@ impl Connector for KaggleConnector {
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config.as_ref(), dataset)?;
 
-        let (all_files, dataset_version) = Self::list_kaggle_files(
-            &client,
-            dataset,
-            &patterns,
-            version,
-        )
-        .await?;
+        let (all_files, dataset_version) =
+            Self::list_kaggle_files(&client, dataset, &patterns, version).await?;
 
         let locations = all_files
             .into_iter()
             .map(|kf| {
-                let format = SourceFormat::from_extension(
-                    kf.filename
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or("dat"),
-                );
+                let format =
+                    SourceFormat::from_extension(kf.filename.rsplit('.').next().unwrap_or("dat"));
                 DiscoveredLocation {
                     location: kf.filename,
                     must_copy: true,
@@ -210,7 +201,8 @@ impl Connector for KaggleConnector {
             download_url.push_str(&format!("?datasetVersionNumber={}", v));
         }
 
-        let stream = Self::download_kaggle_bytes(&client, &download_url, &location.location).await?;
+        let stream =
+            Self::download_kaggle_bytes(&client, &download_url, &location.location).await?;
         Ok(Some(SourceData::RawBytes(stream)))
     }
 
@@ -247,20 +239,13 @@ impl KaggleConnector {
             return Ok(v.to_string());
         }
 
-        let path = format!(
-            "/api/v1/datasets/list?search={}",
-            dataset
-        );
-        let response = client
-            .get_path(&path)
-            .send()
-            .await
-            .map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to read Kaggle dataset version for '{}': {}",
-                    dataset, e
-                ))
-            })?;
+        let path = format!("/api/v1/datasets/list?search={}", dataset);
+        let response = client.get_path(&path).send().await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to read Kaggle dataset version for '{}': {}",
+                dataset, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             log::warn!(
@@ -317,23 +302,16 @@ impl KaggleConnector {
         patterns: &[glob::Pattern],
         version: Option<&str>,
     ) -> Result<(Vec<KaggleFileInfo>, String), BundlebaseError> {
-        let mut list_path = format!(
-            "/api/v1/datasets/list/{}",
-            dataset
-        );
+        let mut list_path = format!("/api/v1/datasets/list/{}", dataset);
         if let Some(v) = version {
             list_path.push_str(&format!("?datasetVersionNumber={}", v));
         }
-        let response = client
-            .get_path(&list_path)
-            .send()
-            .await
-            .map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to list Kaggle dataset '{}': {}",
-                    dataset, e
-                ))
-            })?;
+        let response = client.get_path(&list_path).send().await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to list Kaggle dataset '{}': {}",
+                dataset, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             return Err(BundlebaseError::from(format!(
@@ -357,12 +335,7 @@ impl KaggleConnector {
         })?;
 
         // Fetch dataset version from the dataset view endpoint
-        let dataset_version = Self::read_kaggle_version(
-            client,
-            dataset,
-            version,
-        )
-        .await?;
+        let dataset_version = Self::read_kaggle_version(client, dataset, version).await?;
 
         let files = body
             .get("datasetFiles")
@@ -409,16 +382,12 @@ impl KaggleConnector {
         use futures::StreamExt;
         use tokio::io::AsyncWriteExt;
 
-        let response = client
-            .get_url(url)
-            .send()
-            .await
-            .map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to download Kaggle file '{}': {}",
-                    source_location, e
-                ))
-            })?;
+        let response = client.get_url(url).send().await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to download Kaggle file '{}': {}",
+                source_location, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             return Err(BundlebaseError::from(format!(
@@ -584,9 +553,18 @@ mod tests {
         let sig = func.signature();
         assert_eq!(sig.name, "kaggle");
         assert_eq!(sig.arg_specs.len(), 3);
-        assert!(sig.arg_specs.iter().any(|s| s.name == "dataset" && s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "patterns" && !s.required));
-        assert!(sig.arg_specs.iter().any(|s| s.name == "version" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "dataset" && s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "patterns" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "version" && !s.required));
     }
 
     #[test]
@@ -594,7 +572,12 @@ mod tests {
         let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
-        assert!({ let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) }.is_ok());
+        assert!({
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        }
+        .is_ok());
     }
 
     #[test]
@@ -602,7 +585,11 @@ mod tests {
         let func = KaggleConnector;
         let args = HashMap::new();
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("requires a 'dataset' argument"));
@@ -614,7 +601,11 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "just-a-name".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
@@ -627,7 +618,11 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "a/b/c".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
@@ -639,12 +634,19 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "/dataset".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
 
         let mut args2 = HashMap::new();
         args2.insert("dataset".to_string(), "owner/".to_string());
-        let result2 = { let sig = func.signature(); validate_connector_args(&args2, &sig).and_then(|_| func.validate_args(&args2)) };
+        let result2 = {
+            let sig = func.signature();
+            validate_connector_args(&args2, &sig).and_then(|_| func.validate_args(&args2))
+        };
         assert!(result2.is_err());
     }
 
@@ -654,7 +656,12 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("patterns".to_string(), "*.csv".to_string());
-        assert!({ let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) }.is_ok());
+        assert!({
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        }
+        .is_ok());
     }
 
     #[test]
@@ -663,7 +670,12 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "3".to_string());
-        assert!({ let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) }.is_ok());
+        assert!({
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        }
+        .is_ok());
     }
 
     #[test]
@@ -673,7 +685,11 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "0".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -687,7 +703,11 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "-1".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -700,7 +720,11 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "abc".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -714,7 +738,11 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("unknown".to_string(), "value".to_string());
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args)) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+                .and_then(|_| func.validate_args(&args))
+        };
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("does not accept argument 'unknown'"));
@@ -723,7 +751,8 @@ mod tests {
     #[test]
     fn test_kaggle_client_from_config_missing_credentials() {
         let config = crate::test_utils::test_config();
-        let client = KaggleClient::from_config(&config, "zillow/zecon").expect("client creation failed");
+        let client =
+            KaggleClient::from_config(&config, "zillow/zecon").expect("client creation failed");
         if client.username.is_none() {
             assert!(client.key.is_none() || client.key.is_some());
         }
@@ -737,7 +766,8 @@ mod tests {
             ("kaggle", API_KEY_CFG.key, "config_key"),
         ]);
 
-        let client = KaggleClient::from_config(config.as_ref(), "zillow/zecon").expect("client creation failed");
+        let client = KaggleClient::from_config(config.as_ref(), "zillow/zecon")
+            .expect("client creation failed");
         assert_eq!(client.base_url, "https://test.kaggle.com");
         assert_eq!(client.username, Some("config_user".to_string()));
         assert_eq!(client.key, Some("config_key".to_string()));
@@ -745,11 +775,14 @@ mod tests {
 
     #[test]
     fn test_kaggle_client_from_config_partial_falls_back_to_default_fn() {
-        let config = crate::test_utils::test_config_with_values(&[
-            ("kaggle", USERNAME_CFG.key, "config_user"),
-        ]);
+        let config = crate::test_utils::test_config_with_values(&[(
+            "kaggle",
+            USERNAME_CFG.key,
+            "config_user",
+        )]);
 
-        let client = KaggleClient::from_config(config.as_ref(), "zillow/zecon").expect("client creation failed");
+        let client = KaggleClient::from_config(config.as_ref(), "zillow/zecon")
+            .expect("client creation failed");
         assert_eq!(client.username, Some("config_user".to_string()));
     }
 
@@ -765,7 +798,8 @@ mod tests {
             let mut zip = zip::ZipWriter::new(&mut zip_temp);
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
-            zip.start_file("hello.txt", options).expect("start_file failed");
+            zip.start_file("hello.txt", options)
+                .expect("start_file failed");
             zip.write_all(b"hello world").expect("write_all failed");
             zip.finish().expect("finish failed");
         }
@@ -802,7 +836,9 @@ mod tests {
         use std::io::Write;
 
         let mut garbage_temp = tempfile::NamedTempFile::new().expect("temp file failed");
-        garbage_temp.write_all(&[0u8, 1, 2, 3, 4, 5]).expect("write failed");
+        garbage_temp
+            .write_all(&[0u8, 1, 2, 3, 4, 5])
+            .expect("write failed");
         garbage_temp.flush().expect("flush failed");
 
         let result = KaggleConnector::extract_from_zip_to_file(garbage_temp.path(), "test.csv");
@@ -819,14 +855,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_kaggle_version_with_explicit_version() {
-        let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "owner/ds",
-            Some("5"),
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "owner/ds", Some("5"))
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "5");
     }
 
@@ -845,14 +878,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "zillow/zecon",
-            None,
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "zillow/zecon", None)
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "42");
     }
 
@@ -870,14 +900,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "zillow/zecon",
-            None,
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "zillow/zecon", None)
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -891,14 +918,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "zillow/zecon",
-            None,
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "zillow/zecon", None)
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -912,14 +936,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "zillow/zecon",
-            None,
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "zillow/zecon", None)
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -938,14 +959,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into())).expect("client creation failed");
-        let result = KaggleConnector::read_kaggle_version(
-            &client,
-            "zillow/zecon",
-            None,
-        )
-        .await
-        .expect("read_kaggle_version failed");
+        let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into()))
+            .expect("client creation failed");
+        let result = KaggleConnector::read_kaggle_version(&client, "zillow/zecon", None)
+            .await
+            .expect("read_kaggle_version failed");
         assert_eq!(result, "1");
     }
 
@@ -981,16 +999,13 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let (files, version) = KaggleConnector::list_kaggle_files(
-            &client,
-            "zillow/zecon",
-            &patterns,
-            None,
-        )
-        .await
-        .expect("list_kaggle_files failed");
+        let (files, version) =
+            KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None)
+                .await
+                .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].filename, "data.csv");
@@ -1028,16 +1043,13 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
         let patterns = vec![glob::Pattern::new("*.csv").expect("pattern creation failed")];
-        let (files, _) = KaggleConnector::list_kaggle_files(
-            &client,
-            "zillow/zecon",
-            &patterns,
-            None,
-        )
-        .await
-        .expect("list_kaggle_files failed");
+        let (files, _) =
+            KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None)
+                .await
+                .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, "data.csv");
@@ -1062,16 +1074,13 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let (files, version) = KaggleConnector::list_kaggle_files(
-            &client,
-            "zillow/zecon",
-            &patterns,
-            Some("2"),
-        )
-        .await
-        .expect("list_kaggle_files failed");
+        let (files, version) =
+            KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, Some("2"))
+                .await
+                .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 1);
         assert_eq!(version, "2");
@@ -1089,15 +1098,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let result = KaggleConnector::list_kaggle_files(
-            &client,
-            "zillow/zecon",
-            &patterns,
-            None,
-        )
-        .await;
+        let result =
+            KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None).await;
 
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
@@ -1126,15 +1131,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into()))
+            .expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let result = KaggleConnector::list_kaggle_files(
-            &client,
-            "zillow/zecon",
-            &patterns,
-            None,
-        )
-        .await;
+        let result =
+            KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None).await;
 
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();

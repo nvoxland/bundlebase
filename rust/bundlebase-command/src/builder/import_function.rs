@@ -3,18 +3,18 @@
 //! Handles both single function loading and wildcard/bulk discovery
 //! (e.g., `IMPORT FUNCTION acme.* FROM 'lib://./mylib.so'`).
 
-use crate::parser::{escape_string, extract_string_content};
 use crate::parser::extract_identifier;
+use crate::parser::{escape_string, extract_string_content};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::ImportFunctionOp;
+use bundlebase::BundleBuilder;
+use bundlebase_common::arrow_types::parse_arrow_type_name;
+use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
 use bundlebase_udf::runtime::UdfRuntime;
-use bundlebase_common::arrow_types::parse_arrow_type_name;
 use bundlebase_udf::{parse_function_name, FunctionKind};
-use bundlebase::bundle::operation::ImportFunctionOp;
-use bundlebase_common::BundlebaseError;
 use std::collections::HashMap;
-use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
 
 /// Command to define a named function.
 ///
@@ -32,11 +32,7 @@ pub struct ImportFunctionCommand {
 }
 
 impl ImportFunctionCommand {
-    pub fn new(
-        name: impl Into<String>,
-        from: impl Into<String>,
-        platform: Platform,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, from: impl Into<String>, platform: Platform) -> Self {
         Self {
             name: name.into(),
             from: from.into(),
@@ -99,13 +95,11 @@ impl CommandParsing for ImportFunctionCommand {
             }
         }
 
-        let name = name.ok_or_else(|| -> BundlebaseError {
-            "IMPORT FUNCTION missing function name".into()
-        })?;
+        let name = name
+            .ok_or_else(|| -> BundlebaseError { "IMPORT FUNCTION missing function name".into() })?;
 
-        let from = from.ok_or_else(|| -> BundlebaseError {
-            "IMPORT FUNCTION missing FROM clause".into()
-        })?;
+        let from = from
+            .ok_or_else(|| -> BundlebaseError { "IMPORT FUNCTION missing FROM clause".into() })?;
 
         let platform: Platform = match args.remove("platform") {
             Some(s) => s.parse()?,
@@ -118,7 +112,10 @@ impl CommandParsing for ImportFunctionCommand {
     fn to_statement(&self) -> String {
         let mut with_parts = Vec::new();
         if self.platform != Platform::any() {
-            with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
+            with_parts.push(format!(
+                "platform = {}",
+                escape_string(&self.platform.to_string())
+            ));
         }
 
         if with_parts.is_empty() {
@@ -146,7 +143,11 @@ impl BundleBuilderCommand for ImportFunctionCommand {
 
         // Persistent functions cannot use runtimes that can't be bundled
         if !from.can_bundle() {
-            return Err(format!("'{}' runtime cannot be bundled — use import_temp_function instead", from.runtime_name()).into());
+            return Err(format!(
+                "'{}' runtime cannot be bundled — use import_temp_function instead",
+                from.runtime_name()
+            )
+            .into());
         }
 
         // Copy the referenced file into the bundle ONCE (before manifest loading).
@@ -155,20 +156,21 @@ impl BundleBuilderCommand for ImportFunctionCommand {
         let bundled_from = from.copy_into_bundle(&builder.bundle().data_dir()).await?;
 
         // Verify the bundled copy works from its new location
-        bundled_from.verify_bundled_function(&builder.bundle().data_dir()).await?;
+        bundled_from
+            .verify_bundled_function(&builder.bundle().data_dir())
+            .await?;
 
         if self.is_wildcard() {
             // Wildcard/bulk mode — discover all functions from manifest
             let namespace = self.wildcard_namespace();
 
-            let manifest = from.load_manifest()?
-                .ok_or_else(|| -> BundlebaseError {
-                    format!(
-                        "Wildcard function discovery not supported for '{}' runtime",
-                        from.runtime_name()
-                    )
-                    .into()
-                })?;
+            let manifest = from.load_manifest()?.ok_or_else(|| -> BundlebaseError {
+                format!(
+                    "Wildcard function discovery not supported for '{}' runtime",
+                    from.runtime_name()
+                )
+                .into()
+            })?;
 
             let mut count = 0;
             for entry in &manifest.functions {
@@ -183,7 +185,11 @@ impl BundleBuilderCommand for ImportFunctionCommand {
                 let symbol = entry.symbol.as_deref().unwrap_or(&entry.name);
                 // bundled_from.to_entrypoint_string() is just the hash path (no symbol) for wildcard mode
                 let entrypoint = format!("{}:{}", bundled_from.to_entrypoint_string(), symbol);
-                let func_from = UdfRuntime::parse_from(&format!("{}::{}", bundled_from.runtime_name(), entrypoint))?;
+                let func_from = UdfRuntime::parse_from(&format!(
+                    "{}::{}",
+                    bundled_from.runtime_name(),
+                    entrypoint
+                ))?;
                 let name = format!("{}.{}", namespace, entry.name);
 
                 let op = ImportFunctionOp::new(
@@ -200,7 +206,8 @@ impl BundleBuilderCommand for ImportFunctionCommand {
 
             Ok(format!(
                 "Loaded {} function(s) from '{}'",
-                count, from.to_entrypoint_string()
+                count,
+                from.to_entrypoint_string()
             ))
         } else {
             let namespaced = parse_function_name(&self.name)?;
@@ -208,7 +215,9 @@ impl BundleBuilderCommand for ImportFunctionCommand {
             let entry = from.lookup_function_in_manifest(func_name)?;
             let kind: FunctionKind = entry.kind.parse()?;
 
-            let input_types = entry.input_types.iter()
+            let input_types = entry
+                .input_types
+                .iter()
                 .map(|s| parse_arrow_type_name(s))
                 .collect::<Result<Vec<_>, _>>()?;
             let return_type = parse_arrow_type_name(&entry.return_type)?;
@@ -231,9 +240,9 @@ impl BundleBuilderCommand for ImportFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_import_function() {
@@ -251,7 +260,8 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_function_with_platform() {
-        let input = "IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func' WITH (platform = 'linux/amd64')";
+        let input =
+            "IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func' WITH (platform = 'linux/amd64')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::ImportFunction(c) => {
@@ -319,13 +329,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_function_roundtrip() {
-        let cmd = ImportFunctionCommand::new(
-            "acme.double_val",
-            "ipc::./my_func",
-            Platform::any(),
-        );
+        let cmd = ImportFunctionCommand::new("acme.double_val", "ipc::./my_func", Platform::any());
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func'");
+        assert_eq!(
+            statement,
+            "IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func'"
+        );
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::ImportFunction(c) => {
@@ -358,11 +367,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_function_wildcard_roundtrip() {
-        let cmd = ImportFunctionCommand::new(
-            "acme.*",
-            "ffi::./mylib.so",
-            Platform::any(),
-        );
+        let cmd = ImportFunctionCommand::new("acme.*", "ffi::./mylib.so", Platform::any());
         let statement = cmd.to_statement();
         assert_eq!(statement, "IMPORT FUNCTION acme.* FROM 'ffi::./mylib.so'");
         let parsed = parse_command(&statement).unwrap();

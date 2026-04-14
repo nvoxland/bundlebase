@@ -3,85 +3,89 @@ mod always_delete;
 mod always_update;
 mod attach_block;
 mod cast_column;
-mod drop_cast_column;
+mod create_index;
+mod create_join;
 mod create_report;
+mod create_source;
 mod create_view;
 mod delete;
-mod drop_report;
+mod detach_block;
 mod drop_always_delete;
 mod drop_always_update;
-mod update_data;
-mod import_function;
-mod create_index;
-mod drop_function;
-mod create_join;
-mod create_source;
-mod import_connector;
-mod detach_block;
+mod drop_cast_column;
+mod drop_column;
 mod drop_connector;
+mod drop_function;
 mod drop_index;
 mod drop_join;
+mod drop_report;
 mod drop_view;
-mod replace_block;
 mod filter;
+mod import_connector;
+mod import_function;
 mod index_blocks;
-mod drop_column;
 mod parameter_value;
 mod rename_column;
-mod rename_join;
 mod rename_connector;
 mod rename_function;
+mod rename_join;
 mod rename_view;
-pub(crate) mod serde_util;
+mod replace_block;
 mod save_config;
+pub(crate) mod serde_util;
 mod set_description;
 mod set_max_version;
 mod set_min_version;
 mod set_name;
+mod update_data;
 mod update_version;
 
+use crate::bundle::bundle_schema::BundleSchema;
 pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
 pub use crate::bundle::operation::always_update::AlwaysUpdateOp;
-pub use crate::bundle::operation::attach_block::{AttachBlockOp, BatchedSource, SourceInfo};
+pub use crate::bundle::operation::attach_block::{
+    AttachBlockOp, BatchedSource, SharedAttachContext, SourceInfo,
+};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
-pub use crate::bundle::operation::drop_cast_column::DropCastColumnOp;
-pub use crate::bundle::operation::create_report::CreateReportOp;
-pub use crate::bundle::operation::create_view::CreateViewOp;
-pub use crate::bundle::operation::drop_report::DropReportOp;
-pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
-pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::create_join::CreateJoinOp;
+pub use crate::bundle::operation::create_report::CreateReportOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
-pub use crate::bundle::operation::import_connector::ImportConnectorOp;
+pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::delete::DeleteOp;
+pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_always_delete::DropAlwaysDeleteOp;
 pub use crate::bundle::operation::drop_always_update::DropAlwaysUpdateOp;
-pub use crate::bundle::operation::update_data::UpdateDataOp;
-pub use crate::bundle::operation::detach_block::DetachBlockOp;
+pub use crate::bundle::operation::drop_cast_column::DropCastColumnOp;
+pub use crate::bundle::operation::drop_column::DropColumnOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
+pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_join::DropJoinOp;
+pub use crate::bundle::operation::drop_report::DropReportOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
-pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
+pub use crate::bundle::operation::import_connector::ImportConnectorOp;
+pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
-pub use crate::bundle::operation::drop_column::DropColumnOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_connector::RenameConnectorOp;
 pub use crate::bundle::operation::rename_function::RenameFunctionOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
+pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_max_version::SetMaxVersionOp;
 pub use crate::bundle::operation::set_min_version::SetMinVersionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
+pub use crate::bundle::operation::update_data::UpdateDataOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
-use crate::bundle::bundle_schema::BundleSchema;
 use crate::data::ObjectId;
+use crate::object_id::ColumnId;
 use crate::{versioning, Bundle, BundlebaseError};
+use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{DataFrame, SessionContext};
 use serde::{Deserialize, Serialize};
@@ -89,8 +93,6 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use uuid::Uuid;
-use arrow::datatypes::DataType;
-use crate::object_id::ColumnId;
 
 pub use crate::bundle::operation::create_source::ExpectedColumn;
 
@@ -300,7 +302,6 @@ define_any_operation! {
     SetName(SetNameOp),
     UpdateVersion(UpdateVersionOp),
 }
-
 
 impl Display for AnyOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

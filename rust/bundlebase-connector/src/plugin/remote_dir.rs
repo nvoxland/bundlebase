@@ -3,17 +3,17 @@
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
+use async_trait::async_trait;
 use bundlebase_common::connector::{
-    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::file::IOReadFile;
+use bundlebase_io::io_registry;
 use bundlebase_io::plugin::ftp::FtpFile;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::plugin::sftp::{parse_sftp_url, SftpClient};
-use bundlebase_io::io_registry;
-use bundlebase_common::{ConfigProvider, BundlebaseError};
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::{BoxStream, StreamExt};
 use std::collections::{HashMap, HashSet};
@@ -88,7 +88,10 @@ impl Connector for RemoteDirConnector {
             .into_iter()
             .filter_map(|file| {
                 let relative_path = Self::relative_path(&base_url, &file.url);
-                if patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
+                if patterns
+                    .iter()
+                    .any(|pattern| pattern.matches(&relative_path))
+                {
                     let format = SourceFormat::from_extension(
                         relative_path.rsplit('.').next().unwrap_or("dat"),
                     );
@@ -104,7 +107,8 @@ impl Connector for RemoteDirConnector {
             .map(|(file, relative_path, format)| {
                 let config = Arc::clone(config);
                 async move {
-                    let version = Self::read_remote_version(&file.url, &config).await
+                    let version = Self::read_remote_version(&file.url, &config)
+                        .await
                         .unwrap_or_else(|_| "unknown".to_string());
                     DiscoveredLocation {
                         location: relative_path,
@@ -209,9 +213,7 @@ impl RemoteDirConnector {
     ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, BundlebaseError> {
         let (user, host, port, remote_path) = parse_sftp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
-            BundlebaseError::from(
-                "SFTP source requires 'key_path' argument for downloading files",
-            )
+            BundlebaseError::from("SFTP source requires 'key_path' argument for downloading files")
         })?;
         let key_path_expanded = shellexpand::tilde(key_path_str).to_string();
 
@@ -222,17 +224,25 @@ impl RemoteDirConnector {
         // Stream from SFTP into a temp file
         let mut remote_file = sftp.open_file(&remote_path).await?;
         let temp = tempfile::NamedTempFile::new().map_err(|e| {
-            BundlebaseError::from(format!("Failed to create temp file for SFTP download: {}", e))
-        })?;
-        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
-            BundlebaseError::from(format!("Failed to reopen temp file for SFTP download: {}", e))
-        })?);
-        tokio::io::copy(&mut remote_file, &mut async_temp).await.map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to download SFTP file '{}': {}",
-                remote_path, e
+                "Failed to create temp file for SFTP download: {}",
+                e
             ))
         })?;
+        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to reopen temp file for SFTP download: {}",
+                e
+            ))
+        })?);
+        tokio::io::copy(&mut remote_file, &mut async_temp)
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to download SFTP file '{}': {}",
+                    remote_path, e
+                ))
+            })?;
 
         sftp.close().await?;
 
@@ -245,9 +255,10 @@ impl RemoteDirConnector {
         config: &Arc<dyn ConfigProvider>,
     ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url, config.clone())?;
-        let temp = ftp_file.download_to_temp_file().await?.ok_or_else(|| {
-            BundlebaseError::from(format!("FTP file not found: {}", url))
-        })?;
+        let temp = ftp_file
+            .download_to_temp_file()
+            .await?
+            .ok_or_else(|| BundlebaseError::from(format!("FTP file not found: {}", url)))?;
         Ok(shared_utils::stream_from_temp_file(temp))
     }
 
@@ -320,11 +331,13 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_missing_url() {
-        
         let func = RemoteDirConnector;
         let args = HashMap::new();
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+        };
         assert!(result.is_err());
         assert!(result
             .err()
@@ -335,10 +348,13 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_valid() {
-        
         let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
-        assert!({ let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) }.is_ok());
+        assert!({
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+        }
+        .is_ok());
     }
 }

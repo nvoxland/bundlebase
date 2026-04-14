@@ -20,33 +20,101 @@ fn array_value_to_json(column: &ArrayRef, row_idx: usize) -> Value {
     }
 
     match column.data_type() {
-        DataType::Int8 => json!(column.as_any().downcast_ref::<Int8Array>().expect("Int8 downcast").value(row_idx)),
-        DataType::Int16 => json!(column.as_any().downcast_ref::<Int16Array>().expect("Int16 downcast").value(row_idx)),
-        DataType::Int32 => json!(column.as_any().downcast_ref::<Int32Array>().expect("Int32 downcast").value(row_idx)),
-        DataType::Int64 => json!(column.as_any().downcast_ref::<Int64Array>().expect("Int64 downcast").value(row_idx)),
-        DataType::UInt8 => json!(column.as_any().downcast_ref::<UInt8Array>().expect("UInt8 downcast").value(row_idx)),
-        DataType::UInt16 => json!(column.as_any().downcast_ref::<UInt16Array>().expect("UInt16 downcast").value(row_idx)),
-        DataType::UInt32 => json!(column.as_any().downcast_ref::<UInt32Array>().expect("UInt32 downcast").value(row_idx)),
-        DataType::UInt64 => json!(column.as_any().downcast_ref::<UInt64Array>().expect("UInt64 downcast").value(row_idx)),
+        DataType::Int8 => json!(column
+            .as_any()
+            .downcast_ref::<Int8Array>()
+            .expect("Int8 downcast")
+            .value(row_idx)),
+        DataType::Int16 => json!(column
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .expect("Int16 downcast")
+            .value(row_idx)),
+        DataType::Int32 => json!(column
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .expect("Int32 downcast")
+            .value(row_idx)),
+        DataType::Int64 => json!(column
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("Int64 downcast")
+            .value(row_idx)),
+        DataType::UInt8 => json!(column
+            .as_any()
+            .downcast_ref::<UInt8Array>()
+            .expect("UInt8 downcast")
+            .value(row_idx)),
+        DataType::UInt16 => json!(column
+            .as_any()
+            .downcast_ref::<UInt16Array>()
+            .expect("UInt16 downcast")
+            .value(row_idx)),
+        DataType::UInt32 => json!(column
+            .as_any()
+            .downcast_ref::<UInt32Array>()
+            .expect("UInt32 downcast")
+            .value(row_idx)),
+        DataType::UInt64 => json!(column
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .expect("UInt64 downcast")
+            .value(row_idx)),
         DataType::Float32 => {
-            let v = column.as_any().downcast_ref::<Float32Array>().expect("Float32 downcast").value(row_idx);
-            if v.is_finite() { json!(v) } else { json!(v.to_string()) }
+            let v = column
+                .as_any()
+                .downcast_ref::<Float32Array>()
+                .expect("Float32 downcast")
+                .value(row_idx);
+            if v.is_finite() {
+                json!(v)
+            } else {
+                json!(v.to_string())
+            }
         }
         DataType::Float64 => {
-            let v = column.as_any().downcast_ref::<Float64Array>().expect("Float64 downcast").value(row_idx);
-            if v.is_finite() { json!(v) } else { json!(v.to_string()) }
+            let v = column
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .expect("Float64 downcast")
+                .value(row_idx);
+            if v.is_finite() {
+                json!(v)
+            } else {
+                json!(v.to_string())
+            }
         }
-        DataType::Boolean => json!(column.as_any().downcast_ref::<BooleanArray>().expect("Boolean downcast").value(row_idx)),
-        DataType::Utf8 => json!(column.as_any().downcast_ref::<StringArray>().expect("Utf8 downcast").value(row_idx)),
-        DataType::LargeUtf8 => json!(column.as_any().downcast_ref::<LargeStringArray>().expect("LargeUtf8 downcast").value(row_idx)),
-        DataType::Utf8View => json!(column.as_any().downcast_ref::<StringViewArray>().expect("Utf8View downcast").value(row_idx)),
+        DataType::Boolean => json!(column
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .expect("Boolean downcast")
+            .value(row_idx)),
+        DataType::Utf8 => json!(column
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Utf8 downcast")
+            .value(row_idx)),
+        DataType::LargeUtf8 => json!(column
+            .as_any()
+            .downcast_ref::<LargeStringArray>()
+            .expect("LargeUtf8 downcast")
+            .value(row_idx)),
+        DataType::Utf8View => json!(column
+            .as_any()
+            .downcast_ref::<StringViewArray>()
+            .expect("Utf8View downcast")
+            .value(row_idx)),
         DataType::Date32 => {
             // Use Arrow's display formatting for dates
             let formatted = super::display::format_array_value(column, row_idx);
             json!(formatted)
         }
         DataType::Date64 => {
-            let v = column.as_any().downcast_ref::<Date64Array>().expect("Date64 downcast").value(row_idx);
+            let v = column
+                .as_any()
+                .downcast_ref::<Date64Array>()
+                .expect("Date64 downcast")
+                .value(row_idx);
             json!(v)
         }
         DataType::Timestamp(_, _) => {
@@ -118,8 +186,9 @@ pub async fn format_stream_json(
             if total_rows == 1 && schema.fields().len() == 1 {
                 let batch = &batches[0];
                 let value = array_value_to_json(batch.column(0), 0);
-                Ok(serde_json::to_string_pretty(&value)
-                    .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))?)
+                Ok(serde_json::to_string_pretty(&value).map_err(|e| {
+                    BundlebaseError::from(format!("JSON serialization error: {}", e))
+                })?)
             } else {
                 // Unexpected shape - fall back to array
                 format_as_array(&batches, &schema, limit)
@@ -135,8 +204,11 @@ pub async fn format_stream_json(
                         array_value_to_json(batch.column(i), 0),
                     );
                 }
-                Ok(serde_json::to_string_pretty(&Value::Object(obj))
-                    .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))?)
+                Ok(
+                    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
+                        BundlebaseError::from(format!("JSON serialization error: {}", e))
+                    })?,
+                )
             } else {
                 // Multiple rows - fall back to array
                 format_as_array(&batches, &schema, limit)
@@ -195,12 +267,14 @@ mod tests {
     use std::sync::Arc;
 
     fn create_single_value_stream() -> SendableRecordBatchStream {
-        let schema = Arc::new(Schema::new(vec![Field::new("count", DataType::Int64, false)]));
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![42]))],
-        )
-        .unwrap();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "count",
+            DataType::Int64,
+            false,
+        )]));
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![42]))])
+                .unwrap();
         let stream = futures::stream::iter(vec![Ok(batch)]);
         Box::pin(RecordBatchStreamAdapter::new(schema, stream))
     }

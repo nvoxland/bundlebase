@@ -1,22 +1,23 @@
-use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundleConfig};
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use std::collections::HashMap;
+use std::sync::Arc;
 use url::Url;
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 /// Helper to sum total changes from FetchResults
 fn total_changes(results: &[bundlebase::source::FetchResults]) -> usize {
@@ -39,8 +40,11 @@ async fn copy_test_file(
     target_dir: &dyn IOReadWriteDir,
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
-    let source_obj =
-        readable_file_from_url(&Url::parse(test_file)?, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
+    let source_obj = readable_file_from_url(
+        &Url::parse(test_file)?,
+        Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
+    )
+    .await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -58,14 +62,20 @@ async fn test_create_source_basic() -> Result<(), BundlebaseError> {
 
     // Define a source with default patterns
     bundle
-        .create_source("remote_dir", make_source_args("memory:///some/path/", None), None)
+        .create_source(
+            "remote_dir",
+            make_source_args("memory:///some/path/", None),
+            None,
+        )
         .await?;
 
     // Commit and verify
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains createSource operation
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///some/path/"));
 
@@ -93,7 +103,9 @@ async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify patterns are serialized correctly in args (as comma-separated string)
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
     assert!(contents.contains("patterns: '**/*.parquet,**/*.csv'"));
 
     Ok(())
@@ -107,14 +119,20 @@ async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
 
     // Define source without patterns (function defaults to **/* internally)
     bundle
-        .create_source("remote_dir", make_source_args("memory:///data/", None), None)
+        .create_source(
+            "remote_dir",
+            make_source_args("memory:///data/", None),
+            None,
+        )
         .await?;
 
     bundle.commit("Defined source").await?;
 
     // When patterns are not provided, they are not included in args
     // The remote_dir function defaults to "**/*" internally
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
     // Patterns are not in args when not explicitly provided
@@ -139,11 +157,14 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     // Verify file was auto-attached (create_source calls fetch automatically)
@@ -164,11 +185,14 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
     let bundle_dir = random_memory_dir();
 
     // Create bundle and define source (empty directory)
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     // Verify no data yet by fetching (should attach nothing)
@@ -208,11 +232,14 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (auto-attaches)
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     // First explicit fetch should find nothing (already attached by create_source)
@@ -244,11 +271,14 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*")),
+            None,
+        )
         .await?;
 
     // First file should be auto-attached
@@ -292,11 +322,14 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle with parquet-only pattern
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     // Only parquet should be attached (1000 rows)
@@ -324,11 +357,14 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -357,20 +393,29 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains source in attach operation
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     // The attach operation should have a source field
-    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
+    assert!(
+        contents.contains("source:"),
+        "AttachBlock should have source: {}",
+        contents
+    );
 
     Ok(())
 }
@@ -379,17 +424,22 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
 async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
     init();
     let bundle_dir = random_memory_dir();
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args("memory:///data/", Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args("memory:///data/", Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify CreateSource is serialized
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
@@ -414,11 +464,14 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
-        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -461,8 +514,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default is copy=true)
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -475,11 +527,17 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains attach operation with location in bundle data_dir
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     // The location should be in the bundle data_dir, not the original source
     // And source should contain the original location
-    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
+    assert!(
+        contents.contains("source:"),
+        "AttachBlock should have source: {}",
+        contents
+    );
 
     Ok(())
 }
@@ -498,8 +556,7 @@ async fn test_create_source_save_as_ref() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with SAVE AS REF
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let sql = format!(
         "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') SAVE AS REF",
@@ -512,9 +569,14 @@ async fn test_create_source_save_as_ref() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify the location references the original source URL (not copied)
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
-    assert!(contents.contains(source_dir.url().as_str()),
-        "AttachBlock location should reference original source: {}", contents);
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
+    assert!(
+        contents.contains(source_dir.url().as_str()),
+        "AttachBlock location should reference original source: {}",
+        contents
+    );
 
     Ok(())
 }
@@ -533,8 +595,7 @@ async fn test_create_source_save_as_copy() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with SAVE AS COPY
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let sql = format!(
         "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') SAVE AS COPY",
@@ -547,8 +608,14 @@ async fn test_create_source_save_as_copy() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify the data was copied (not referenced) and is queryable
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
-    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
+    assert!(
+        contents.contains("source:"),
+        "AttachBlock should have source: {}",
+        contents
+    );
     assert_eq!(bundle.num_rows().await?, 1000);
 
     Ok(())
@@ -569,8 +636,7 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     // Record change count before create_source (create may add a change)
     let changes_before = bundle.status().changes().len();
@@ -589,7 +655,8 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
     let changes = status.changes();
     let changes_added = changes.len() - changes_before;
     assert_eq!(
-        changes_added, 1,
+        changes_added,
+        1,
         "create_source should create exactly 1 change, got {}. Changes: {:?}",
         changes_added,
         changes.iter().map(|c| &c.description).collect::<Vec<_>>()
@@ -625,8 +692,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -639,14 +705,17 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify the sourceLocation is a relative path
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
-    // Find the attachBlock operation and verify its sourceLocation field
+    // Find the attachBlock operation and verify its source.batchSources location field
     // The YAML format is now nested:
     // source:
     //   id: '...'
-    //   location: userdata.parquet
-    //   version: '...'
+    //   batchSources:
+    //     - location: userdata.parquet
+    //       version: '...'
     let lines: Vec<&str> = contents.lines().collect();
     let mut found_attach_block = false;
     let mut in_source_block = false;
@@ -661,8 +730,8 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
             in_source_block = true;
             continue;
         }
-        // Look for location: within source block (indented)
-        if in_source_block && line.trim_start().starts_with("location:") {
+        // Look for location: within source.batchSources
+        if in_source_block && line.trim_start().starts_with("- location:") {
             let location_value = line.split(':').skip(1).collect::<Vec<_>>().join(":");
             let location = location_value.trim().trim_matches('\'').trim_matches('"');
 
@@ -673,7 +742,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
             // The relative path should be just the filename
             assert_eq!(
                 location, "userdata.parquet",
-                "source.location should be relative path 'userdata.parquet', got: {}",
+                "source.batchSources location should be relative path 'userdata.parquet', got: {}",
                 location
             );
 
@@ -685,10 +754,13 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
         }
     }
 
-    assert!(found_attach_block, "Should have attachBlock operation in commit");
+    assert!(
+        found_attach_block,
+        "Should have attachBlock operation in commit"
+    );
     assert!(
         source_location_is_relative,
-        "source.location should be relative path, not URL. Contents:\n{}",
+        "source.batchSources location should be relative path, not URL. Contents:\n{}",
         contents
     );
 
@@ -710,8 +782,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with SAVE AS COPY to force download
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let source_url = source_dir.url().to_string();
     let sql = format!(
@@ -725,7 +796,9 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify the attach location is a relative path
-    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref())
+        .await?
+        .unwrap();
 
     // The attachBlock location should be a relative path like "ab/cdef12345.parquet"
     // NOT a full URL like "memory:///xxx/ab/cdef12345.parquet"
@@ -761,7 +834,10 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
         }
     }
 
-    assert!(found_attach_block, "Should have attachBlock operation in commit");
+    assert!(
+        found_attach_block,
+        "Should have attachBlock operation in commit"
+    );
     assert!(
         location_is_relative,
         "attachBlock location should be relative path, not URL. Contents:\n{}",
@@ -786,8 +862,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default copy=true)
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -802,7 +877,11 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
 
     // Subsequent fetch should not re-copy the file
     let results = bundle.fetch_all(SyncMode::Add).await?;
-    assert_eq!(total_changes(&results), 0, "Should not re-attach already copied file");
+    assert_eq!(
+        total_changes(&results),
+        0,
+        "Should not re-attach already copied file"
+    );
 
     // Add a second parquet file (same data, different name)
     copy_test_file(
@@ -814,14 +893,22 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
 
     // Fetch should only find the new file
     let results = bundle.fetch_all(SyncMode::Add).await?;
-    assert_eq!(total_changes(&results), 1, "Should attach only the new file");
+    assert_eq!(
+        total_changes(&results),
+        1,
+        "Should attach only the new file"
+    );
 
     // Now we should have 2000 rows (1000 from each file)
     assert_eq!(bundle.num_rows().await?, 2000);
 
     // Another fetch should find nothing
     let results = bundle.fetch_all(SyncMode::Add).await?;
-    assert_eq!(total_changes(&results), 0, "Should not re-attach already copied files");
+    assert_eq!(
+        total_changes(&results),
+        0,
+        "Should not re-attach already copied files"
+    );
 
     Ok(())
 }
@@ -841,8 +928,7 @@ async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseErro
     .await?;
 
     // Create bundle and define source (auto-attaches the file)
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -856,7 +942,11 @@ async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseErro
 
     // Default (add) fetch should find nothing new
     let results = bundle.fetch_all(SyncMode::Add).await?;
-    assert_eq!(total_changes(&results), 0, "Add mode should find nothing new");
+    assert_eq!(
+        total_changes(&results),
+        0,
+        "Add mode should find nothing new"
+    );
 
     // Overwrite the source file with different content to simulate a change
     copy_test_file(
@@ -868,14 +958,26 @@ async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseErro
 
     // Add-mode fetch should still find nothing (file already tracked)
     let results = bundle.fetch_all(SyncMode::Add).await?;
-    assert_eq!(total_changes(&results), 0, "Add mode should ignore changed files");
+    assert_eq!(
+        total_changes(&results),
+        0,
+        "Add mode should ignore changed files"
+    );
 
     // Update-mode fetch should detect the changed file and replace it
     let results = bundle.fetch_all(SyncMode::Update).await?;
     assert_eq!(results.len(), 1, "Should have results for one source");
-    assert_eq!(results[0].replaced.len(), 1, "Update mode should replace the changed file");
+    assert_eq!(
+        results[0].replaced.len(),
+        1,
+        "Update mode should replace the changed file"
+    );
     assert_eq!(results[0].added.len(), 0, "No new files to add");
-    assert_eq!(results[0].removed.len(), 0, "Update mode should not remove files");
+    assert_eq!(
+        results[0].removed.len(),
+        0,
+        "Update mode should not remove files"
+    );
 
     // Data should still be queryable
     assert_eq!(bundle.num_rows().await?, 1000);
@@ -898,8 +1000,7 @@ async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -928,8 +1029,16 @@ async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
     // Sync-mode fetch should add new files and replace changed ones
     let results = bundle.fetch_all(SyncMode::Sync).await?;
     assert_eq!(results.len(), 1, "Should have results for one source");
-    assert_eq!(results[0].added.len(), 1, "Sync mode should add the new file");
-    assert_eq!(results[0].replaced.len(), 1, "Sync mode should replace the changed file");
+    assert_eq!(
+        results[0].added.len(),
+        1,
+        "Sync mode should add the new file"
+    );
+    assert_eq!(
+        results[0].replaced.len(),
+        1,
+        "Sync mode should replace the changed file"
+    );
 
     // Should now have 2000 rows
     assert_eq!(bundle.num_rows().await?, 2000);
@@ -952,8 +1061,7 @@ async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), Bundleb
     .await?;
 
     // Create bundle and define source
-    let bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
         .create_source(
@@ -983,8 +1091,16 @@ async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), Bundleb
     let results = bundle.fetch_all(SyncMode::Update).await?;
     assert_eq!(results.len(), 1, "Should have results for one source");
     assert_eq!(results[0].added.len(), 1, "Should add the new file");
-    assert_eq!(results[0].replaced.len(), 1, "Should replace the changed file");
-    assert_eq!(results[0].removed.len(), 0, "Update mode should not remove files");
+    assert_eq!(
+        results[0].replaced.len(),
+        1,
+        "Should replace the changed file"
+    );
+    assert_eq!(
+        results[0].removed.len(),
+        0,
+        "Update mode should not remove files"
+    );
 
     // Should now have 2000 rows
     assert_eq!(bundle.num_rows().await?, 2000);

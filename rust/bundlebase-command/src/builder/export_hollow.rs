@@ -60,11 +60,11 @@ impl BundleBuilderCommand for ExportHollowCommand {
         for op in &all_ops {
             if let AnyOperation::AttachBlock(attach) = op {
                 if let Some(ref source_info) = attach.source_info {
-                    if let Some(ref schema) = attach.schema {
+                    if let Some(ref schema) = attach.schema_cache {
                         let cols: Vec<(String, ColumnId, DataType)> = schema
                             .fields()
                             .iter()
-                            .zip(attach.column_ids.iter())
+                            .zip(attach.column_ids_cache.iter())
                             .map(|(f, id)| (f.name().clone(), *id, f.data_type().clone()))
                             .collect();
                         // Most recent AttachBlock wins (overwrite any previous entry)

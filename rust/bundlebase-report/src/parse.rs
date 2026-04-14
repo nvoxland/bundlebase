@@ -162,8 +162,8 @@ fn parse_block(yaml_body: &str, block_index: usize) -> Result<ReportElement, Bun
             options: raw.options,
         }))
     } else {
-        let chart_type: ChartType =
-            serde_yaml_ng::from_str(&format!("\"{}\"", raw.block_type)).map_err(|_| {
+        let chart_type: ChartType = serde_yaml_ng::from_str(&format!("\"{}\"", raw.block_type))
+            .map_err(|_| {
                 BundlebaseError::from(format!(
                     "Unknown type '{}' in bundlebase block #{}. \
                      Valid types: table, pie, bar, line, horizontal_bar, \
@@ -219,7 +219,10 @@ Some text after.
             assert_eq!(chart.chart_type, ChartType::Pie);
             assert_eq!(chart.title.as_deref(), Some("Revenue by Region"));
             assert!(chart.query.contains("SELECT"));
-            assert_eq!(chart.options["radius"], serde_yaml_ng::Value::Number(4.into()));
+            assert_eq!(
+                chart.options["radius"],
+                serde_yaml_ng::Value::Number(4.into())
+            );
         } else {
             panic!("Expected Chart element");
         }
@@ -245,10 +248,7 @@ options:
         if let ReportElement::Table(table) = &elements[0] {
             assert_eq!(table.bundle, "inventory");
             assert_eq!(table.title.as_deref(), Some("Product Counts"));
-            assert_eq!(
-                table.options["zebra"],
-                serde_yaml_ng::Value::Bool(true)
-            );
+            assert_eq!(table.options["zebra"], serde_yaml_ng::Value::Bool(true));
         } else {
             panic!("Expected Table element");
         }
@@ -313,7 +313,8 @@ query: SELECT * FROM bundle
                 "```bundlebase\nbundle: data\nquery: SELECT * FROM bundle\ntype: {}\n```\n",
                 type_str
             );
-            let elements = parse_report(&md).unwrap_or_else(|e| panic!("should parse type '{}': {}", type_str, e));
+            let elements = parse_report(&md)
+                .unwrap_or_else(|e| panic!("should parse type '{}': {}", type_str, e));
             if let ReportElement::Chart(chart) = &elements[0] {
                 assert_eq!(chart.chart_type, expected, "type '{}' mismatch", type_str);
             } else {

@@ -3,12 +3,12 @@
 //! Fetches a webpage, extracts links from `<a href="...">` elements,
 //! and downloads files that match specified glob patterns.
 
+use async_trait::async_trait;
 use bundlebase_common::connector::{
-    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
-use bundlebase_common::{ConfigProvider, BundlebaseError};
-use async_trait::async_trait;
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 use scraper::{Html, Selector};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -139,19 +139,11 @@ impl WebScrapeConnector {
             .map_err(|e| BundlebaseError::from(format!("Failed to fetch '{}': {}", url, e)))?;
 
         if !response.status().is_success() {
-            return Err(format!(
-                "Failed to fetch '{}': HTTP {}",
-                url,
-                response.status()
-            )
-            .into());
+            return Err(format!("Failed to fetch '{}': HTTP {}", url, response.status()).into());
         }
 
         response.text().await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to read response from '{}': {}",
-                url, e
-            ))
+            BundlebaseError::from(format!("Failed to read response from '{}': {}", url, e))
         })
     }
 
@@ -218,20 +210,19 @@ mod tests {
     fn test_validate_args_with_url() {
         let func = WebScrapeConnector;
         let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://example.com/data/".to_string(),
-        );
+        args.insert("url".to_string(), "https://example.com/data/".to_string());
         assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]
     fn test_validate_args_missing_url() {
-        
         let func = WebScrapeConnector;
         let args = HashMap::new();
 
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) };
+        let result = {
+            let sig = func.signature();
+            bundlebase_common::connector::validate_connector_args(&args, &sig)
+        };
         assert!(result.is_err());
         assert!(result
             .err()

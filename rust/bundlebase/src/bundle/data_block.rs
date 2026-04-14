@@ -15,7 +15,6 @@ use crate::metrics::{
 use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
 use crate::BundleConfig;
-use futures::StreamExt;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;
@@ -24,6 +23,7 @@ use datafusion::datasource::memory::MemorySourceConfig;
 use datafusion::datasource::TableType;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
+use futures::StreamExt;
 use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::Arc;
@@ -89,7 +89,12 @@ impl DataBlock {
             .iter()
             .zip(column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                Arc::new(
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_name(bundle_schema::generate_internal_name(col_id)),
+                )
             })
             .collect();
         let schema = Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -139,18 +144,20 @@ impl DataBlock {
                     .iter()
                     .zip(column_ids.iter())
                     .map(|(field, col_id)| {
-                        Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                        Arc::new(
+                            field
+                                .as_ref()
+                                .clone()
+                                .with_name(bundle_schema::generate_internal_name(col_id)),
+                        )
                     })
                     .collect();
                 let id_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
                     id_fields,
                     batch_schema.metadata().clone(),
                 ));
-                arrow::record_batch::RecordBatch::try_new(
-                    id_schema,
-                    batch.columns().to_vec(),
-                )
-                .unwrap_or(batch)
+                arrow::record_batch::RecordBatch::try_new(id_schema, batch.columns().to_vec())
+                    .unwrap_or(batch)
             })
             .collect()
     }
@@ -225,7 +232,10 @@ impl DataBlock {
     /// circuits subsequent calls so this is not on the hot path after the
     /// first query.
     pub async fn validate_version(&self) -> Result<(), crate::BundlebaseError> {
-        if self.version_validated.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .version_validated
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             return Ok(());
         }
         let current = self.reader.read_version().await?;
@@ -238,7 +248,8 @@ impl DataBlock {
                 current
             )));
         }
-        self.version_validated.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.version_validated
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
@@ -251,11 +262,14 @@ impl DataBlock {
         &self,
         filters: &[IndexableFilter],
     ) -> datafusion::common::Result<bool> {
-        use bundlebase_data::page_filter::{prune_block_exact, prune_block_range, prune_prefix};
         use crate::index::IndexPredicate;
+        use bundlebase_data::page_filter::{prune_block_exact, prune_block_range, prune_prefix};
 
         // Load all column stats once; we'll use them for both pruning and caching DF stats.
-        let all_stats = self.reader.column_stats().await
+        let all_stats = self
+            .reader
+            .column_stats()
+            .await
             .map_err(|e| datafusion::common::DataFusionError::External(e))?;
 
         // Cache DataFusion statistics (column cardinality / min / max) for the optimizer.
@@ -263,13 +277,23 @@ impl DataBlock {
         if !all_stats.is_empty() {
             let mut cache = self.cached_df_statistics.write();
             if cache.is_none() {
-                *cache = Some(build_df_statistics(&all_stats, &self.schema.read(), self.num_rows));
+                *cache = Some(build_df_statistics(
+                    &all_stats,
+                    &self.schema.read(),
+                    self.num_rows,
+                ));
             }
         }
 
         for filter in filters {
             // Look up column ID by name
-            let col_pos = match self.schema.read().fields().iter().position(|f| f.name() == &filter.column) {
+            let col_pos = match self
+                .schema
+                .read()
+                .fields()
+                .iter()
+                .position(|f| f.name() == &filter.column)
+            {
                 Some(p) => p,
                 None => continue,
             };
@@ -282,13 +306,17 @@ impl DataBlock {
                 IndexPredicate::Exact(val) => {
                     prune_block_exact(val, stats.min.as_ref(), stats.max.as_ref())
                 }
-                IndexPredicate::Range { min: fmin, max: fmax } => {
-                    prune_block_range(fmin, fmax, stats.min.as_ref(), stats.max.as_ref())
-                }
+                IndexPredicate::Range {
+                    min: fmin,
+                    max: fmax,
+                } => prune_block_range(fmin, fmax, stats.min.as_ref(), stats.max.as_ref()),
                 IndexPredicate::In(vals) => {
                     // Prune only if every value in the IN list is outside the block range.
-                    stats.min.is_some() && stats.max.is_some() &&
-                        vals.iter().all(|v| prune_block_exact(v, stats.min.as_ref(), stats.max.as_ref()))
+                    stats.min.is_some()
+                        && stats.max.is_some()
+                        && vals
+                            .iter()
+                            .all(|v| prune_block_exact(v, stats.min.as_ref(), stats.max.as_ref()))
                 }
                 IndexPredicate::IsNull => {
                     // No nulls in this block — IS NULL can't match
@@ -318,7 +346,12 @@ impl DataBlock {
     /// For uncommitted data (version "TEMP"), includes the data_dir URL
     /// to prevent cross-instance collisions.
     fn cache_key(&self) -> String {
-        format!("{}:{}:{}", self.data_dir.url(), self.reader.url(), self.version)
+        format!(
+            "{}:{}:{}",
+            self.data_dir.url(),
+            self.reader.url(),
+            self.version
+        )
     }
 
     /// Add deleted row numbers to this block's deleted set.
@@ -395,10 +428,7 @@ impl DataBlock {
     }
 
     /// Perform index lookup using a pre-loaded `BTreeIndex`.
-    fn lookup_index(
-        index: &BTreeIndex,
-        predicate: &IndexPredicate,
-    ) -> Vec<crate::data::RowId> {
+    fn lookup_index(index: &BTreeIndex, predicate: &IndexPredicate) -> Vec<crate::data::RowId> {
         match predicate {
             IndexPredicate::Exact(val) => index.lookup_exact(val),
             IndexPredicate::In(vals) => {
@@ -425,7 +455,9 @@ impl DataBlock {
             }
             IndexPredicate::Range { min, max } => index.lookup_range(min, max),
             // IsNull, IsNotNull, and Prefix are not handled by the column index
-            IndexPredicate::IsNull | IndexPredicate::IsNotNull | IndexPredicate::Prefix(_) => vec![],
+            IndexPredicate::IsNull | IndexPredicate::IsNotNull | IndexPredicate::Prefix(_) => {
+                vec![]
+            }
         }
     }
 
@@ -555,7 +587,8 @@ impl TableProvider for DataBlock {
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>> {
+    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>>
+    {
         use datafusion::logical_expr::TableProviderFilterPushDown;
 
         Ok(filters
@@ -616,7 +649,8 @@ impl TableProvider for DataBlock {
                 && deleted.is_empty()
                 && self.update_overlays.read().is_empty()
             {
-                self.validate_version().await
+                self.validate_version()
+                    .await
                     .map_err(datafusion::common::DataFusionError::External)?;
                 let effective_rows = match limit {
                     Some(lim) => rows.min(lim),
@@ -660,10 +694,7 @@ impl TableProvider for DataBlock {
                 );
 
                 // Perform lookup using the already-deserialized index (no second disk read)
-                let mut row_ids = Self::lookup_index(
-                    &best.index,
-                    &best.filter.predicate,
-                );
+                let mut row_ids = Self::lookup_index(&best.index, &best.filter.predicate);
 
                 // Remove deleted rows from the inclusion set
                 if !deleted.is_empty() {
@@ -682,12 +713,16 @@ impl TableProvider for DataBlock {
                 timer.finish(OperationOutcome::Success);
 
                 // Use optimized data source with row IDs, wrapped for internal name renaming
-                let inner_source = self.reader
+                let inner_source = self
+                    .reader
                     .data_source(projection, filters, limit, Some(&row_ids))
                     .await?
                     .clone();
                 let projected_col_ids: Vec<ColumnId> = match projection {
-                    Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect(),
+                    Some(proj) => proj
+                        .iter()
+                        .filter_map(|&i| self.column_ids.get(i).copied())
+                        .collect(),
                     None => self.column_ids.clone(),
                 };
                 // Use self.schema for planning (types may not match reader exactly, but
@@ -695,7 +730,8 @@ impl TableProvider for DataBlock {
                 let current_schema = self.schema.read().clone();
                 let projected_schema = match projection {
                     Some(proj) => {
-                        let fields: Vec<_> = proj.iter()
+                        let fields: Vec<_> = proj
+                            .iter()
                             .filter_map(|&i| current_schema.fields().get(i).cloned())
                             .collect();
                         Arc::new(arrow_schema::Schema::new(fields))
@@ -728,7 +764,8 @@ impl TableProvider for DataBlock {
             let current_schema = self.schema.read().clone();
             let projected_schema = match projection {
                 Some(proj) => {
-                    let fields: Vec<_> = proj.iter()
+                    let fields: Vec<_> = proj
+                        .iter()
                         .filter_map(|&i| current_schema.fields().get(i).cloned())
                         .collect();
                     Arc::new(arrow_schema::Schema::new(fields))
@@ -738,7 +775,10 @@ impl TableProvider for DataBlock {
 
             // Block-level pruning: if any filter provably excludes this entire block, return empty.
             if self.can_prune_block(&indexable_filters).await? {
-                log::debug!("Block {} pruned by column stats (filter can't match)", self.id);
+                log::debug!(
+                    "Block {} pruned by column stats (filter can't match)",
+                    self.id
+                );
                 record_operation(
                     OperationCategory::Select,
                     OperationOutcome::Skipped,
@@ -755,12 +795,16 @@ impl TableProvider for DataBlock {
             let cache_key = self.cache_key();
             let cached = GLOBAL_BLOCK_CACHE.get(&cache_key);
             if cached.is_none() {
-                if let Some(page_source) = self.reader
+                if let Some(page_source) = self
+                    .reader
                     .data_source_filtered_pages(projection, filters, limit)
                     .await
                     .map_err(|e| datafusion::common::DataFusionError::External(e))?
                 {
-                    log::debug!("Block {} using page-filtered read (bypassing block cache)", self.id);
+                    log::debug!(
+                        "Block {} using page-filtered read (bypassing block cache)",
+                        self.id
+                    );
                     record_operation(
                         OperationCategory::Select,
                         OperationOutcome::Success,
@@ -770,12 +814,16 @@ impl TableProvider for DataBlock {
                     let deleted = self.deleted_rows.read().clone();
                     let mut source = page_source;
                     if !deleted.is_empty() {
-                        source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                            source,
-                            Arc::new(deleted),
-                        ));
+                        source = Arc::new(
+                            crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                                source,
+                                Arc::new(deleted),
+                            ),
+                        );
                     }
-                    return Ok(Arc::new(datafusion::catalog::memory::DataSourceExec::new(source)));
+                    return Ok(Arc::new(datafusion::catalog::memory::DataSourceExec::new(
+                        source,
+                    )));
                 }
             }
         }
@@ -798,7 +846,8 @@ impl TableProvider for DataBlock {
         if let Some(proj) = projection {
             let current_schema = self.schema.read().clone();
             let narrow = proj.len() < current_schema.fields().len();
-            if narrow && overlays.is_empty() && GLOBAL_BLOCK_CACHE.get(&self.cache_key()).is_none() {
+            if narrow && overlays.is_empty() && GLOBAL_BLOCK_CACHE.get(&self.cache_key()).is_none()
+            {
                 log::debug!(
                     "Block {} using narrow-projection bypass ({} of {} columns)",
                     self.id,
@@ -811,7 +860,8 @@ impl TableProvider for DataBlock {
                     "narrow_projection_bypass",
                     &[KeyValue::new("block_id", self.id.to_string())],
                 );
-                let inner_source = self.reader
+                let inner_source = self
+                    .reader
                     .data_source(projection, &[], limit, None)
                     .await?;
                 let projected_col_ids: Vec<ColumnId> = proj
@@ -833,10 +883,12 @@ impl TableProvider for DataBlock {
                     ),
                 );
                 if !deleted.is_empty() {
-                    source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                        source,
-                        Arc::new(deleted),
-                    ));
+                    source = Arc::new(
+                        crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                            source,
+                            Arc::new(deleted),
+                        ),
+                    );
                 }
                 return Ok(Arc::new(DataSourceExec::new(source)));
             }
@@ -851,17 +903,22 @@ impl TableProvider for DataBlock {
         // returned above.
         if let Some(lim) = limit {
             if overlays.is_empty() {
-                let inner_source = self.reader
+                let inner_source = self
+                    .reader
                     .data_source(projection, &[], Some(lim), None)
                     .await?;
                 let projected_col_ids: Vec<ColumnId> = match projection {
-                    Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect(),
+                    Some(proj) => proj
+                        .iter()
+                        .filter_map(|&i| self.column_ids.get(i).copied())
+                        .collect(),
                     None => self.column_ids.clone(),
                 };
                 let current_schema = self.schema.read().clone();
                 let projected_schema = match projection {
                     Some(proj) => {
-                        let fields: Vec<_> = proj.iter()
+                        let fields: Vec<_> = proj
+                            .iter()
                             .filter_map(|&i| current_schema.fields().get(i).cloned())
                             .collect();
                         Arc::new(arrow_schema::Schema::new(fields))
@@ -876,10 +933,12 @@ impl TableProvider for DataBlock {
                     ),
                 );
                 if !deleted.is_empty() {
-                    source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                        source,
-                        Arc::new(deleted),
-                    ));
+                    source = Arc::new(
+                        crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                            source,
+                            Arc::new(deleted),
+                        ),
+                    );
                 }
                 return Ok(Arc::new(DataSourceExec::new(source)));
             }
@@ -887,63 +946,37 @@ impl TableProvider for DataBlock {
 
         // Phase 3: Full scan with block cache
         let cache_key = self.cache_key();
-        let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
+        let validated = self
+            .version_validated
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         // Try to serve from the block cache (stores base data with internal names).
         // Only use cache after version has been validated (first scan reads through reader).
-        let mut source: Arc<dyn datafusion::datasource::source::DataSource> =
-            if validated {
-                if let Some(cached) = GLOBAL_BLOCK_CACHE.get(&cache_key) {
-                    log::debug!("Block cache hit for {}", cache_key);
-                    record_cache_operation("block_cache", true);
-                    // Use the cached batch's own schema (derived from the reader's actual types)
-                    let batch_schema = cached.batches.first()
-                        .map(|b| b.schema())
-                        .unwrap_or_else(|| self.schema.read().clone());
-                    Arc::new(MemorySourceConfig::try_new(
-                        &[cached.batches.as_ref().clone()],
-                        batch_schema,
-                        projection.cloned(),
-                    )?)
-                } else {
-                    log::debug!("Block cache miss for {}", cache_key);
-                    record_cache_operation("block_cache", false);
-                    // Validated but not cached (evicted or first scan after validation).
-                    // Read through reader, rename to internal names, cache result.
-                    // NOTE: collect() is intentional here — we materialize the block to populate
-                    // the LRU block cache for subsequent queries. Block sizes are bounded by the
-                    // source row-group size (typically ~128MB), and the cache enforces a global
-                    // memory budget via eviction.
-                    let base_source = self.reader
-                        .data_source(None, &[], None, None)
-                        .await?;
-                    let task_ctx = Arc::new(
-                        datafusion::execution::TaskContext::default()
-                            .with_runtime(Arc::clone(state.runtime_env())),
-                    );
-                    let stream = base_source.open(0, task_ctx)?;
-                    let batches = Self::collect(self.reader.url(), stream).await?;
-                    let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
-                    let batch_schema = batches.first()
-                        .map(|b| b.schema())
-                        .unwrap_or_else(|| {
-                            log::debug!("Block {} returned no batches on re-read; using stored schema", self.id);
-                            self.schema.read().clone()
-                        });
-                    GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
-                    Arc::new(MemorySourceConfig::try_new(
-                        &[batches],
-                        batch_schema,
-                        projection.cloned(),
-                    )?)
-                }
+        let mut source: Arc<dyn datafusion::datasource::source::DataSource> = if validated {
+            if let Some(cached) = GLOBAL_BLOCK_CACHE.get(&cache_key) {
+                log::debug!("Block cache hit for {}", cache_key);
+                record_cache_operation("block_cache", true);
+                // Use the cached batch's own schema (derived from the reader's actual types)
+                let batch_schema = cached
+                    .batches
+                    .first()
+                    .map(|b| b.schema())
+                    .unwrap_or_else(|| self.schema.read().clone());
+                Arc::new(MemorySourceConfig::try_new(
+                    &[cached.batches.as_ref().clone()],
+                    batch_schema,
+                    projection.cloned(),
+                )?)
             } else {
-                // First scan: read through reader (validates version), rename, then cache.
-                // NOTE: collect() is intentional — see comment above for rationale.
+                log::debug!("Block cache miss for {}", cache_key);
                 record_cache_operation("block_cache", false);
-                let base_source = self.reader
-                    .data_source(None, &[], None, None)
-                    .await?;
+                // Validated but not cached (evicted or first scan after validation).
+                // Read through reader, rename to internal names, cache result.
+                // NOTE: collect() is intentional here — we materialize the block to populate
+                // the LRU block cache for subsequent queries. Block sizes are bounded by the
+                // source row-group size (typically ~128MB), and the cache enforces a global
+                // memory budget via eviction.
+                let base_source = self.reader.data_source(None, &[], None, None).await?;
                 let task_ctx = Arc::new(
                     datafusion::execution::TaskContext::default()
                         .with_runtime(Arc::clone(state.runtime_env())),
@@ -951,46 +984,80 @@ impl TableProvider for DataBlock {
                 let stream = base_source.open(0, task_ctx)?;
                 let batches = Self::collect(self.reader.url(), stream).await?;
                 let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
-                let batch_schema = batches.first()
-                    .map(|b| b.schema())
-                    .unwrap_or_else(|| {
-                        log::debug!("Block {} returned no batches on first scan; using stored schema", self.id);
-                        self.schema.read().clone()
-                    });
-
-                // Version validated successfully — mark and cache.
-                // Update self.schema with actual reader types for consistent planning.
-                self.version_validated.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Some(first) = batches.first() {
-                    *self.schema.write() = first.schema();
-                }
+                let batch_schema = batches.first().map(|b| b.schema()).unwrap_or_else(|| {
+                    log::debug!(
+                        "Block {} returned no batches on re-read; using stored schema",
+                        self.id
+                    );
+                    self.schema.read().clone()
+                });
                 GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
                 Arc::new(MemorySourceConfig::try_new(
                     &[batches],
                     batch_schema,
                     projection.cloned(),
                 )?)
-            };
+            }
+        } else {
+            // First scan: read through reader (validates version), rename, then cache.
+            // NOTE: collect() is intentional — see comment above for rationale.
+            record_cache_operation("block_cache", false);
+            let base_source = self.reader.data_source(None, &[], None, None).await?;
+            let task_ctx = Arc::new(
+                datafusion::execution::TaskContext::default()
+                    .with_runtime(Arc::clone(state.runtime_env())),
+            );
+            let stream = base_source.open(0, task_ctx)?;
+            let batches = Self::collect(self.reader.url(), stream).await?;
+            let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
+            let batch_schema = batches.first().map(|b| b.schema()).unwrap_or_else(|| {
+                log::debug!(
+                    "Block {} returned no batches on first scan; using stored schema",
+                    self.id
+                );
+                self.schema.read().clone()
+            });
+
+            // Version validated successfully — mark and cache.
+            // Update self.schema with actual reader types for consistent planning.
+            self.version_validated
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(first) = batches.first() {
+                *self.schema.write() = first.schema();
+            }
+            GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
+            Arc::new(MemorySourceConfig::try_new(
+                &[batches],
+                batch_schema,
+                projection.cloned(),
+            )?)
+        };
 
         // Apply deleted row filter if there are deleted rows
         if !deleted.is_empty() {
-            source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                source,
-                Arc::new(deleted),
-            ));
+            source = Arc::new(
+                crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                    source,
+                    Arc::new(deleted),
+                ),
+            );
         }
 
         // Apply update overlay if there are updates for this block
         if !overlays.is_empty() {
             // Build projected column_ids matching the scan output columns
             let projected_col_ids = match projection {
-                Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect::<Vec<_>>(),
+                Some(proj) => proj
+                    .iter()
+                    .filter_map(|&i| self.column_ids.get(i).copied())
+                    .collect::<Vec<_>>(),
                 None => self.column_ids.clone(),
             };
             let current_schema = self.schema.read().clone();
             let projected_schema = match projection {
                 Some(proj) => {
-                    let fields: Vec<_> = proj.iter()
+                    let fields: Vec<_> = proj
+                        .iter()
                         .filter_map(|&i| current_schema.fields().get(i).cloned())
                         .collect();
                     Arc::new(arrow_schema::Schema::new(fields))
@@ -1013,7 +1080,6 @@ impl TableProvider for DataBlock {
     }
 }
 
-
 /// Build a DataFusion `Statistics` object from our per-column stats, for the query optimizer.
 /// Uses the internal-name schema (col_<id>) to populate column statistics positionally.
 fn build_df_statistics(
@@ -1024,31 +1090,40 @@ fn build_df_statistics(
     use datafusion::common::stats::Precision;
     use datafusion::common::{ColumnStatistics, Statistics};
 
-    let column_statistics = schema.fields().iter().enumerate().map(|(i, _field)| {
-        let cs = match col_stats.get(i) {
-            Some(s) => s,
-            None => return ColumnStatistics::new_unknown(),
-        };
-        let min_val = cs.min.as_ref()
-            .and_then(stat_value_to_scalar)
-            .map(Precision::Exact)
-            .unwrap_or(Precision::Absent);
-        let max_val = cs.max.as_ref()
-            .and_then(stat_value_to_scalar)
-            .map(Precision::Exact)
-            .unwrap_or(Precision::Absent);
-        ColumnStatistics {
-            null_count: Precision::Exact(cs.null_count as usize),
-            max_value: max_val,
-            min_value: min_val,
-            distinct_count: if cs.distinct_count > 0 {
-                Precision::Inexact(cs.distinct_count as usize)
-            } else {
-                Precision::Absent
-            },
-            ..Default::default()
-        }
-    }).collect();
+    let column_statistics = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, _field)| {
+            let cs = match col_stats.get(i) {
+                Some(s) => s,
+                None => return ColumnStatistics::new_unknown(),
+            };
+            let min_val = cs
+                .min
+                .as_ref()
+                .and_then(stat_value_to_scalar)
+                .map(Precision::Exact)
+                .unwrap_or(Precision::Absent);
+            let max_val = cs
+                .max
+                .as_ref()
+                .and_then(stat_value_to_scalar)
+                .map(Precision::Exact)
+                .unwrap_or(Precision::Absent);
+            ColumnStatistics {
+                null_count: Precision::Exact(cs.null_count as usize),
+                max_value: max_val,
+                min_value: min_val,
+                distinct_count: if cs.distinct_count > 0 {
+                    Precision::Inexact(cs.distinct_count as usize)
+                } else {
+                    Precision::Absent
+                },
+                ..Default::default()
+            }
+        })
+        .collect();
 
     Statistics {
         num_rows: num_rows.map(Precision::Exact).unwrap_or(Precision::Absent),
@@ -1058,7 +1133,9 @@ fn build_df_statistics(
 }
 
 /// Convert a typed `StatValue` to a DataFusion `ScalarValue` for the query optimizer.
-fn stat_value_to_scalar(sv: &bundlebase_data::StatValue) -> Option<datafusion::scalar::ScalarValue> {
+fn stat_value_to_scalar(
+    sv: &bundlebase_data::StatValue,
+) -> Option<datafusion::scalar::ScalarValue> {
     use bundlebase_data::StatValue;
     use datafusion::scalar::ScalarValue;
     match sv {
@@ -1077,8 +1154,12 @@ fn stat_value_to_scalar(sv: &bundlebase_data::StatValue) -> Option<datafusion::s
         StatValue::Date32(n) => Some(ScalarValue::Date32(Some(*n))),
         StatValue::Date64(n) => Some(ScalarValue::Date64(Some(*n))),
         StatValue::TimestampSecond(n) => Some(ScalarValue::TimestampSecond(Some(*n), None)),
-        StatValue::TimestampMillisecond(n) => Some(ScalarValue::TimestampMillisecond(Some(*n), None)),
-        StatValue::TimestampMicrosecond(n) => Some(ScalarValue::TimestampMicrosecond(Some(*n), None)),
+        StatValue::TimestampMillisecond(n) => {
+            Some(ScalarValue::TimestampMillisecond(Some(*n), None))
+        }
+        StatValue::TimestampMicrosecond(n) => {
+            Some(ScalarValue::TimestampMicrosecond(Some(*n), None))
+        }
         StatValue::TimestampNanosecond(n) => Some(ScalarValue::TimestampNanosecond(Some(*n), None)),
         StatValue::Time32Second(n) => Some(ScalarValue::Time32Second(Some(*n))),
         StatValue::Time32Millisecond(n) => Some(ScalarValue::Time32Millisecond(Some(*n))),
@@ -1097,5 +1178,4 @@ mod tests {
         assert!(table.starts_with("__block_"));
         assert_eq!(table.len(), 8 + 16); // "__block_" + 16 hex chars
     }
-
 }

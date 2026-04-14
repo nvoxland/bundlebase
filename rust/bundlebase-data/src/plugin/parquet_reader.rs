@@ -1,12 +1,12 @@
-use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
+use crate::DataContext;
 use crate::{BlockId, DataReader, ObjectIdAlias, RowId, RowIdBatch, SendableRowIdBatchStream};
+use arrow::datatypes::{DataType, SchemaRef};
+use async_trait::async_trait;
 use bundlebase_common::BundlebaseError;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
-use arrow::datatypes::{DataType, SchemaRef};
-use async_trait::async_trait;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::parquet::ParquetFormat;
@@ -127,7 +127,9 @@ impl ParquetDataReader {
 impl ParquetDataReader {
     /// Extract basic min/max/null_count/distinct_count from the Parquet footer.
     /// Does not scan row data — only reads the file footer.
-    async fn column_stats_from_footer(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
+    async fn column_stats_from_footer(
+        &self,
+    ) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         use crate::page_map::ColumnStats;
 
         // Read Parquet metadata (only fetches footer, no row data)
@@ -136,7 +138,9 @@ impl ParquetDataReader {
         let object_reader = ParquetObjectReader::new(store, path);
         let builder = ParquetRecordBatchStreamBuilder::new(object_reader)
             .await
-            .map_err(|e| BundlebaseError::from(format!("Failed to read Parquet metadata: {}", e)))?;
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to read Parquet metadata: {}", e))
+            })?;
         let metadata = builder.metadata().clone();
 
         let schema = match self.inner.schema() {
@@ -167,23 +171,19 @@ impl ParquetDataReader {
                     if let Some(m) = mn {
                         mins[col_idx] = Some(match &mins[col_idx] {
                             None => m,
-                            Some(existing) => {
-                                match m.cmp_to_stat(existing) {
-                                    Some(Ordering::Less) => m,
-                                    _ => existing.clone(),
-                                }
-                            }
+                            Some(existing) => match m.cmp_to_stat(existing) {
+                                Some(Ordering::Less) => m,
+                                _ => existing.clone(),
+                            },
                         });
                     }
                     if let Some(m) = mx {
                         maxs[col_idx] = Some(match &maxs[col_idx] {
                             None => m,
-                            Some(existing) => {
-                                match m.cmp_to_stat(existing) {
-                                    Some(Ordering::Greater) => m,
-                                    _ => existing.clone(),
-                                }
-                            }
+                            Some(existing) => match m.cmp_to_stat(existing) {
+                                Some(Ordering::Greater) => m,
+                                _ => existing.clone(),
+                            },
                         });
                     }
                     if let Some(dc) = stats.distinct_count_opt() {
@@ -193,24 +193,35 @@ impl ParquetDataReader {
             }
         }
 
-        let result = (0..num_cols).map(|i| {
-            let field = schema.field(i);
-            let is_numeric = matches!(
-                field.data_type(),
-                DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
-                | DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64
-                | DataType::Float16 | DataType::Float32 | DataType::Float64
-                | DataType::Decimal128(_, _) | DataType::Decimal256(_, _)
-            );
-            ColumnStats {
-                null_count: null_counts[i],
-                min: mins[i].clone(),
-                max: maxs[i].clone(),
-                distinct_count: distinct_counts[i],
-                is_all_numeric: is_numeric,
-                ..Default::default()
-            }
-        }).collect();
+        let result = (0..num_cols)
+            .map(|i| {
+                let field = schema.field(i);
+                let is_numeric = matches!(
+                    field.data_type(),
+                    DataType::Int8
+                        | DataType::Int16
+                        | DataType::Int32
+                        | DataType::Int64
+                        | DataType::UInt8
+                        | DataType::UInt16
+                        | DataType::UInt32
+                        | DataType::UInt64
+                        | DataType::Float16
+                        | DataType::Float32
+                        | DataType::Float64
+                        | DataType::Decimal128(_, _)
+                        | DataType::Decimal256(_, _)
+                );
+                ColumnStats {
+                    null_count: null_counts[i],
+                    min: mins[i].clone(),
+                    max: maxs[i].clone(),
+                    distinct_count: distinct_counts[i],
+                    is_all_numeric: is_numeric,
+                    ..Default::default()
+                }
+            })
+            .collect();
 
         Ok(result)
     }
@@ -218,11 +229,21 @@ impl ParquetDataReader {
 
 #[async_trait]
 impl DataReader for ParquetDataReader {
-    fn url(&self) -> &Url { self.inner.url() }
-    fn block_id(&self) -> BlockId { self.block_id }
-    fn format(&self) -> crate::attach_format::AttachFormat { crate::attach_format::AttachFormat::Parquet }
-    async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> { self.inner.read_schema().await }
-    async fn read_version(&self) -> Result<String, BundlebaseError> { self.inner.version().await }
+    fn url(&self) -> &Url {
+        self.inner.url()
+    }
+    fn block_id(&self) -> BlockId {
+        self.block_id
+    }
+    fn format(&self) -> crate::attach_format::AttachFormat {
+        crate::attach_format::AttachFormat::Parquet
+    }
+    async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
+        self.inner.read_schema().await
+    }
+    async fn read_version(&self) -> Result<String, BundlebaseError> {
+        self.inner.version().await
+    }
 
     async fn data_source(
         &self,
@@ -234,14 +255,20 @@ impl DataReader for ParquetDataReader {
         use datafusion::datasource::listing::PartitionedFile;
         use datafusion::datasource::physical_plan::FileScanConfigBuilder;
 
-        let metadata = self.inner.file().object_meta().await.map_err(|e| {
-            DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
-        })?.ok_or_else(|| {
-            DataFusionError::Internal(format!(
-                "File metadata not available for: {}",
-                self.inner.file().url()
-            ))
-        })?;
+        let metadata = self
+            .inner
+            .file()
+            .object_meta()
+            .await
+            .map_err(|e| {
+                DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
+            })?
+            .ok_or_else(|| {
+                DataFusionError::Internal(format!(
+                    "File metadata not available for: {}",
+                    self.inner.file().url()
+                ))
+            })?;
 
         let partitioned_file = PartitionedFile::from(metadata);
         let schema = self.inner.schema().clone().expect("No schema set");
@@ -249,10 +276,9 @@ impl DataReader for ParquetDataReader {
             .with_pushdown_filters(true)
             .with_reorder_filters(true)
             .with_parquet_file_reader_factory(self.reader_factory.clone());
-        let mut builder = FileScanConfigBuilder::new(
-            self.inner.file().store_url(),
-            Arc::new(parquet_source),
-        ).with_file(partitioned_file);
+        let mut builder =
+            FileScanConfigBuilder::new(self.inner.file().store_url(), Arc::new(parquet_source))
+                .with_file(partitioned_file);
         if let Some(proj) = projection {
             builder = builder.with_projection_indices(Some(proj.to_vec()))?;
         }
@@ -291,9 +317,11 @@ impl DataReader for ParquetDataReader {
 
         // Build an all-Utf8 schema so the ColumnStatsBuilder can process all columns uniformly.
         let utf8_schema = Arc::new(arrow::datatypes::Schema::new(
-            schema.fields().iter().map(|f| {
-                Arc::new(f.as_ref().clone().with_data_type(DataType::Utf8))
-            }).collect::<Vec<_>>(),
+            schema
+                .fields()
+                .iter()
+                .map(|f| Arc::new(f.as_ref().clone().with_data_type(DataType::Utf8)))
+                .collect::<Vec<_>>(),
         ));
 
         let mut stats_builder = ColumnStatsBuilder::new(num_cols, &[]);
@@ -305,8 +333,11 @@ impl DataReader for ParquetDataReader {
         let object_reader = ParquetObjectReader::new(store, path);
         let parquet_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
             .await
-            .map_err(|e| BundlebaseError::from(format!("Failed to open Parquet for stats: {}", e)))?;
-        let mut batch_stream = parquet_builder.build()
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to open Parquet for stats: {}", e))
+            })?;
+        let mut batch_stream = parquet_builder
+            .build()
             .map_err(|e| BundlebaseError::from(format!("Failed to build Parquet stream: {}", e)))?;
 
         while let Some(batch_result) = batch_stream.next().await {
@@ -348,7 +379,9 @@ impl DataReader for ParquetDataReader {
         };
 
         let index_bytes = layout.serialize()?;
-        let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
+        let data_stream = Box::pin(stream::once(
+            async move { Ok::<_, std::io::Error>(index_bytes) },
+        ));
         let address = bundlebase_common::ContentAddress::with_sub_type(
             bundlebase_common::ContentCategory::Block,
             "layout",
@@ -458,9 +491,11 @@ impl futures::stream::Stream for RowIdStreamWrapper {
                     row_ids.push(RowId::new(self.block_ref, self.global_row_num));
                     self.global_row_num = match self.global_row_num.checked_add(1) {
                         Some(n) => n,
-                        None => return Poll::Ready(Some(Err(
-                            "Row count exceeds u32::MAX (~4 billion rows)".into()
-                        ))),
+                        None => {
+                            return Poll::Ready(Some(Err(
+                                "Row count exceeds u32::MAX (~4 billion rows)".into(),
+                            )))
+                        }
                     };
                 }
 
@@ -478,7 +513,10 @@ impl futures::stream::Stream for RowIdStreamWrapper {
 fn parquet_stats_to_stat_values(
     stats: &datafusion::parquet::file::statistics::Statistics,
     field: &arrow::datatypes::Field,
-) -> (Option<crate::page_map::StatValue>, Option<crate::page_map::StatValue>) {
+) -> (
+    Option<crate::page_map::StatValue>,
+    Option<crate::page_map::StatValue>,
+) {
     use crate::page_map::StatValue;
     use arrow::datatypes::{DataType, TimeUnit};
     use datafusion::parquet::file::statistics::Statistics as S;
@@ -499,7 +537,10 @@ fn parquet_stats_to_stat_values(
                 DataType::Int16 => Box::new(|n| StatValue::Int16(n as i16)),
                 _ => Box::new(StatValue::Int32),
             };
-            (v.min_opt().map(|n| to_sv(*n)), v.max_opt().map(|n| to_sv(*n)))
+            (
+                v.min_opt().map(|n| to_sv(*n)),
+                v.max_opt().map(|n| to_sv(*n)),
+            )
         }
         S::Int64(v) => {
             let to_sv: Box<dyn Fn(i64) -> StatValue> = match field.data_type() {
@@ -507,16 +548,25 @@ fn parquet_stats_to_stat_values(
                 DataType::Time64(TimeUnit::Microsecond) => Box::new(StatValue::Time64Microsecond),
                 DataType::Time64(TimeUnit::Nanosecond) => Box::new(StatValue::Time64Nanosecond),
                 DataType::Timestamp(TimeUnit::Second, _) => Box::new(StatValue::TimestampSecond),
-                DataType::Timestamp(TimeUnit::Millisecond, _) => Box::new(StatValue::TimestampMillisecond),
-                DataType::Timestamp(TimeUnit::Microsecond, _) => Box::new(StatValue::TimestampMicrosecond),
-                DataType::Timestamp(TimeUnit::Nanosecond, _) => Box::new(StatValue::TimestampNanosecond),
+                DataType::Timestamp(TimeUnit::Millisecond, _) => {
+                    Box::new(StatValue::TimestampMillisecond)
+                }
+                DataType::Timestamp(TimeUnit::Microsecond, _) => {
+                    Box::new(StatValue::TimestampMicrosecond)
+                }
+                DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+                    Box::new(StatValue::TimestampNanosecond)
+                }
                 DataType::UInt8 => Box::new(|n| StatValue::UInt8(n as u8)),
                 DataType::UInt16 => Box::new(|n| StatValue::UInt16(n as u16)),
                 DataType::UInt32 => Box::new(|n| StatValue::UInt32(n as u32)),
                 DataType::UInt64 => Box::new(|n| StatValue::UInt64(n as u64)),
                 _ => Box::new(StatValue::Int64),
             };
-            (v.min_opt().map(|n| to_sv(*n)), v.max_opt().map(|n| to_sv(*n)))
+            (
+                v.min_opt().map(|n| to_sv(*n)),
+                v.max_opt().map(|n| to_sv(*n)),
+            )
         }
         S::Int96(_) => (None, None), // Int96 timestamps — skip, rarely used
         S::Float(v) => (
@@ -528,12 +578,16 @@ fn parquet_stats_to_stat_values(
             v.max_opt().map(|f| StatValue::Float64(*f)),
         ),
         S::ByteArray(v) => (
-            v.min_opt().map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
-            v.max_opt().map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
+            v.min_opt()
+                .map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
+            v.max_opt()
+                .map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
         ),
         S::FixedLenByteArray(v) => (
-            v.min_opt().map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
-            v.max_opt().map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
+            v.min_opt()
+                .map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
+            v.max_opt()
+                .map(|b| StatValue::Utf8(String::from_utf8_lossy(b.data()).into_owned())),
         ),
     }
 }
@@ -541,7 +595,7 @@ fn parquet_stats_to_stat_values(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{test_datafile, test_context};
+    use crate::test_utils::{test_context, test_datafile};
     use arrow::array::{downcast_array, StringViewArray};
     use futures::stream::StreamExt;
 
@@ -552,10 +606,21 @@ mod tests {
 
         let binding = test_context();
         let result = plugin
-            .reader("file:///test.csv", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///test.csv",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
-        assert!(result.is_none(), "ParquetPlugin should reject non-Parquet format");
+        assert!(
+            result.is_none(),
+            "ParquetPlugin should reject non-Parquet format"
+        );
 
         Ok(())
     }
@@ -566,7 +631,15 @@ mod tests {
 
         let binding = test_context();
         let invalid_reader = plugin
-            .reader("file:///invalid.parquet", &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                "file:///invalid.parquet",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -698,7 +771,10 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let schema = reader.read_schema().await?.ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
 
         // Build a comprehensive schema string representation
         let schema_string = schema

@@ -10,7 +10,11 @@ use crate::source::Connector;
 pub fn serve(source: &dyn Connector) {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout().lock();
-    serve_io(source, &mut BufReader::new(stdin), &mut std::io::BufWriter::new(stdout));
+    serve_io(
+        source,
+        &mut BufReader::new(stdin),
+        &mut std::io::BufWriter::new(stdout),
+    );
 }
 
 /// Run the connector on the given reader/writer (for testing).
@@ -32,7 +36,12 @@ pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write) 
         let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
             Err(e) => {
-                let _ = write_error(w, &serde_json::Value::Null, -32700, &format!("Parse error: {}", e));
+                let _ = write_error(
+                    w,
+                    &serde_json::Value::Null,
+                    -32700,
+                    &format!("Parse error: {}", e),
+                );
                 let _ = w.flush();
                 continue;
             }
@@ -58,11 +67,7 @@ fn handle_request(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Writ
         "data" => handle_data(source, req, w),
         "stable_url" => handle_stable_url(source, req, w),
         "shutdown" => {
-            let _ = write_response(
-                w,
-                &req.id,
-                serde_json::json!({"ok": true}),
-            );
+            let _ = write_response(w, &req.id, serde_json::json!({"ok": true}));
             return true;
         }
         _ => {
@@ -79,11 +84,7 @@ fn handle_discover(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Wri
 
     match source.discover(&attached, &args) {
         Ok(locations) => {
-            let _ = write_response(
-                w,
-                &req.id,
-                serde_json::json!({"locations": locations}),
-            );
+            let _ = write_response(w, &req.id, serde_json::json!({"locations": locations}));
         }
         Err(e) => {
             let _ = write_error(w, &req.id, -32000, &e.to_string());
@@ -119,11 +120,7 @@ fn handle_stable_url(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn W
 
     match source.stable_url(&location, &args) {
         Ok(Some(stable_url)) => {
-            let _ = write_response(
-                w,
-                &req.id,
-                serde_json::json!({"url": stable_url.url}),
-            );
+            let _ = write_response(w, &req.id, serde_json::json!({"url": stable_url.url}));
         }
         Ok(None) => {
             let _ = write_response(w, &req.id, serde_json::Value::Null);
@@ -137,10 +134,10 @@ fn handle_stable_url(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn W
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Location;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use crate::types::Location;
     use std::collections::HashMap;
     use std::io::Cursor;
     use std::sync::Arc;
@@ -243,7 +240,10 @@ mod tests {
             "method": method,
             "params": params,
         });
-        format!("{}\n", serde_json::to_string(&req).expect("serialize request"))
+        format!(
+            "{}\n",
+            serde_json::to_string(&req).expect("serialize request")
+        )
     }
 
     fn read_response(data: &[u8], offset: usize) -> (serde_json::Value, usize) {
@@ -286,18 +286,11 @@ mod tests {
 
     #[test]
     fn test_discover() {
-        let input = make_request(
-            "discover",
-            serde_json::json!({"attached_locations": []}),
-            1,
-        ) + &make_request("shutdown", serde_json::json!({}), 2);
+        let input = make_request("discover", serde_json::json!({"attached_locations": []}), 1)
+            + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
-        serve_io(
-            &TestSource,
-            &mut Cursor::new(input.as_bytes()),
-            &mut output,
-        );
+        serve_io(&TestSource, &mut Cursor::new(input.as_bytes()), &mut output);
 
         let (resp, _) = read_response(&output, 0);
         let locations = resp["result"]["locations"]
@@ -324,11 +317,7 @@ mod tests {
         ) + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
-        serve_io(
-            &TestSource,
-            &mut Cursor::new(input.as_bytes()),
-            &mut output,
-        );
+        serve_io(&TestSource, &mut Cursor::new(input.as_bytes()), &mut output);
 
         let (resp, offset) = read_response(&output, 0);
         assert_eq!(resp["result"]["ok"], true);
@@ -346,17 +335,12 @@ mod tests {
         ) + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
-        serve_io(
-            &TestSource,
-            &mut Cursor::new(input.as_bytes()),
-            &mut output,
-        );
+        serve_io(&TestSource, &mut Cursor::new(input.as_bytes()), &mut output);
 
         let (_, offset) = read_response(&output, 0);
 
         // Should be zero-length frame
-        let length =
-            u32::from_be_bytes(output[offset..offset + 4].try_into().expect("4 bytes"));
+        let length = u32::from_be_bytes(output[offset..offset + 4].try_into().expect("4 bytes"));
         assert_eq!(length, 0);
     }
 
@@ -366,11 +350,7 @@ mod tests {
             + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
-        serve_io(
-            &TestSource,
-            &mut Cursor::new(input.as_bytes()),
-            &mut output,
-        );
+        serve_io(&TestSource, &mut Cursor::new(input.as_bytes()), &mut output);
 
         let (resp, _) = read_response(&output, 0);
         assert_eq!(resp["error"]["code"], -32601);
@@ -378,11 +358,8 @@ mod tests {
 
     #[test]
     fn test_user_error_wrapped() {
-        let input = make_request(
-            "discover",
-            serde_json::json!({"attached_locations": []}),
-            1,
-        ) + &make_request("shutdown", serde_json::json!({}), 2);
+        let input = make_request("discover", serde_json::json!({"attached_locations": []}), 1)
+            + &make_request("shutdown", serde_json::json!({}), 2);
 
         let mut output = Vec::new();
         serve_io(

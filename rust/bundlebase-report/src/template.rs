@@ -24,7 +24,8 @@ pub fn template_preamble(show_branding: bool) -> String {
     if show_branding {
         preamble.push_str("  footer: context {\n");
         preamble.push_str("    align(center)[\n");
-        preamble.push_str("      #text(size: 8pt, fill: rgb(\"#999999\"))[Created by Bundlebase]\n");
+        preamble
+            .push_str("      #text(size: 8pt, fill: rgb(\"#999999\"))[Created by Bundlebase]\n");
         preamble.push_str("    ]\n");
         preamble.push_str("  },\n");
     }
@@ -101,12 +102,10 @@ fn is_table_separator(line: &str) -> bool {
         return false;
     }
     // All cells should contain only dashes, colons, and spaces
-    trimmed[1..trimmed.len() - 1]
-        .split('|')
-        .all(|cell| {
-            let c = cell.trim();
-            !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':')
-        })
+    trimmed[1..trimmed.len() - 1].split('|').all(|cell| {
+        let c = cell.trim();
+        !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':')
+    })
 }
 
 /// Parse cells from a markdown table row.
@@ -128,7 +127,10 @@ fn convert_markdown_table(header_line: &str, data_rows: &[&str]) -> String {
     let mut lines = Vec::new();
 
     lines.push("#table(".to_string());
-    lines.push(format!("  columns: ({}),", vec!["auto"; num_cols].join(", ")));
+    lines.push(format!(
+        "  columns: ({}),",
+        vec!["auto"; num_cols].join(", ")
+    ));
     lines.push(format!("  stroke: {},", crate::defaults::TABLE_BORDER));
     lines.push("  inset: (x: 8pt, y: 5pt),".to_string());
     lines.push(format!(
@@ -290,12 +292,18 @@ mod tests {
 
     #[test]
     fn test_bold_conversion() {
-        assert_eq!(convert_inline("This is **bold** text"), "This is *bold* text");
+        assert_eq!(
+            convert_inline("This is **bold** text"),
+            "This is *bold* text"
+        );
     }
 
     #[test]
     fn test_italic_conversion() {
-        assert_eq!(convert_inline("This is *italic* text"), "This is _italic_ text");
+        assert_eq!(
+            convert_inline("This is *italic* text"),
+            "This is _italic_ text"
+        );
     }
 
     #[test]
@@ -347,7 +355,10 @@ mod tests {
         assert!(result.contains("[*Age*]"), "Should have bold header");
         assert!(result.contains("[Alice]"), "Should have data cell");
         assert!(result.contains("[30]"), "Should have data cell");
-        assert!(result.contains("table.header("), "Should have header section");
+        assert!(
+            result.contains("table.header("),
+            "Should have header section"
+        );
     }
 
     #[test]

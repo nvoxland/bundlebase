@@ -1,22 +1,27 @@
 mod passed;
 mod registry;
-mod system;
 mod scope;
+mod system;
 pub use passed::PassedBundleConfig;
-pub use system::{SYSTEM_SCOPE, MAX_MEMORY_CFG, CATALOG_NAME_CFG, ALLOW_EXTERNAL_CODE_CFG, is_external_code_allowed};
-pub use scope::{Scope, validated_scope, validated_scope_from_url};
 use registry::config_registry;
+pub use scope::{validated_scope, validated_scope_from_url, Scope};
+pub use system::{
+    is_external_code_allowed, ALLOW_EXTERNAL_CODE_CFG, CATALOG_NAME_CFG, MAX_MEMORY_CFG,
+    SYSTEM_SCOPE,
+};
 
 // Re-export config types from common
-pub use bundlebase_common::config::{ConfigKey, ConfigProvider, ConfigScope, ConfigSource, default_url_to_name};
+pub use bundlebase_common::config::{
+    default_url_to_name, ConfigKey, ConfigProvider, ConfigScope, ConfigSource,
+};
 
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
+use crate::BundlebaseError;
 use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
 use bundlebase_common::impl_dyn_command_response;
-use crate::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -47,8 +52,7 @@ pub struct ConfigValueDetails {
 
 /// Check whether a key is secure for a given scope.
 pub fn is_key_secure(scope: &Scope, key: &str) -> bool {
-    BundleConfig::get_config_key(scope, key)
-        .map_or(false, |spec| spec.secure)
+    BundleConfig::get_config_key(scope, key).map_or(false, |spec| spec.secure)
 }
 
 /// Validate that a config key is recognized for a specific scope.
@@ -56,7 +60,8 @@ pub fn validate_key_exists(scope: &Scope, key: &str) -> Result<(), BundlebaseErr
     if BundleConfig::get_config_key(scope, key).is_some() {
         Ok(())
     } else {
-        let valid_keys: Vec<&str> = config_registry().keys()
+        let valid_keys: Vec<&str> = config_registry()
+            .keys()
             .iter()
             .filter(|s| s.scope.matches(scope))
             .map(|s| s.key)
@@ -70,7 +75,6 @@ pub fn validate_key_exists(scope: &Scope, key: &str) -> Result<(), BundlebaseErr
 }
 
 // Re-export macros from common (they use #[macro_export] so they're at the crate root)
-
 
 /// A single config entry stored internally.
 #[derive(Debug, Clone)]
@@ -168,7 +172,9 @@ impl BundleConfig {
     ///
     /// Returns the first matching `ConfigKey` whose scope matches the given scope.
     pub fn get_config_key(scope: &Scope, key: &str) -> Option<ConfigKey> {
-        config_registry().keys().iter()
+        config_registry()
+            .keys()
+            .iter()
             .find(|spec| spec.key == key && spec.scope.matches(scope))
             .copied()
     }
@@ -204,7 +210,13 @@ impl BundleConfig {
     /// * `key` - Configuration key (e.g., "region", "access_key_id").
     /// * `value` - Configuration value
     /// * `source` - Which config layer this entry belongs to
-    pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) -> Result<(), BundlebaseError> {
+    pub fn set(
+        &self,
+        scope: &Scope,
+        key: &str,
+        value: &str,
+        source: ConfigSource,
+    ) -> Result<(), BundlebaseError> {
         validate_key_exists(scope, key)?;
 
         let mut inner = self.inner.write();
@@ -235,7 +247,9 @@ impl BundleConfig {
 
         match other_inner.entries.get(&ConfigSource::Stored) {
             Some(stored) => {
-                self_inner.entries.insert(ConfigSource::Stored, stored.clone());
+                self_inner
+                    .entries
+                    .insert(ConfigSource::Stored, stored.clone());
             }
             None => {
                 self_inner.entries.remove(&ConfigSource::Stored);
@@ -300,7 +314,12 @@ impl BundleConfig {
     /// Like [`get`], but returns an error if the key is not set.
     ///
     /// `context` is prepended to the error message (e.g. `"Cannot configure Kaggle client: No configuration set for /kaggle:username"`).
-    pub fn get_required(&self, scope: &Scope, key: &ConfigKey, context: &str) -> Result<String, BundlebaseError> {
+    pub fn get_required(
+        &self,
+        scope: &Scope,
+        key: &ConfigKey,
+        context: &str,
+    ) -> Result<String, BundlebaseError> {
         self.get(scope, key)?.ok_or_else(|| {
             BundlebaseError::from(format!(
                 "{}: No configuration set for /{}:{}",
@@ -451,12 +470,17 @@ impl BundleConfig {
                 let scope = match Scope::from_name(spec.scope.name) {
                     Ok(s) => s,
                     Err(e) => {
-                        log::warn!("Skipping invalid scope '{}' in config spec: {}", spec.scope.name, e);
+                        log::warn!(
+                            "Skipping invalid scope '{}' in config spec: {}",
+                            spec.scope.name,
+                            e
+                        );
                         continue;
                     }
                 };
                 let winner_key = (spec.key.to_string(), scope.clone());
-                let is_active = !winners.contains_key(&winner_key) && spec.resolve_default().is_some();
+                let is_active =
+                    !winners.contains_key(&winner_key) && spec.resolve_default().is_some();
                 result.push(ConfigValueDetails {
                     key: spec.key.to_string(),
                     value: description.to_string(),
@@ -473,7 +497,8 @@ impl BundleConfig {
 
     /// Returns only the winning (active) config entries.
     pub fn values(&self) -> Result<Vec<ConfigValueDetails>, BundlebaseError> {
-        Ok(self.all_values()?
+        Ok(self
+            .all_values()?
             .into_iter()
             .filter(|e| e.active)
             .collect())
@@ -521,7 +546,10 @@ impl BundleConfig {
                     );
                     continue;
                 };
-                (suffix[..underscore_pos].to_lowercase(), suffix[underscore_pos + 1..].to_lowercase())
+                (
+                    suffix[..underscore_pos].to_lowercase(),
+                    suffix[underscore_pos + 1..].to_lowercase(),
+                )
             } else {
                 // __ separators: BB_SCOPE__SUB__...__KEY pattern
                 let scope_name = parts[0];
@@ -532,7 +560,10 @@ impl BundleConfig {
                     );
                     continue;
                 }
-                let key = parts.last().expect("split always returns at least one element").to_lowercase();
+                let key = parts
+                    .last()
+                    .expect("split always returns at least one element")
+                    .to_lowercase();
                 let mut scope_parts: Vec<String> = Vec::with_capacity(parts.len() - 1);
                 scope_parts.push(scope_name.to_lowercase());
                 for part in &parts[1..parts.len() - 1] {
@@ -546,7 +577,8 @@ impl BundleConfig {
                 Err(_) => {
                     log::warn!(
                         "Ignoring env var '{}': unknown scope '{}'.",
-                        raw_key, scope_str
+                        raw_key,
+                        scope_str
                     );
                     continue;
                 }
@@ -559,9 +591,7 @@ impl BundleConfig {
 
         Ok(())
     }
-
 }
-
 
 impl Clone for BundleConfig {
     fn clone(&self) -> Self {
@@ -624,10 +654,15 @@ impl CommandResponse for ConfigEntries {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let scopes: Vec<String> = self.0.iter().map(|e| e.scope.as_str().to_string()).collect();
+        let scopes: Vec<String> = self
+            .0
+            .iter()
+            .map(|e| e.scope.as_str().to_string())
+            .collect();
         let scope_refs: Vec<&str> = scopes.iter().map(|s| s.as_str()).collect();
         let keys: Vec<&str> = self.0.iter().map(|e| e.key.as_str()).collect();
-        let values: Vec<String> = self.0
+        let values: Vec<String> = self
+            .0
             .iter()
             .map(|e| {
                 if e.secure {
@@ -681,11 +716,9 @@ impl CommandResponse for ConfigValueDetails {
 mod tests {
     use super::*;
     use crate::io::plugin::object_store::{
-        S3_SCOPE, GCS_SCOPE,
-        S3_REGION_CFG, S3_ENDPOINT_CFG,
-        S3_BUCKET_CFG, S3_SKIP_SIGNATURE_CFG,
-        S3_IMDSV1_FALLBACK_CFG, S3_CHECKSUM_ALGORITHM_CFG,
-        S3_COPY_IF_NOT_EXISTS_CFG, S3_CONDITIONAL_PUT_CFG,
+        GCS_SCOPE, S3_BUCKET_CFG, S3_CHECKSUM_ALGORITHM_CFG, S3_CONDITIONAL_PUT_CFG,
+        S3_COPY_IF_NOT_EXISTS_CFG, S3_ENDPOINT_CFG, S3_IMDSV1_FALLBACK_CFG, S3_REGION_CFG,
+        S3_SCOPE, S3_SKIP_SIGNATURE_CFG,
     };
 
     /// Get a ConfigScope by name from the pre-registered scopes.
@@ -700,18 +733,45 @@ mod tests {
     fn test_set_scoped_default() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://bucket/file").unwrap(),
+                    &S3_REGION_CFG
+                )
+                .unwrap(),
+            Some("us-west-2".to_string())
+        );
     }
 
     #[test]
     fn test_set_scoped_override() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3://test/").unwrap(), "endpoint", "http://localhost:9000", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://test/").unwrap(),
+                "endpoint",
+                "http://localhost:9000",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
         assert_eq!(
-            config.get(&Scope::try_from("s3://test/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3://test/file").unwrap(),
+                    &S3_ENDPOINT_CFG
+                )
+                .unwrap(),
             Some("http://localhost:9000".to_string())
         );
     }
@@ -720,34 +780,109 @@ mod tests {
     fn test_get_defaults_with_path() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
-        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/path/to/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://my-bucket/path/to/file").unwrap(),
+                    &S3_REGION_CFG
+                )
+                .unwrap(),
+            Some("us-west-2".to_string())
+        );
     }
 
     #[test]
     fn test_get_with_scoped_override() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3://special-bucket/").unwrap(), "region", "us-east-1", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://special-bucket/").unwrap(),
+                "region",
+                "us-east-1",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
-        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
-        assert_eq!(config.get(&Scope::try_from("s3://special-bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-east-1".to_string()));
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://my-bucket/file").unwrap(),
+                    &S3_REGION_CFG
+                )
+                .unwrap(),
+            Some("us-west-2".to_string())
+        );
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://special-bucket/file").unwrap(),
+                    &S3_REGION_CFG
+                )
+                .unwrap(),
+            Some("us-east-1".to_string())
+        );
     }
 
     #[test]
     fn test_longest_prefix_matching() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "default", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3://bucket/subfolder/").unwrap(), "endpoint", "specific", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "endpoint",
+                "default",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/subfolder/").unwrap(),
+                "endpoint",
+                "specific",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
         // Should match the longer prefix
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/subfolder/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("specific".to_string()));
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://bucket/subfolder/file").unwrap(),
+                    &S3_ENDPOINT_CFG
+                )
+                .unwrap(),
+            Some("specific".to_string())
+        );
 
         // Should match the shorter prefix
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/otherpath/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("default".to_string()));
+        assert_eq!(
+            config
+                .get(
+                    &Scope::try_from("s3://bucket/otherpath/file").unwrap(),
+                    &S3_ENDPOINT_CFG
+                )
+                .unwrap(),
+            Some("default".to_string())
+        );
     }
 
     // from_env tests use unique env var names to avoid conflicts between parallel tests
@@ -766,7 +901,12 @@ mod tests {
         // BB_TESTREGION1 is a single-segment env var (no __), so it should
         // be skipped entirely — not stored at any scope
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_IMDSV1_FALLBACK_CFG).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3://bucket/").unwrap(),
+                    &S3_IMDSV1_FALLBACK_CFG
+                )
+                .unwrap(),
             None
         );
         std::env::remove_var("BB_TESTREGION1");
@@ -781,12 +921,19 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB_S3_CHECKSUM_ALGORITHM -> scope "s3", key "checksum_algorithm"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG)
+                .unwrap(),
             Some("sha256".to_string())
         );
         // Should also match via prefix matching on child paths
         assert_eq!(
-            config.get(&Scope::try_from("s3/bucket").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3/bucket").unwrap(),
+                    &S3_CHECKSUM_ALGORITHM_CFG
+                )
+                .unwrap(),
             Some("sha256".to_string())
         );
         std::env::remove_var("BB_S3_CHECKSUM_ALGORITHM");
@@ -801,7 +948,12 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB_S3__MY_BUCKET__CONDITIONAL_PUT -> scope "s3/my_bucket", key "conditional_put"
         assert_eq!(
-            config.get(&Scope::try_from("s3/my_bucket").unwrap(), &S3_CONDITIONAL_PUT_CFG).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3/my_bucket").unwrap(),
+                    &S3_CONDITIONAL_PUT_CFG
+                )
+                .unwrap(),
             Some("etag".to_string())
         );
         std::env::remove_var("BB_S3__MY_BUCKET__CONDITIONAL_PUT");
@@ -824,7 +976,9 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB_S3_COPY_IF_NOT_EXISTS -> scope "s3", key "copy_if_not_exists"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_COPY_IF_NOT_EXISTS_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &S3_COPY_IF_NOT_EXISTS_CFG)
+                .unwrap(),
             Some("multipart".to_string())
         );
         std::env::remove_var("BB_S3_COPY_IF_NOT_EXISTS");
@@ -839,7 +993,9 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB__S3__CHECKSUM_ALGORITHM -> first part is "_S3" (starts with _), should be skipped
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG)
+                .unwrap(),
             None
         );
         std::env::remove_var("BB__S3__CHECKSUM_ALGORITHM");
@@ -854,7 +1010,9 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB_S3__A__B__CONDITIONAL_PUT -> scope "s3/a/b", key "conditional_put"
         assert_eq!(
-            config.get(&Scope::try_from("s3/a/b").unwrap(), &S3_CONDITIONAL_PUT_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3/a/b").unwrap(), &S3_CONDITIONAL_PUT_CFG)
+                .unwrap(),
             Some("deep-value".to_string())
         );
         std::env::remove_var("BB_S3__A__B__CONDITIONAL_PUT");
@@ -870,7 +1028,9 @@ mod tests {
         // BB_S3__CHECKSUM_ALGORITHM -> split on __ -> ["S3", "CHECKSUM_ALGORITHM"]
         // scope "s3", key "checksum_algorithm"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG)
+                .unwrap(),
             Some("double-us".to_string())
         );
         std::env::remove_var("BB_S3__CHECKSUM_ALGORITHM");
@@ -885,7 +1045,9 @@ mod tests {
         config.ensure_env_cache().unwrap();
         // BB_S3_CHECKSUM_ALGORITHM -> scope "s3", key "checksum_algorithm" (all lowercase)
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG)
+                .unwrap(),
             Some("case-test".to_string())
         );
         std::env::remove_var("BB_S3_CHECKSUM_ALGORITHM");
@@ -896,29 +1058,60 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
         // No explicitly set values; only synthetic Default entries from registered keys
-        assert!(config.values().unwrap().iter().all(|e| e.source == ConfigSource::Default));
-        assert!(config.all_values().unwrap().iter().all(|e| e.source == ConfigSource::Default));
+        assert!(config
+            .values()
+            .unwrap()
+            .iter()
+            .all(|e| e.source == ConfigSource::Default));
+        assert!(config
+            .all_values()
+            .unwrap()
+            .iter()
+            .all(|e| e.source == ConfigSource::Default));
     }
 
     #[test]
     fn test_values_single_layer() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "endpoint",
+                "http://minio",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
-        let values: Vec<_> = config.values().unwrap().into_iter()
+        let values: Vec<_> = config
+            .values()
+            .unwrap()
+            .into_iter()
             .filter(|e| e.source != ConfigSource::Default)
             .collect();
         assert_eq!(values.len(), 2);
 
-        let region = values.iter().find(|e| e.key == "region").expect("region entry");
+        let region = values
+            .iter()
+            .find(|e| e.key == "region")
+            .expect("region entry");
         assert_eq!(region.value, "us-west-2");
         assert_eq!(region.scope, Scope::try_from("s3").unwrap());
         assert_eq!(region.source, ConfigSource::Stored);
         assert!(region.active);
 
-        let endpoint = values.iter().find(|e| e.key == "endpoint").expect("endpoint entry");
+        let endpoint = values
+            .iter()
+            .find(|e| e.key == "endpoint")
+            .expect("endpoint entry");
         assert_eq!(endpoint.value, "http://minio");
         assert_eq!(endpoint.scope, Scope::try_from("s3://bucket/").unwrap());
         assert!(endpoint.active);
@@ -928,24 +1121,50 @@ mod tests {
     fn test_all_values_multiple_layers() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-east-1", ConfigSource::Runtime).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-east-1",
+                ConfigSource::Runtime,
+            )
+            .unwrap();
 
-        let all: Vec<_> = config.all_values().unwrap().into_iter()
+        let all: Vec<_> = config
+            .all_values()
+            .unwrap()
+            .into_iter()
             .filter(|e| e.source != ConfigSource::Default)
             .collect();
         assert_eq!(all.len(), 2);
 
-        let stored_entry = all.iter().find(|e| e.source == ConfigSource::Stored).expect("stored entry");
+        let stored_entry = all
+            .iter()
+            .find(|e| e.source == ConfigSource::Stored)
+            .expect("stored entry");
         assert_eq!(stored_entry.value, "us-west-2");
         assert!(!stored_entry.active, "stored should be overridden");
 
-        let runtime_entry = all.iter().find(|e| e.source == ConfigSource::Runtime).expect("runtime entry");
+        let runtime_entry = all
+            .iter()
+            .find(|e| e.source == ConfigSource::Runtime)
+            .expect("runtime entry");
         assert_eq!(runtime_entry.value, "us-east-1");
         assert!(runtime_entry.active, "runtime should win");
 
         // values() should only return the winner (excluding defaults)
-        let active: Vec<_> = config.values().unwrap().into_iter()
+        let active: Vec<_> = config
+            .values()
+            .unwrap()
+            .into_iter()
             .filter(|e| e.source != ConfigSource::Default)
             .collect();
         assert_eq!(active.len(), 1);
@@ -957,26 +1176,55 @@ mod tests {
     fn test_all_values_scoped() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "eu-west-1", ConfigSource::Passed).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Passed).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "region",
+                "eu-west-1",
+                ConfigSource::Passed,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "endpoint",
+                "http://localhost",
+                ConfigSource::Passed,
+            )
+            .unwrap();
 
-        let all: Vec<_> = config.all_values().unwrap().into_iter()
+        let all: Vec<_> = config
+            .all_values()
+            .unwrap()
+            .into_iter()
             .filter(|e| e.source != ConfigSource::Default)
             .collect();
         assert_eq!(all.len(), 3);
 
         // Scoped "region": stored is overridden, passed wins
-        let stored_region = all.iter().find(|e| {
-            e.key == "region" && e.source == ConfigSource::Stored
-        }).expect("stored region");
+        let stored_region = all
+            .iter()
+            .find(|e| e.key == "region" && e.source == ConfigSource::Stored)
+            .expect("stored region");
         assert!(!stored_region.active);
 
-        let passed_region = all.iter().find(|e| {
-            e.key == "region" && e.source == ConfigSource::Passed
-        }).expect("passed region");
+        let passed_region = all
+            .iter()
+            .find(|e| e.key == "region" && e.source == ConfigSource::Passed)
+            .expect("passed region");
         assert!(passed_region.active);
-        assert_eq!(passed_region.scope, Scope::try_from("s3://bucket/").unwrap());
+        assert_eq!(
+            passed_region.scope,
+            Scope::try_from("s3://bucket/").unwrap()
+        );
 
         // Scoped "endpoint": only in passed, so active
         let endpoint = all.iter().find(|e| e.key == "endpoint").expect("endpoint");
@@ -989,16 +1237,40 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
 
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "secret_access_key", "SECRETKEY", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "secret_access_key",
+                "SECRETKEY",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "endpoint",
+                "http://localhost",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
         let all = config.all_values().unwrap();
 
         let region = all.iter().find(|e| e.key == "region").expect("region");
         assert!(!region.secure);
 
-        let secret = all.iter().find(|e| e.key == "secret_access_key").expect("secret");
+        let secret = all
+            .iter()
+            .find(|e| e.key == "secret_access_key")
+            .expect("secret");
         assert!(secret.secure);
 
         let endpoint = all.iter().find(|e| e.key == "endpoint").expect("endpoint");
@@ -1034,54 +1306,159 @@ mod tests {
     fn test_reload_stored() {
         let _lock = ENV_MUTEX.lock();
         let config1 = BundleConfig::new(None).unwrap();
-        config1.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
-        config1.set(&Scope::try_from("s3").unwrap(), "skip_signature", "runtime_value", ConfigSource::Runtime).unwrap();
-        config1.set(&Scope::try_from("s3").unwrap(), "bucket", "original_passed", ConfigSource::Passed).unwrap();
+        config1
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "us-west-2",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config1
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "skip_signature",
+                "runtime_value",
+                ConfigSource::Runtime,
+            )
+            .unwrap();
+        config1
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "bucket",
+                "original_passed",
+                ConfigSource::Passed,
+            )
+            .unwrap();
 
         let config2 = BundleConfig::new(None).unwrap();
-        config2.set(&Scope::try_from("s3").unwrap(), "region", "eu-west-1", ConfigSource::Stored).unwrap();
-        config2.set(&Scope::try_from("s3").unwrap(), "bucket", "config2_passed", ConfigSource::Passed).unwrap();
+        config2
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "eu-west-1",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config2
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "bucket",
+                "config2_passed",
+                ConfigSource::Passed,
+            )
+            .unwrap();
 
         config1.reload_stored(&config2);
 
         // Runtime should be preserved
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_SKIP_SIGNATURE_CFG).unwrap(), Some("runtime_value".to_string()));
+        assert_eq!(
+            config1
+                .get(
+                    &Scope::try_from("s3://bucket/").unwrap(),
+                    &S3_SKIP_SIGNATURE_CFG
+                )
+                .unwrap(),
+            Some("runtime_value".to_string())
+        );
         // Stored should come from config2
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("eu-west-1".to_string()));
+        assert_eq!(
+            config1
+                .get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG)
+                .unwrap(),
+            Some("eu-west-1".to_string())
+        );
         // Passed from config1 should be preserved (not replaced by config2's Passed)
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_BUCKET_CFG).unwrap(), Some("original_passed".to_string()));
+        assert_eq!(
+            config1
+                .get(&Scope::try_from("s3://bucket/").unwrap(), &S3_BUCKET_CFG)
+                .unwrap(),
+            Some("original_passed".to_string())
+        );
     }
 
     #[test]
     fn test_priority_ordering() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "stored", ConfigSource::Stored).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "passed", ConfigSource::Passed).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "stored",
+                ConfigSource::Stored,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "passed",
+                ConfigSource::Passed,
+            )
+            .unwrap();
 
         // Passed should win over Stored
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("passed".to_string()));
+        assert_eq!(
+            config
+                .get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG)
+                .unwrap(),
+            Some("passed".to_string())
+        );
 
         // Runtime should win over everything
-        config.set(&Scope::try_from("s3").unwrap(), "region", "runtime", ConfigSource::Runtime).unwrap();
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("runtime".to_string()));
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "region",
+                "runtime",
+                ConfigSource::Runtime,
+            )
+            .unwrap();
+        assert_eq!(
+            config
+                .get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG)
+                .unwrap(),
+            Some("runtime".to_string())
+        );
     }
 
     #[test]
     fn test_longest_prefix_wins_over_source_priority() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3://").unwrap(), "region", "runtime-short", ConfigSource::Runtime).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "stored-long", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://").unwrap(),
+                "region",
+                "runtime-short",
+                ConfigSource::Runtime,
+            )
+            .unwrap();
+        config
+            .set(
+                &Scope::try_from("s3://bucket/").unwrap(),
+                "region",
+                "stored-long",
+                ConfigSource::Stored,
+            )
+            .unwrap();
 
         // Longer prefix in Stored beats shorter prefix in Runtime
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3://bucket/file").unwrap(),
+                    &S3_REGION_CFG
+                )
+                .unwrap(),
             Some("stored-long".to_string())
         );
         // Path that only matches the short prefix → Runtime wins
         assert_eq!(
-            config.get(&Scope::try_from("s3://other/file").unwrap(), &S3_REGION_CFG).unwrap(),
+            config
+                .get(&Scope::try_from("s3://other/file").unwrap(), &S3_REGION_CFG)
+                .unwrap(),
             Some("runtime-short".to_string())
         );
     }
@@ -1124,7 +1501,10 @@ mod tests {
     fn test_all_scopes() {
         let scopes = BundleConfig::all_scopes();
         let names: Vec<&str> = scopes.iter().map(|s| s.name).collect();
-        assert!(names.contains(&"system"), "all_scopes should include system scope");
+        assert!(
+            names.contains(&"system"),
+            "all_scopes should include system scope"
+        );
         assert!(names.contains(&"s3"));
         assert!(names.contains(&"gs"));
         assert!(names.contains(&"azure"));
@@ -1137,7 +1517,10 @@ mod tests {
     #[test]
     fn test_all_scopes_system_is_first() {
         let scopes = BundleConfig::all_scopes();
-        assert_eq!(scopes[0].name, "system", "system scope should be first in all_scopes");
+        assert_eq!(
+            scopes[0].name, "system",
+            "system scope should be first in all_scopes"
+        );
     }
 
     #[test]
@@ -1152,8 +1535,14 @@ mod tests {
     #[test]
     fn test_system_scope_url_to_name() {
         use crate::bundle_config::SYSTEM_SCOPE;
-        assert_eq!(SYSTEM_SCOPE.url_to_name("system://settings"), Some("system/settings".to_string()));
-        assert_eq!(SYSTEM_SCOPE.url_to_name("system://"), Some("system".to_string()));
+        assert_eq!(
+            SYSTEM_SCOPE.url_to_name("system://settings"),
+            Some("system/settings".to_string())
+        );
+        assert_eq!(
+            SYSTEM_SCOPE.url_to_name("system://"),
+            Some("system".to_string())
+        );
         assert_eq!(SYSTEM_SCOPE.url_to_name("s3://bucket"), None);
         assert_eq!(SYSTEM_SCOPE.url_to_name("anything"), None);
     }
@@ -1162,9 +1551,15 @@ mod tests {
     fn test_system_scope_parse() {
         // Name-based parsing
         assert_eq!(Scope::try_from("system").unwrap().as_str(), "system");
-        assert_eq!(Scope::try_from("system/sub").unwrap().as_str(), "system/sub");
+        assert_eq!(
+            Scope::try_from("system/sub").unwrap().as_str(),
+            "system/sub"
+        );
         // URL-based parsing
-        assert_eq!(Scope::try_from("system://settings").unwrap().as_str(), "system/settings");
+        assert_eq!(
+            Scope::try_from("system://settings").unwrap().as_str(),
+            "system/settings"
+        );
     }
 
     #[test]
@@ -1207,7 +1602,10 @@ mod tests {
     #[test]
     fn test_config_scope_url_to_name_delegates() {
         let scope = get_scope("s3");
-        assert_eq!(scope.url_to_name("s3://bucket"), Some("s3/bucket".to_string()));
+        assert_eq!(
+            scope.url_to_name("s3://bucket"),
+            Some("s3/bucket".to_string())
+        );
         assert_eq!(scope.url_to_name("gs://bucket"), None);
     }
 
@@ -1216,14 +1614,20 @@ mod tests {
     fn test_config_scope_with_custom_url_to_name() {
         // Test that Kaggle scope (which has a custom url_to_name) works correctly
         let scope = get_scope("kaggle");
-        assert_eq!(scope.url_to_name("kaggle://user/dataset"), Some("kaggle/dataset".to_string()));
+        assert_eq!(
+            scope.url_to_name("kaggle://user/dataset"),
+            Some("kaggle/dataset".to_string())
+        );
         // Non-URL strings return None
         assert_eq!(scope.url_to_name("not a url"), None);
     }
 
     #[test]
     fn test_scope_parse_s3_url() {
-        assert_eq!(Scope::try_from("s3://bucket/path").unwrap(), Scope::try_from("s3/bucket/path").unwrap());
+        assert_eq!(
+            Scope::try_from("s3://bucket/path").unwrap(),
+            Scope::try_from("s3/bucket/path").unwrap()
+        );
     }
 
     #[test]
@@ -1239,7 +1643,11 @@ mod tests {
         let result = validated_scope("not-a-valid-scope");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Unknown scope"), "Expected 'Unknown scope' in: {}", err);
+        assert!(
+            err.contains("Unknown scope"),
+            "Expected 'Unknown scope' in: {}",
+            err
+        );
     }
 
     // ── ConfigKey default value tests ─────────────────────────────────
@@ -1254,7 +1662,10 @@ mod tests {
     fn test_with_default_const_context() {
         // Verify that with_default() works in const context and the value is accessible
         assert!(TEST_KEY_WITH_DEFAULT.default_value.is_some());
-        assert_eq!(TEST_KEY_WITH_DEFAULT.default_value, Some("https://default.example.com"));
+        assert_eq!(
+            TEST_KEY_WITH_DEFAULT.default_value,
+            Some("https://default.example.com")
+        );
         assert!(TEST_KEY_NO_DEFAULT.default_value.is_none());
         assert!(TEST_KEY_NO_DEFAULT.default_fn.is_none());
     }
@@ -1264,12 +1675,19 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT)
+                .unwrap(),
             Some("https://default.example.com".to_string())
         );
         // Also matches child scopes
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("s3://bucket").unwrap(),
+                    &TEST_KEY_WITH_DEFAULT
+                )
+                .unwrap(),
             Some("https://default.example.com".to_string())
         );
     }
@@ -1280,7 +1698,9 @@ mod tests {
         let config = BundleConfig::new(None).unwrap();
         // A different scope should not return the default
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
+            config
+                .get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT)
+                .unwrap(),
             None
         );
     }
@@ -1289,9 +1709,18 @@ mod tests {
     fn test_get_returns_explicit_value_over_default() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "allow_http", "https://custom.example.com", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("s3").unwrap(),
+                "allow_http",
+                "https://custom.example.com",
+                ConfigSource::Stored,
+            )
+            .unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT)
+                .unwrap(),
             Some("https://custom.example.com".to_string())
         );
     }
@@ -1329,11 +1758,18 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
+            config
+                .get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN)
+                .unwrap(),
             Some("dynamic_value".to_string())
         );
         assert_eq!(
-            config.get(&Scope::try_from("gs://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("gs://bucket").unwrap(),
+                    &TEST_KEY_WITH_DEFAULT_FN
+                )
+                .unwrap(),
             Some("dynamic_value".to_string())
         );
     }
@@ -1343,7 +1779,12 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN_NONE).unwrap(),
+            config
+                .get(
+                    &Scope::try_from("gs").unwrap(),
+                    &TEST_KEY_WITH_DEFAULT_FN_NONE
+                )
+                .unwrap(),
             None
         );
     }
@@ -1353,7 +1794,9 @@ mod tests {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
+            config
+                .get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT_FN)
+                .unwrap(),
             None
         );
     }
@@ -1369,7 +1812,9 @@ mod tests {
 
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &KEY_BOTH).unwrap(),
+            config
+                .get(&Scope::try_from("gs").unwrap(), &KEY_BOTH)
+                .unwrap(),
             Some("dynamic_value".to_string())
         );
     }
@@ -1383,7 +1828,9 @@ mod tests {
 
         let config = BundleConfig::new(None).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &KEY_STATIC_ONLY).unwrap(),
+            config
+                .get(&Scope::try_from("gs").unwrap(), &KEY_STATIC_ONLY)
+                .unwrap(),
             Some("static_value".to_string())
         );
     }
@@ -1392,14 +1839,22 @@ mod tests {
     fn test_get_returns_explicit_value_over_default_fn() {
         let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("gs").unwrap(), "service_account_path", "explicit", ConfigSource::Stored).unwrap();
+        config
+            .set(
+                &Scope::try_from("gs").unwrap(),
+                "service_account_path",
+                "explicit",
+                ConfigSource::Stored,
+            )
+            .unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
+            config
+                .get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN)
+                .unwrap(),
             Some("explicit".to_string())
         );
     }
 
     // Default-fn behavior in all_values() is covered by get() tests above.
     // Synthetic Default entries in all_values() use the registered config keys.
-
 }

@@ -121,7 +121,6 @@ impl std::fmt::Display for SourceFormat {
     }
 }
 
-
 /// A partition of source data discovered during the discovery phase.
 ///
 /// Each `DiscoveredLocation` becomes one block in the bundle.
@@ -216,11 +215,25 @@ pub struct FetchResults {
 impl FetchResults {
     /// Create empty results.
     pub fn empty(connector: String, source_url: String, pack: String) -> Self {
-        Self { connector, source_url, pack, added: Vec::new(), replaced: Vec::new(), removed: Vec::new(), rows_before: 0, rows_after: 0 }
+        Self {
+            connector,
+            source_url,
+            pack,
+            added: Vec::new(),
+            replaced: Vec::new(),
+            removed: Vec::new(),
+            rows_before: 0,
+            rows_after: 0,
+        }
     }
 
     /// Create FetchResults from a list of FetchActions.
-    pub fn from_actions(connector: String, source_url: String, pack: String, actions: Vec<FetchAction>) -> Self {
+    pub fn from_actions(
+        connector: String,
+        source_url: String,
+        pack: String,
+        actions: Vec<FetchAction>,
+    ) -> Self {
         let mut added = Vec::new();
         let mut replaced = Vec::new();
         let mut removed = Vec::new();
@@ -228,10 +241,16 @@ impl FetchResults {
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
-                    added.push(FetchedBlock { attach_location: data.attach_location, source_location: data.source_location });
+                    added.push(FetchedBlock {
+                        attach_location: data.attach_location,
+                        source_location: data.source_location,
+                    });
                 }
                 FetchAction::Replace { data, .. } => {
-                    replaced.push(FetchedBlock { attach_location: data.attach_location, source_location: data.source_location });
+                    replaced.push(FetchedBlock {
+                        attach_location: data.attach_location,
+                        source_location: data.source_location,
+                    });
                 }
                 FetchAction::Remove { source_location } => {
                     removed.push(source_location);
@@ -239,7 +258,16 @@ impl FetchResults {
             }
         }
 
-        Self { connector, source_url, pack, added, replaced, removed, rows_before: 0, rows_after: 0 }
+        Self {
+            connector,
+            source_url,
+            pack,
+            added,
+            replaced,
+            removed,
+            rows_before: 0,
+            rows_after: 0,
+        }
     }
 
     /// Total number of actions.
@@ -342,7 +370,8 @@ pub fn validate_connector_args(
             return Err(format!(
                 "Function '{}' requires a '{}' argument. Valid arguments: {}",
                 sig.name, spec.name, valid_args
-            ).into());
+            )
+            .into());
         }
     }
 
@@ -352,12 +381,16 @@ pub fn validate_connector_args(
     if !sig.accepts_extra_args {
         let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
         for key in args.keys() {
-            if !key.starts_with('_') && !key.starts_with("json_") && !valid_names.contains(key.as_str()) {
+            if !key.starts_with('_')
+                && !key.starts_with("json_")
+                && !valid_names.contains(key.as_str())
+            {
                 let valid_args = format_arg_list(specs);
                 return Err(format!(
                     "Function '{}' does not accept argument '{}'. Valid arguments: {}",
                     sig.name, key, valid_args
-                ).into());
+                )
+                .into());
             }
         }
     }

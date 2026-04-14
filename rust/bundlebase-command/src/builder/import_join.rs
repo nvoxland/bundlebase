@@ -7,9 +7,9 @@
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::*;
-use bundlebase_data::ObjectId;
 use bundlebase::{Bundle, BundleBuilder, BundleFacade};
 use bundlebase_common::BundlebaseError;
+use bundlebase_data::ObjectId;
 use std::collections::HashMap;
 use tracing::info;
 
@@ -64,7 +64,10 @@ impl CommandParsing for ImportJoinCommand {
 
     fn to_statement(&self) -> String {
         if self.flatten {
-            format!("IMPORT JOIN {} FLATTEN HISTORY", quote_identifier(&self.name))
+            format!(
+                "IMPORT JOIN {} FLATTEN HISTORY",
+                quote_identifier(&self.name)
+            )
         } else {
             format!("IMPORT JOIN {}", quote_identifier(&self.name))
         }
@@ -196,10 +199,7 @@ fn remap_operation(
 }
 
 /// Build the pack ID remap table from source bundle to target join pack.
-fn build_pack_remap(
-    source: &Bundle,
-    target_join_pack_id: ObjectId,
-) -> HashMap<ObjectId, ObjectId> {
+fn build_pack_remap(source: &Bundle, target_join_pack_id: ObjectId) -> HashMap<ObjectId, ObjectId> {
     let mut remap = HashMap::new();
 
     // Source base pack → existing target join pack
@@ -218,10 +218,7 @@ fn build_pack_remap(
 impl BundleBuilderCommand for ImportJoinCommand {
     type Output = String;
 
-    async fn execute(
-        self: Box<Self>,
-        builder: &BundleBuilder,
-    ) -> Result<String, BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         info!("Importing join '{}'", self.name);
 
         // 1. Look up existing join pack
@@ -270,7 +267,10 @@ impl BundleBuilderCommand for ImportJoinCommand {
                 let name = source_entry.name.to_string();
                 let target_reg_arc = target_bundle.function_registry();
                 let target_registry = target_reg_arc.read();
-                let conflict = target_registry.entries().iter().any(|e| e.name.to_string() == name);
+                let conflict = target_registry
+                    .entries()
+                    .iter()
+                    .any(|e| e.name.to_string() == name);
                 if conflict {
                     return Err(format!(
                         "Cannot import: function '{}' already exists in target bundle. Rename it in the source bundle first.",
@@ -352,11 +352,12 @@ async fn copy_data_files(
         }
 
         // Compute relative path from source base URL
-        let relative = if let Some(rel) = file_url.strip_prefix(source_base_url.trim_end_matches('/')) {
-            rel.trim_start_matches('/')
-        } else {
-            continue;
-        };
+        let relative =
+            if let Some(rel) = file_url.strip_prefix(source_base_url.trim_end_matches('/')) {
+                rel.trim_start_matches('/')
+            } else {
+                continue;
+            };
 
         if relative.is_empty() {
             continue;
@@ -366,15 +367,13 @@ async fn copy_data_files(
         let target_file = target_dir.writable_file(relative)?;
 
         let stream = source_file.read_stream().await?.ok_or_else(|| {
-            BundlebaseError::from(format!(
-                "Failed to read file during import: {}",
-                relative
-            ))
+            BundlebaseError::from(format!("Failed to read file during import: {}", relative))
         })?;
-        let pinned: std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
-            Box::pin(futures::StreamExt::map(stream, |r| {
-                r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-            }));
+        let pinned: std::pin::Pin<
+            Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>,
+        > = Box::pin(futures::StreamExt::map(stream, |r| {
+            r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        }));
         target_file.write_stream(pinned).await?;
 
         let new_url = format!("{}/{}", target_base_url.trim_end_matches('/'), relative);
@@ -389,16 +388,15 @@ async fn copy_data_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     // --- Parsing tests ---
 
     #[test]
     fn test_parse_import_join_basic() {
-        let cmd = parse_command("IMPORT JOIN stations")
-            .expect("Failed to parse IMPORT JOIN");
+        let cmd = parse_command("IMPORT JOIN stations").expect("Failed to parse IMPORT JOIN");
         match cmd {
             BundleCommand::ImportJoin(ref c) => {
                 assert_eq!(c.name, "stations");
@@ -484,16 +482,17 @@ mod tests {
             layout: None,
             num_rows: Some(100),
             bytes: None,
-            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
-            schema: None,
-            column_ids: vec![],
+            schema: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
+            schema_cache: None,
+            column_ids_cache: vec![],
         });
 
         let mut loc_remap = HashMap::new();
         loc_remap.insert("old://data.csv".to_string(), "new://data.csv".to_string());
 
-        let remapped = remap_operation(&op, &pack_remap, &loc_remap).expect("should not be stripped");
+        let remapped =
+            remap_operation(&op, &pack_remap, &loc_remap).expect("should not be stripped");
         match remapped {
             AnyOperation::AttachBlock(a) => {
                 assert_eq!(a.pack, new_join_id);
@@ -505,13 +504,17 @@ mod tests {
 
     #[test]
     fn test_remap_strips_set_name() {
-        let op = AnyOperation::SetName(SetNameOp { name: "old".to_string() });
+        let op = AnyOperation::SetName(SetNameOp {
+            name: "old".to_string(),
+        });
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
     fn test_remap_strips_set_description() {
-        let op = AnyOperation::SetDescription(SetDescriptionOp { description: "old".to_string() });
+        let op = AnyOperation::SetDescription(SetDescriptionOp {
+            description: "old".to_string(),
+        });
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
@@ -533,7 +536,7 @@ mod tests {
             connector: "http".to_string(),
             args: HashMap::new(),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         });
 
@@ -571,7 +574,13 @@ mod tests {
         let new_id = ObjectId::generate();
         pack_remap.insert(old_id, new_id);
 
-        match remap_operation(&AnyOperation::DropJoin(DropJoinOp { id: old_id }), &pack_remap, &HashMap::new()).unwrap() {
+        match remap_operation(
+            &AnyOperation::DropJoin(DropJoinOp { id: old_id }),
+            &pack_remap,
+            &HashMap::new(),
+        )
+        .unwrap()
+        {
             AnyOperation::DropJoin(d) => assert_eq!(d.id, new_id),
             _ => panic!("Expected DropJoin"),
         }
@@ -584,7 +593,16 @@ mod tests {
         let new_id = ObjectId::generate();
         pack_remap.insert(old_id, new_id);
 
-        match remap_operation(&AnyOperation::RenameJoin(RenameJoinOp { id: old_id, new_name: "x".into() }), &pack_remap, &HashMap::new()).unwrap() {
+        match remap_operation(
+            &AnyOperation::RenameJoin(RenameJoinOp {
+                id: old_id,
+                new_name: "x".into(),
+            }),
+            &pack_remap,
+            &HashMap::new(),
+        )
+        .unwrap()
+        {
             AnyOperation::RenameJoin(r) => assert_eq!(r.id, new_id),
             _ => panic!("Expected RenameJoin"),
         }
@@ -595,10 +613,20 @@ mod tests {
         let mut loc = HashMap::new();
         loc.insert("old://f.csv".to_string(), "new://f.csv".to_string());
 
-        match remap_operation(&AnyOperation::ReplaceBlock(ReplaceBlockOp {
-            id: "00000000000000cc".try_into().unwrap(),
-            new_location: "old://f.csv".into(), format: bundlebase_data::attach_format::AttachFormat::Csv, new_version: "2".into(), new_hash: "0".repeat(64), source_info: None,
-        }), &HashMap::new(), &loc).unwrap() {
+        match remap_operation(
+            &AnyOperation::ReplaceBlock(ReplaceBlockOp {
+                id: "00000000000000cc".try_into().unwrap(),
+                new_location: "old://f.csv".into(),
+                format: bundlebase_data::attach_format::AttachFormat::Csv,
+                new_version: "2".into(),
+                new_hash: "0".repeat(64),
+                source_info: None,
+            }),
+            &HashMap::new(),
+            &loc,
+        )
+        .unwrap()
+        {
             AnyOperation::ReplaceBlock(r) => assert_eq!(r.new_location, "new://f.csv"),
             _ => panic!("Expected ReplaceBlock"),
         }
@@ -609,9 +637,19 @@ mod tests {
         let mut loc = HashMap::new();
         loc.insert("old://idx".to_string(), "new://idx".to_string());
 
-        match remap_operation(&AnyOperation::IndexBlocks(IndexBlocksOp {
-            index: ObjectId::generate(), blocks: vec![], path: "old://idx".into(), cardinality: 10, doc_count: None,
-        }), &HashMap::new(), &loc).unwrap() {
+        match remap_operation(
+            &AnyOperation::IndexBlocks(IndexBlocksOp {
+                index: ObjectId::generate(),
+                blocks: vec![],
+                path: "old://idx".into(),
+                cardinality: 10,
+                doc_count: None,
+            }),
+            &HashMap::new(),
+            &loc,
+        )
+        .unwrap()
+        {
             AnyOperation::IndexBlocks(i) => assert_eq!(i.path, "new://idx"),
             _ => panic!("Expected IndexBlocks"),
         }
@@ -626,22 +664,41 @@ mod tests {
 
     #[test]
     fn test_remap_strips_create_view() {
-        let op = AnyOperation::CreateView(CreateViewOp { id: ObjectId::generate(), name: "v".into() });
+        let op = AnyOperation::CreateView(CreateViewOp {
+            id: ObjectId::generate(),
+            name: "v".into(),
+        });
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
     fn test_remap_keeps_column_ops() {
-        assert!(remap_operation(&AnyOperation::RenameColumn(RenameColumnOp {
-            id: "00000000000000c1".try_into().unwrap(), new_name: "x".into(),
-        }), &HashMap::new(), &HashMap::new()).is_some());
+        assert!(remap_operation(
+            &AnyOperation::RenameColumn(RenameColumnOp {
+                id: "00000000000000c1".try_into().unwrap(),
+                new_name: "x".into(),
+            }),
+            &HashMap::new(),
+            &HashMap::new()
+        )
+        .is_some());
 
-        assert!(remap_operation(&AnyOperation::DropColumn(DropColumnOp {
-            id: "00000000000000c1".try_into().unwrap(),
-        }), &HashMap::new(), &HashMap::new()).is_some());
+        assert!(remap_operation(
+            &AnyOperation::DropColumn(DropColumnOp {
+                id: "00000000000000c1".try_into().unwrap(),
+            }),
+            &HashMap::new(),
+            &HashMap::new()
+        )
+        .is_some());
 
-        assert!(remap_operation(&AnyOperation::DetachBlock(DetachBlockOp {
-            id: "00000000000000cc".try_into().unwrap(),
-        }), &HashMap::new(), &HashMap::new()).is_some());
+        assert!(remap_operation(
+            &AnyOperation::DetachBlock(DetachBlockOp {
+                id: "00000000000000cc".try_into().unwrap(),
+            }),
+            &HashMap::new(),
+            &HashMap::new()
+        )
+        .is_some());
     }
 }

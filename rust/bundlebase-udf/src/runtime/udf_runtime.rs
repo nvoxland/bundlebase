@@ -1,15 +1,15 @@
 //! UdfRuntime enum, parsing, delegation to inner trait impls, serde, and path resolution.
 
-use super::python::PythonRuntime;
+use super::docker::DockerRuntime;
 use super::ffi::FfiRuntime;
 use super::ipc::IpcRuntime;
 use super::java::JavaRuntime;
-use super::docker::DockerRuntime;
+use super::python::PythonRuntime;
 
-use super::entrypoint::{UdfEntrypoint, RuntimeType};
+use super::entrypoint::{RuntimeType, UdfEntrypoint};
 pub use crate::bridge::manifest::{Manifest, ManifestEntry};
-use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteDir;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -86,7 +86,10 @@ impl UdfRuntime {
             UdfRuntime::Java(r) => UdfRuntime::Java(r.with_path(new_path)),
             UdfRuntime::Python(r) => UdfRuntime::Python(r.with_path(new_path)),
             UdfRuntime::Docker(_) => {
-                panic!("with_path not supported for {} runtime", self.runtime_name())
+                panic!(
+                    "with_path not supported for {} runtime",
+                    self.runtime_name()
+                )
             }
         }
     }
@@ -170,7 +173,8 @@ impl UdfRuntime {
         args: &datafusion::logical_expr::ScalarFunctionArgs,
         subprocess_cache: &crate::bridge::ipc_bridge::SubprocessCache,
     ) -> datafusion::common::Result<datafusion::logical_expr::ColumnarValue> {
-        self.inner().invoke_scalar(name, function_name, args, subprocess_cache)
+        self.inner()
+            .invoke_scalar(name, function_name, args, subprocess_cache)
     }
 
     /// Create an accumulator for an aggregate function.
@@ -181,11 +185,15 @@ impl UdfRuntime {
         return_type: &arrow::datatypes::DataType,
         subprocess_cache: &crate::bridge::ipc_bridge::SubprocessCache,
     ) -> datafusion::common::Result<Box<dyn datafusion::logical_expr::Accumulator>> {
-        self.inner().create_accumulator(name, function_name, return_type, subprocess_cache)
+        self.inner()
+            .create_accumulator(name, function_name, return_type, subprocess_cache)
     }
 
     /// DataType for aggregate state serialization.
-    pub fn aggregate_state_type(&self, return_type: &arrow::datatypes::DataType) -> arrow::datatypes::DataType {
+    pub fn aggregate_state_type(
+        &self,
+        return_type: &arrow::datatypes::DataType,
+    ) -> arrow::datatypes::DataType {
         self.inner().aggregate_state_type(return_type)
     }
 
@@ -218,7 +226,8 @@ impl UdfRuntime {
         };
 
         // Only resolve relative paths (bundle-internal hash paths like "ab/cdef12345678.so")
-        if file_path.starts_with('/') || file_path.starts_with("./") || file_path.starts_with("../") {
+        if file_path.starts_with('/') || file_path.starts_with("./") || file_path.starts_with("../")
+        {
             return self.clone();
         }
 
@@ -298,11 +307,10 @@ impl<'de> Deserialize<'de> for UdfRuntime {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::entrypoint::find_in_manifest;
+    use super::*;
 
     #[test]
     fn test_parse_from_ipc_relative() {
@@ -428,9 +436,7 @@ mod tests {
 
     #[test]
     fn test_find_in_manifest_empty_manifest() {
-        let manifest = Manifest {
-            functions: vec![],
-        };
+        let manifest = Manifest { functions: vec![] };
 
         let err = find_in_manifest(manifest, "nonexistent", "ipc::./my_func")
             .unwrap_err()
@@ -445,14 +451,26 @@ mod tests {
     #[test]
     fn test_udf_runtime_can_bundle() {
         // Module-backed Python cannot be bundled
-        assert!(!UdfRuntime::parse_from("python::mod:func").unwrap().can_bundle());
+        assert!(!UdfRuntime::parse_from("python::mod:func")
+            .unwrap()
+            .can_bundle());
         // File-backed Python CAN be bundled
-        assert!(UdfRuntime::parse_from("python::./script.py:func").unwrap().can_bundle());
-        assert!(UdfRuntime::parse_from("python::path/to/script.py:func").unwrap().can_bundle());
+        assert!(UdfRuntime::parse_from("python::./script.py:func")
+            .unwrap()
+            .can_bundle());
+        assert!(UdfRuntime::parse_from("python::path/to/script.py:func")
+            .unwrap()
+            .can_bundle());
 
-        assert!(UdfRuntime::parse_from("ffi::./lib.so").unwrap().can_bundle());
-        assert!(UdfRuntime::parse_from("java::./my.jar").unwrap().can_bundle());
-        assert!(UdfRuntime::parse_from("docker::my-image").unwrap().can_bundle());
+        assert!(UdfRuntime::parse_from("ffi::./lib.so")
+            .unwrap()
+            .can_bundle());
+        assert!(UdfRuntime::parse_from("java::./my.jar")
+            .unwrap()
+            .can_bundle());
+        assert!(UdfRuntime::parse_from("docker::my-image")
+            .unwrap()
+            .can_bundle());
         assert!(UdfRuntime::parse_from("ipc::./func").unwrap().can_bundle());
     }
 
@@ -513,24 +531,48 @@ mod tests {
     fn test_validate_entrypoint_python_file_backed_nonexistent() {
         let rt = UdfRuntime::parse_from("python::./nonexistent_script_xyz.py:func").unwrap();
         let err = rt.validate_entrypoint().unwrap_err().to_string();
-        assert!(err.contains("Python script"), "Expected 'Python script' in error: {}", err);
-        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+        assert!(
+            err.contains("Python script"),
+            "Expected 'Python script' in error: {}",
+            err
+        );
+        assert!(
+            err.contains("not found"),
+            "Expected 'not found' in error: {}",
+            err
+        );
     }
 
     #[test]
     fn test_validate_entrypoint_ipc_nonexistent() {
         let rt = UdfRuntime::parse_from("ipc::./nonexistent_binary_xyz").unwrap();
         let err = rt.validate_entrypoint().unwrap_err().to_string();
-        assert!(err.contains("IPC executable"), "Expected 'IPC executable' in error: {}", err);
-        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+        assert!(
+            err.contains("IPC executable"),
+            "Expected 'IPC executable' in error: {}",
+            err
+        );
+        assert!(
+            err.contains("not found"),
+            "Expected 'not found' in error: {}",
+            err
+        );
     }
 
     #[test]
     fn test_validate_entrypoint_ffi_nonexistent() {
         let rt = UdfRuntime::parse_from("ffi::./nonexistent_lib_xyz.so").unwrap();
         let err = rt.validate_entrypoint().unwrap_err().to_string();
-        assert!(err.contains("Shared library"), "Expected 'Shared library' in error: {}", err);
-        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+        assert!(
+            err.contains("Shared library"),
+            "Expected 'Shared library' in error: {}",
+            err
+        );
+        assert!(
+            err.contains("not found"),
+            "Expected 'not found' in error: {}",
+            err
+        );
     }
 
     #[test]
@@ -543,7 +585,15 @@ mod tests {
     fn test_validate_entrypoint_java_nonexistent() {
         let rt = UdfRuntime::parse_from("java::./nonexistent_xyz.jar").unwrap();
         let err = rt.validate_entrypoint().unwrap_err().to_string();
-        assert!(err.contains("JAR file"), "Expected 'JAR file' in error: {}", err);
-        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+        assert!(
+            err.contains("JAR file"),
+            "Expected 'JAR file' in error: {}",
+            err
+        );
+        assert!(
+            err.contains("not found"),
+            "Expected 'not found' in error: {}",
+            err
+        );
     }
 }

@@ -5,19 +5,22 @@
 //! the `BundleFacade` trait itself but are separated to keep the command system
 //! in its own crate.
 
+use crate::facade::describe_data::DescribeDataColumnSpec;
+use crate::parser::{is_command_statement, parse_command};
+use crate::response::{CommandResponse, OutputShape};
+use crate::{BundleCommand, FacadeCommand};
+use crate::{
+    DescribeDataCommand, ExplainPlanCommand, ImportTempConnectorCommand, ImportTempFunctionCommand,
+    TestConnectorCommand,
+};
+use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use bundlebase::bundle::Bundle;
-use bundlebase::{BundleFacade, BundleBuilder};
+use bundlebase::{BundleBuilder, BundleFacade};
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
 use datafusion::common::ScalarValue;
 use datafusion::execution::SendableRecordBatchStream;
-use crate::response::{CommandResponse, OutputShape};
-use crate::{BundleCommand, FacadeCommand};
-use crate::parser::{is_command_statement, parse_command};
-use crate::{DescribeDataCommand, ExplainPlanCommand, ImportTempConnectorCommand, ImportTempFunctionCommand, TestConnectorCommand};
-use crate::facade::describe_data::DescribeDataColumnSpec;
-use arrow_schema::SchemaRef;
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Extension trait that adds command execution capabilities to `BundleFacade`.
@@ -47,7 +50,8 @@ pub trait BundleFacadeCommandExt {
     /// Get the schema and output shape that will be returned by executing a SQL statement.
     ///
     /// This method determines the output schema and display shape without executing the statement.
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError>;
+    async fn response_schema(&self, sql: &str)
+        -> Result<(SchemaRef, OutputShape), BundlebaseError>;
 
     /// Returns the query execution plan as a stream.
     async fn explain(
@@ -165,7 +169,9 @@ async fn default_explain(
         format: format_str,
         sql: sql.map(|s| s.to_string()),
     };
-    let response = ext.execute_facade_command(FacadeCommand::ExplainPlan(cmd)).await?;
+    let response = ext
+        .execute_facade_command(FacadeCommand::ExplainPlan(cmd))
+        .await?;
     response.into_stream()
 }
 
@@ -192,8 +198,14 @@ async fn default_test_connector(
     name: &str,
     args: std::collections::HashMap<String, String>,
 ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-    let cmd = TestConnectorCommand { name: Some(name.to_string()), temp: None, args };
-    let response = ext.execute_facade_command(FacadeCommand::TestConnector(cmd)).await?;
+    let cmd = TestConnectorCommand {
+        name: Some(name.to_string()),
+        temp: None,
+        args,
+    };
+    let response = ext
+        .execute_facade_command(FacadeCommand::TestConnector(cmd))
+        .await?;
     response.into_stream()
 }
 
@@ -202,8 +214,14 @@ async fn default_test_temp_connector(
     from_: &str,
     args: std::collections::HashMap<String, String>,
 ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-    let cmd = TestConnectorCommand { name: None, temp: Some(from_.to_string()), args };
-    let response = ext.execute_facade_command(FacadeCommand::TestConnector(cmd)).await?;
+    let cmd = TestConnectorCommand {
+        name: None,
+        temp: Some(from_.to_string()),
+        args,
+    };
+    let response = ext
+        .execute_facade_command(FacadeCommand::TestConnector(cmd))
+        .await?;
     response.into_stream()
 }
 
@@ -215,7 +233,8 @@ async fn default_import_temp_connector(
 ) -> Result<(), BundlebaseError> {
     let platform: Platform = platform.parse()?;
     let cmd = ImportTempConnectorCommand::new(name, from, platform);
-    ext.execute_facade_command(FacadeCommand::ImportTempConnector(cmd)).await?;
+    ext.execute_facade_command(FacadeCommand::ImportTempConnector(cmd))
+        .await?;
     Ok(())
 }
 
@@ -227,7 +246,8 @@ async fn default_import_temp_function(
 ) -> Result<(), BundlebaseError> {
     let platform: Platform = platform.parse()?;
     let cmd = ImportTempFunctionCommand::new(name, from, platform);
-    ext.execute_facade_command(FacadeCommand::ImportTempFunction(cmd)).await?;
+    ext.execute_facade_command(FacadeCommand::ImportTempFunction(cmd))
+        .await?;
     Ok(())
 }
 
@@ -241,7 +261,10 @@ impl BundleFacadeCommandExt for Bundle {
         default_execute(self, self, sql, params).await
     }
 
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
+    async fn response_schema(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
         default_response_schema(self, sql).await
     }
 
@@ -280,11 +303,19 @@ impl BundleFacadeCommandExt for Bundle {
         default_describe_data(self, columns).await
     }
 
-    async fn test_connector(&self, name: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_connector(
+        &self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_connector(self, name, args).await
     }
 
-    async fn test_temp_connector(&self, from_: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_temp_connector(
+        &self,
+        from_: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_temp_connector(self, from_, args).await
     }
 
@@ -315,7 +346,10 @@ impl BundleFacadeCommandExt for BundleBuilder {
         default_execute(self, self, sql, params).await
     }
 
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
+    async fn response_schema(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
         default_response_schema(self, sql).await
     }
 
@@ -354,11 +388,19 @@ impl BundleFacadeCommandExt for BundleBuilder {
         default_describe_data(self, columns).await
     }
 
-    async fn test_connector(&self, name: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_connector(
+        &self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_connector(self, name, args).await
     }
 
-    async fn test_temp_connector(&self, from_: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_temp_connector(
+        &self,
+        from_: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_temp_connector(self, from_, args).await
     }
 
@@ -398,7 +440,10 @@ impl BundleFacadeCommandExt for Arc<dyn BundleFacade> {
         }
     }
 
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
+    async fn response_schema(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
         default_response_schema(self.as_ref(), sql).await
     }
 
@@ -437,11 +482,19 @@ impl BundleFacadeCommandExt for Arc<dyn BundleFacade> {
         default_describe_data(self, columns).await
     }
 
-    async fn test_connector(&self, name: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_connector(
+        &self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_connector(self, name, args).await
     }
 
-    async fn test_temp_connector(&self, from_: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    async fn test_temp_connector(
+        &self,
+        from_: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         default_test_temp_connector(self, from_, args).await
     }
 
@@ -470,16 +523,74 @@ impl BundleFacadeCommandExt for Arc<dyn BundleFacade> {
 /// Implementation for `Arc<Bundle>` - delegates to inner Bundle.
 #[async_trait]
 impl BundleFacadeCommandExt for Arc<Bundle> {
-    async fn execute(&self, sql: &str, params: Vec<ScalarValue>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).execute(sql, params).await }
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError> { (**self).response_schema(sql).await }
-    async fn explain(&self, verbose: bool, analyze: bool, format: datafusion::logical_expr::ExplainFormat, sql: Option<&str>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).explain(verbose, analyze, format, sql).await }
-    async fn import_temp_connector(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_connector(name, from, platform).await }
-    async fn import_temp_function(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_function(name, from, platform).await }
-    async fn describe_data(&self, columns: Vec<(String, Option<String>)>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).describe_data(columns).await }
-    async fn test_connector(&self, name: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).test_connector(name, args).await }
-    async fn test_temp_connector(&self, from_: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).test_temp_connector(from_, args).await }
-    async fn execute_facade_command(&self, cmd: FacadeCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> { (**self).execute_facade_command(cmd).await }
-    async fn execute_command(&self, cmd: BundleCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+    async fn execute(
+        &self,
+        sql: &str,
+        params: Vec<ScalarValue>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).execute(sql, params).await
+    }
+    async fn response_schema(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
+        (**self).response_schema(sql).await
+    }
+    async fn explain(
+        &self,
+        verbose: bool,
+        analyze: bool,
+        format: datafusion::logical_expr::ExplainFormat,
+        sql: Option<&str>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).explain(verbose, analyze, format, sql).await
+    }
+    async fn import_temp_connector(
+        &self,
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        (**self).import_temp_connector(name, from, platform).await
+    }
+    async fn import_temp_function(
+        &self,
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        (**self).import_temp_function(name, from, platform).await
+    }
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).describe_data(columns).await
+    }
+    async fn test_connector(
+        &self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).test_connector(name, args).await
+    }
+    async fn test_temp_connector(
+        &self,
+        from_: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).test_temp_connector(from_, args).await
+    }
+    async fn execute_facade_command(
+        &self,
+        cmd: FacadeCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        (**self).execute_facade_command(cmd).await
+    }
+    async fn execute_command(
+        &self,
+        cmd: BundleCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         let facade_cmd = cmd.into_facade_command()?;
         self.execute_facade_command(facade_cmd).await
     }
@@ -488,16 +599,74 @@ impl BundleFacadeCommandExt for Arc<Bundle> {
 /// Implementation for `Arc<BundleBuilder>` - delegates to inner BundleBuilder.
 #[async_trait]
 impl BundleFacadeCommandExt for Arc<BundleBuilder> {
-    async fn execute(&self, sql: &str, params: Vec<ScalarValue>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).execute(sql, params).await }
-    async fn response_schema(&self, sql: &str) -> Result<(SchemaRef, OutputShape), BundlebaseError> { (**self).response_schema(sql).await }
-    async fn explain(&self, verbose: bool, analyze: bool, format: datafusion::logical_expr::ExplainFormat, sql: Option<&str>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).explain(verbose, analyze, format, sql).await }
-    async fn import_temp_connector(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_connector(name, from, platform).await }
-    async fn import_temp_function(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_function(name, from, platform).await }
-    async fn describe_data(&self, columns: Vec<(String, Option<String>)>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).describe_data(columns).await }
-    async fn test_connector(&self, name: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).test_connector(name, args).await }
-    async fn test_temp_connector(&self, from_: &str, args: std::collections::HashMap<String, String>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).test_temp_connector(from_, args).await }
-    async fn execute_facade_command(&self, cmd: FacadeCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> { (**self).execute_facade_command(cmd).await }
-    async fn execute_command(&self, cmd: BundleCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+    async fn execute(
+        &self,
+        sql: &str,
+        params: Vec<ScalarValue>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).execute(sql, params).await
+    }
+    async fn response_schema(
+        &self,
+        sql: &str,
+    ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
+        (**self).response_schema(sql).await
+    }
+    async fn explain(
+        &self,
+        verbose: bool,
+        analyze: bool,
+        format: datafusion::logical_expr::ExplainFormat,
+        sql: Option<&str>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).explain(verbose, analyze, format, sql).await
+    }
+    async fn import_temp_connector(
+        &self,
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        (**self).import_temp_connector(name, from, platform).await
+    }
+    async fn import_temp_function(
+        &self,
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        (**self).import_temp_function(name, from, platform).await
+    }
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).describe_data(columns).await
+    }
+    async fn test_connector(
+        &self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).test_connector(name, args).await
+    }
+    async fn test_temp_connector(
+        &self,
+        from_: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        (**self).test_temp_connector(from_, args).await
+    }
+    async fn execute_facade_command(
+        &self,
+        cmd: FacadeCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        (**self).execute_facade_command(cmd).await
+    }
+    async fn execute_command(
+        &self,
+        cmd: BundleCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         cmd.execute(&**self).await
     }
 }

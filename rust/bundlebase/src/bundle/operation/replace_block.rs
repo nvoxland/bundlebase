@@ -1,5 +1,6 @@
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
+use crate::bundle::operation::BatchedSource;
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
 use crate::connector::AttachFormat;
@@ -51,30 +52,46 @@ impl ReplaceBlockOp {
         // Find block ID by searching AttachBlockOp operations for matching location
         // Also check ReplaceBlockOp in case the block was already replaced
         let (block_id, old_source_info) =
-            Self::find_block_by_location(old_location, &builder.bundle().operations.read()).ok_or_else(
-                || BundlebaseError::from(format!("No block found at location '{}'", old_location)),
-            )?;
+            Self::find_block_by_location(old_location, &builder.bundle().operations.read())
+                .ok_or_else(|| {
+                    BundlebaseError::from(format!("No block found at location '{}'", old_location))
+                })?;
 
         // Create adapter to read version from the new location
         let temp_id = BlockId::generate();
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(new_location, &format, &temp_id, builder, None, None, None, None)
+            .reader(
+                new_location,
+                &format,
+                &temp_id,
+                builder,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?;
         let new_version = adapter.read_version().await?;
 
         // Compute hash from the new location
         let new_hash = {
-            let file = readable_file_from_path(new_location, builder.data_dir(), builder.config()).await?;
+            let file =
+                readable_file_from_path(new_location, builder.data_dir(), builder.config()).await?;
             file.compute_hash().await?
         };
 
         // Update source info with the new version (if source info exists)
         let source_info = old_source_info.map(|info| SourceInfo {
             id: info.id,
-            location: info.location,
-            version: new_version.clone(),
-            batch_sources: info.batch_sources,
+            batch_sources: info
+                .batch_sources
+                .into_iter()
+                .map(|source| BatchedSource {
+                    location: source.location,
+                    version: new_version.clone(),
+                })
+                .collect(),
         });
 
         Ok(Self {
@@ -92,7 +109,10 @@ impl ReplaceBlockOp {
     /// Returns the block ID and the most recent source_info for that block.
     /// For blocks that have been replaced, this finds the ReplaceBlockOp with the matching new_location
     /// and returns the updated source_info from that operation.
-    fn find_block_by_location(location: &str, operations: &[AnyOperation]) -> Option<(BlockId, Option<SourceInfo>)> {
+    fn find_block_by_location(
+        location: &str,
+        operations: &[AnyOperation],
+    ) -> Option<(BlockId, Option<SourceInfo>)> {
         // First, check if any ReplaceBlockOp has this as its new_location (most recent state)
         // We iterate in reverse to find the most recent replacement
         for op in operations.iter().rev() {
@@ -194,14 +214,16 @@ impl Operation for ReplaceBlockOp {
         // Update source's attached_files with the new location and version
         if let Some(ref info) = self.source_info {
             if let Some(src) = bundle.get_source(&info.id) {
-                src.update_attached_file(
-                    &info.location,
-                    AttachedFileInfo {
-                        location: self.new_location.clone(),
-                        version: info.version.clone(),
-                        bytes: None, // Could read from adapter if needed
-                    },
-                );
+                for batched_source in &info.batch_sources {
+                    src.update_attached_file(
+                        &batched_source.location,
+                        AttachedFileInfo {
+                            location: self.new_location.clone(),
+                            version: batched_source.version.clone(),
+                            bytes: None, // Could read from adapter if needed
+                        },
+                    );
+                }
             }
         }
 
@@ -264,10 +286,26 @@ mod tests {
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
-        assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
-        assert!(serialized.contains("etag:abc123"), "serialized: {}", serialized);
-        assert!(serialized.contains("newHash:"), "serialized: {}", serialized);
-        assert!(serialized.contains(&"0".repeat(64)), "serialized: {}", serialized);
+        assert!(
+            serialized.contains("newVersion:"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains("etag:abc123"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains("newHash:"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains(&"0".repeat(64)),
+            "serialized: {}",
+            serialized
+        );
         // source should not appear when None
         assert!(!serialized.contains("source:"));
     }
@@ -284,20 +322,38 @@ mod tests {
             new_hash: "0".repeat(64),
             source_info: Some(SourceInfo {
                 id: source_id,
-                location: "original/path.csv".to_string(),
-                version: "etag:abc123".to_string(),
-                batch_sources: None,
+                batch_sources: vec![BatchedSource {
+                    location: "original/path.csv".to_string(),
+                    version: "etag:abc123".to_string(),
+                }],
             }),
         };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
-        assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
-        assert!(serialized.contains("etag:abc123"), "serialized: {}", serialized);
-        assert!(serialized.contains("newHash:"), "serialized: {}", serialized);
-        assert!(serialized.contains(&"0".repeat(64)), "serialized: {}", serialized);
+        assert!(
+            serialized.contains("newVersion:"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains("etag:abc123"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains("newHash:"),
+            "serialized: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains(&"0".repeat(64)),
+            "serialized: {}",
+            serialized
+        );
         assert!(serialized.contains("source:"));
+        assert!(serialized.contains("batchSources:"));
         assert!(serialized.contains("location: original/path.csv"));
     }
 
@@ -328,8 +384,9 @@ newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
 source:
   id: 00000000000000b3
-  location: original/path.csv
-  version: 'etag:abc123'
+  batchSources:
+    - location: original/path.csv
+      version: 'etag:abc123'
 "#;
 
         let op: ReplaceBlockOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
@@ -341,7 +398,8 @@ source:
         assert!(op.source_info.is_some());
         let source = op.source_info.unwrap();
         assert_eq!(source.id.to_string(), "00000000000000b3");
-        assert_eq!(source.location, "original/path.csv");
-        assert_eq!(source.version, "etag:abc123");
+        assert_eq!(source.batch_sources.len(), 1);
+        assert_eq!(source.batch_sources[0].location, "original/path.csv");
+        assert_eq!(source.batch_sources[0].version, "etag:abc123");
     }
 }

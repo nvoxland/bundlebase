@@ -2,27 +2,26 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
-use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::registry::IOFactory;
-use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::util::{join_path, join_url};
-use crate::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
-use crate::ConfigProvider;
 use crate::BundlebaseError;
+use crate::ConfigProvider;
+use crate::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
+use crate::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use async_trait::async_trait;
+use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt};
 use sha2::{Digest, Sha256};
-use std::env::current_dir;
 use std::collections::HashMap;
+use std::env::current_dir;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use url::Url;
-
 
 // ── Custom scheme registry ─────────────────────────────────────────
 
@@ -69,10 +68,12 @@ config_keys!(s3_keys, {
     pub const S3_BUCKET_CFG: ConfigKey = S3_SCOPE.define("bucket");
     pub const S3_ALLOW_HTTP_CFG: ConfigKey = S3_SCOPE.define("allow_http");
     pub const S3_SKIP_SIGNATURE_CFG: ConfigKey = S3_SCOPE.define("skip_signature");
-    pub const S3_VIRTUAL_HOSTED_STYLE_REQUEST_CFG: ConfigKey = S3_SCOPE.define("virtual_hosted_style_request");
+    pub const S3_VIRTUAL_HOSTED_STYLE_REQUEST_CFG: ConfigKey =
+        S3_SCOPE.define("virtual_hosted_style_request");
     pub const S3_IMDSV1_FALLBACK_CFG: ConfigKey = S3_SCOPE.define("imdsv1_fallback");
     pub const S3_METADATA_ENDPOINT_CFG: ConfigKey = S3_SCOPE.define("metadata_endpoint");
-    pub const S3_CONTAINER_CREDENTIALS_RELATIVE_URI_CFG: ConfigKey = S3_SCOPE.define("container_credentials_relative_uri");
+    pub const S3_CONTAINER_CREDENTIALS_RELATIVE_URI_CFG: ConfigKey =
+        S3_SCOPE.define("container_credentials_relative_uri");
     pub const S3_UNSIGNED_PAYLOAD_CFG: ConfigKey = S3_SCOPE.define("unsigned_payload");
     pub const S3_CHECKSUM_ALGORITHM_CFG: ConfigKey = S3_SCOPE.define("checksum_algorithm");
     pub const S3_COPY_IF_NOT_EXISTS_CFG: ConfigKey = S3_SCOPE.define("copy_if_not_exists");
@@ -87,8 +88,10 @@ config_keys!(s3_keys, {
 config_keys!(gcs_keys, {
     pub const GCS_BUCKET_CFG: ConfigKey = GCS_SCOPE.define("bucket");
     pub const GCS_SERVICE_ACCOUNT_PATH_CFG: ConfigKey = GCS_SCOPE.define("service_account_path");
-    pub const GCS_APPLICATION_CREDENTIALS_CFG: ConfigKey = GCS_SCOPE.define("application_credentials");
-    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey = GCS_SCOPE.define_secure("service_account_key");
+    pub const GCS_APPLICATION_CREDENTIALS_CFG: ConfigKey =
+        GCS_SCOPE.define("application_credentials");
+    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey =
+        GCS_SCOPE.define_secure("service_account_key");
 });
 
 // ── Azure configuration keys ────────────────────────────────────────
@@ -106,13 +109,13 @@ config_keys!(azure_keys, {
     pub const AZURE_CLIENT_SECRET_CFG: ConfigKey = AZURE_SCOPE.define_secure("client_secret");
 });
 
-
 // ============================================================================
 // URL and ObjectStore utilities
 // ============================================================================
 
 pub(crate) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
-    ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority())).expect("BUG: URL scheme://authority should be valid")
+    ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority()))
+        .expect("BUG: URL scheme://authority should be valid")
 }
 
 /// Parse a URL and return an ObjectStore and Path
@@ -235,7 +238,10 @@ impl Debug for ObjectStoreFile {
 
 impl ObjectStoreFile {
     /// Create an IOFile from a URL.
-    pub fn from_url(url: &Url, config: Arc<dyn ConfigProvider>) -> Result<ObjectStoreFile, BundlebaseError> {
+    pub fn from_url(
+        url: &Url,
+        config: Arc<dyn ConfigProvider>,
+    ) -> Result<ObjectStoreFile, BundlebaseError> {
         let (store, path) = parse_url(url, &config)?;
         Self::new(url, store, &path)
     }
@@ -470,7 +476,10 @@ impl Debug for ObjectStoreDir {
 
 impl ObjectStoreDir {
     /// Create an IODir from a URL.
-    pub fn from_url(url: &Url, config: Arc<dyn ConfigProvider>) -> Result<ObjectStoreDir, BundlebaseError> {
+    pub fn from_url(
+        url: &Url,
+        config: Arc<dyn ConfigProvider>,
+    ) -> Result<ObjectStoreDir, BundlebaseError> {
         if url.scheme() == "memory" && !url.authority().is_empty() {
             return Err("Memory URL must be memory:///<path>".into());
         }
@@ -485,7 +494,10 @@ impl ObjectStoreDir {
 
     /// Creates a directory from the passed string.
     /// The string can be either a URL or a filesystem path (relative or absolute).
-    pub fn from_str(path: &str, config: Arc<dyn ConfigProvider>) -> Result<ObjectStoreDir, BundlebaseError> {
+    pub fn from_str(
+        path: &str,
+        config: Arc<dyn ConfigProvider>,
+    ) -> Result<ObjectStoreDir, BundlebaseError> {
         let url = str_to_url(path)?;
         Self::from_url(&url, config)
     }
@@ -525,7 +537,6 @@ impl ObjectStoreDir {
             config: self.config.clone(),
         })
     }
-
 }
 
 #[async_trait]
@@ -610,14 +621,13 @@ fn file_url(path: &str) -> Result<Url, BundlebaseError> {
     let absolute_path = if path_buf.is_absolute() {
         path_buf
     } else {
-        current_dir().map_err(|e| {
-            BundlebaseError::from(format!("Failed to get current directory: {}", e))
-        })?.join(path_buf)
+        current_dir()
+            .map_err(|e| BundlebaseError::from(format!("Failed to get current directory: {}", e)))?
+            .join(path_buf)
     };
 
-    Url::from_file_path(absolute_path.as_path()).map_err(|_| {
-        BundlebaseError::from(format!("Invalid file path: {}", path))
-    })
+    Url::from_file_path(absolute_path.as_path())
+        .map_err(|_| BundlebaseError::from(format!("Invalid file path: {}", path)))
 }
 
 // ============================================================================
@@ -689,7 +699,8 @@ mod tests {
     async fn test_read_write() {
         let file = random_memory_file("test.json");
         // Convert to IOFile
-        let io_file = ObjectStoreFile::from_url(file.url(), crate::test_utils::test_config()).unwrap();
+        let io_file =
+            ObjectStoreFile::from_url(file.url(), crate::test_utils::test_config()).unwrap();
 
         assert!(!io_file.exists().await.unwrap());
 
@@ -731,17 +742,23 @@ mod tests {
     #[test]
     fn test_from_string_complex() {
         assert!(
-            ObjectStoreDir::from_str("memory://bucket/test", crate::test_utils::test_config()).is_err(),
+            ObjectStoreDir::from_str("memory://bucket/test", crate::test_utils::test_config())
+                .is_err(),
             "Memory must start with :///"
         );
 
         let dir =
-            ObjectStoreDir::from_str("memory:///test/../test2", crate::test_utils::test_config()).unwrap();
+            ObjectStoreDir::from_str("memory:///test/../test2", crate::test_utils::test_config())
+                .unwrap();
         assert_eq!(dir.path.to_string(), "test2");
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
-        let dir = ObjectStoreDir::from_str("relative/path", crate::test_utils::test_config()).unwrap();
-        assert_eq!(dir.url.to_string(), file_url("relative/path").unwrap().to_string());
+        let dir =
+            ObjectStoreDir::from_str("relative/path", crate::test_utils::test_config()).unwrap();
+        assert_eq!(
+            dir.url.to_string(),
+            file_url("relative/path").unwrap().to_string()
+        );
     }
 
     #[rstest]
@@ -769,7 +786,8 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let dir = ObjectStoreDir::from_str("memory:///test", crate::test_utils::test_config()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("memory:///test", crate::test_utils::test_config()).unwrap();
         let file = dir.io_file("other").unwrap();
         assert_eq!(file.url().to_string(), "memory:///test/other");
 
@@ -779,7 +797,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files() {
-        let dir = ObjectStoreDir::from_str("memory:///test", crate::test_utils::test_config()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("memory:///test", crate::test_utils::test_config()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len())
     }
 
@@ -829,5 +848,4 @@ mod tests {
             assert_eq!(result.bytes().await.unwrap().as_ref(), b"hello");
         });
     }
-
 }

@@ -3,37 +3,37 @@
 pub mod attach_format;
 pub mod column_stats_builder;
 mod jsonl_row;
-pub mod page_filter;
-pub mod plugin;
-pub mod reader_factory;
 mod layout_cache;
+pub mod page_filter;
 pub mod page_map;
 mod page_map_data_source;
+pub mod plugin;
+pub mod reader_factory;
 mod rowid_stream;
 
-use bundlebase_common::config::ConfigProvider;
-use bundlebase_common::BundlebaseError;
-use bundlebase_io::IOReadWriteDir;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
+use bundlebase_common::config::ConfigProvider;
+pub use bundlebase_common::object_id::{BlockId, ObjectId, ObjectIdAlias};
+pub use bundlebase_common::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
+pub use bundlebase_common::versioned_blockid::VersionedBlockId;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteDir;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 pub use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::prelude::SessionContext;
-pub use bundlebase_common::object_id::{BlockId, ObjectId, ObjectIdAlias};
-pub use reader_factory::DataReaderFactory;
-pub use bundlebase_common::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
 pub use layout_cache::GLOBAL_LAYOUT_CACHE;
-pub use page_map::{ColumnStats, HistogramBucket, PageStats, PageMap, StatValue, StringProfile};
+pub use page_map::{ColumnStats, HistogramBucket, PageMap, PageStats, StatValue, StringProfile};
 pub use page_map_data_source::{coalesce_page_ranges, LineOrientedFormat, PageMapDataSource};
+pub use plugin::ReaderPlugin;
+pub use reader_factory::DataReaderFactory;
 pub use rowid_stream::RowIdStreamAdapter;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use url::Url;
-pub use bundlebase_common::versioned_blockid::VersionedBlockId;
-pub use plugin::ReaderPlugin;
 
 pub trait DataContext: Send + Sync {
     fn config_provider(&self) -> Arc<dyn ConfigProvider>;
@@ -148,9 +148,9 @@ pub(crate) mod test_utils {
     use super::DataContext;
     use bundlebase_common::config::ConfigProvider;
     use bundlebase_common::{BundlebaseError, ConfigKey, Scope};
-    use bundlebase_io::IOReadWriteDir;
-    use bundlebase_io::plugin::object_store::ObjectStoreFile;
     use bundlebase_io::file::IOReadWriteFile;
+    use bundlebase_io::plugin::object_store::ObjectStoreFile;
+    use bundlebase_io::IOReadWriteDir;
     use datafusion::prelude::SessionContext;
     use std::sync::Arc;
     use url::Url;
@@ -162,14 +162,22 @@ pub(crate) mod test_utils {
     }
 
     impl DataContext for TestDataContext {
-        fn config_provider(&self) -> Arc<dyn ConfigProvider> { self.config.clone() }
-        fn data_context_dir(&self) -> Arc<dyn IOReadWriteDir> { self.dir.clone() }
-        fn session_context(&self) -> Arc<SessionContext> { self.ctx.clone() }
+        fn config_provider(&self) -> Arc<dyn ConfigProvider> {
+            self.config.clone()
+        }
+        fn data_context_dir(&self) -> Arc<dyn IOReadWriteDir> {
+            self.dir.clone()
+        }
+        fn session_context(&self) -> Arc<SessionContext> {
+            self.ctx.clone()
+        }
     }
 
     struct EmptyConfig;
     impl ConfigProvider for EmptyConfig {
-        fn get(&self, _: &Scope, _: &ConfigKey) -> Result<Option<String>, BundlebaseError> { Ok(None) }
+        fn get(&self, _: &Scope, _: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+            Ok(None)
+        }
     }
 
     pub fn test_config() -> Arc<dyn ConfigProvider> {
@@ -185,9 +193,11 @@ pub(crate) mod test_utils {
             store.clone(),
             &object_store::path::Path::from(url.path()),
             config.clone(),
-        ).expect("valid dir");
+        )
+        .expect("valid dir");
         let ctx = SessionContext::new();
-        let memory_url = datafusion::datasource::object_store::ObjectStoreUrl::parse("memory://").expect("valid url");
+        let memory_url = datafusion::datasource::object_store::ObjectStoreUrl::parse("memory://")
+            .expect("valid url");
         ctx.register_object_store(memory_url.as_ref(), store);
         TestDataContext {
             config,
@@ -196,12 +206,16 @@ pub(crate) mod test_utils {
         }
     }
 
-    static TEST_DATAFILE_RESPONSES: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
+    static TEST_DATAFILE_RESPONSES: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
 
     pub fn test_datafile(name: &str) -> &'static str {
         let responses = TEST_DATAFILE_RESPONSES.get_or_init(|| {
             std::thread::spawn(|| {
-                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
                 let mut map = std::collections::HashMap::new();
                 let data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .parent()
@@ -210,10 +224,16 @@ pub(crate) mod test_utils {
                     .expect("test_data dir");
                 for datafile in data_dir.read_dir().expect("read test_data") {
                     let os_path = datafile.expect("entry").path();
-                    let filename = os_path.file_name().expect("filename").to_str().expect("str").to_string();
+                    let filename = os_path
+                        .file_name()
+                        .expect("filename")
+                        .to_str()
+                        .expect("str")
+                        .to_string();
                     let bytes = std::fs::read(&os_path).expect("read file");
 
-                    let url = Url::parse(&format!("memory:///test_data/{}", filename)).expect("valid url");
+                    let url = Url::parse(&format!("memory:///test_data/{}", filename))
+                        .expect("valid url");
                     let file = ObjectStoreFile::from_url(&url, test_config()).expect("file");
 
                     rt.block_on(file.write(bytes.into())).expect("write");

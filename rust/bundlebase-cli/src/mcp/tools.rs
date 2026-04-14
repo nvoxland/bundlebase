@@ -3,8 +3,8 @@
 //! Each tool handler method uses the existing REPL command infrastructure
 //! to parse and execute commands, then formats results as JSON.
 
-use bundlebase_command::OutputShape;
 use bundlebase::BundleFacade;
+use bundlebase_command::OutputShape;
 use bundlebase_common::progress::ProgressScope;
 use serde_json::json;
 use std::sync::Arc;
@@ -14,10 +14,7 @@ use crate::repl::json_formatter::format_stream_json;
 const MCP_QUERY_LIMIT: usize = 1000;
 
 /// Execute a SQL query or bundlebase command against the bundle and return JSON.
-pub async fn execute_query(
-    bundle: &Arc<dyn BundleFacade>,
-    sql: &str,
-) -> Result<String, String> {
+pub async fn execute_query(bundle: &Arc<dyn BundleFacade>, sql: &str) -> Result<String, String> {
     use crate::repl::commands;
 
     // Top-level progress scope: emits start/finish for every command, even those
@@ -36,11 +33,9 @@ pub async fn execute_query(
 
     let cmd = cmds.pop().ok_or_else(|| "Empty command".to_string())?;
     match commands::execute(cmd, bundle).await {
-        Ok(Some((stream, shape))) => {
-            format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
-                .await
-                .map_err(|e| format!("{}", e))
-        }
+        Ok(Some((stream, shape))) => format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
+            .await
+            .map_err(|e| format!("{}", e)),
         Ok(None) => Ok("OK".to_string()),
         Err(e) => Err(format!("{}", e)),
     }
@@ -72,10 +67,7 @@ pub async fn get_count(bundle: &Arc<dyn BundleFacade>) -> Result<String, String>
 }
 
 /// Get sample rows as a JSON string.
-pub async fn get_sample(
-    bundle: &Arc<dyn BundleFacade>,
-    limit: usize,
-) -> Result<String, String> {
+pub async fn get_sample(bundle: &Arc<dyn BundleFacade>, limit: usize) -> Result<String, String> {
     let sql = format!("SELECT * FROM bundle LIMIT {}", limit);
     let stream = bundle
         .query(&sql, vec![], Some(limit))
@@ -92,10 +84,8 @@ pub async fn get_status(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
     let status = bundle.status();
     let changes = bundle.status_changes();
 
-    let change_list: Vec<serde_json::Value> = changes
-        .iter()
-        .map(|c| json!(format!("{}", c)))
-        .collect();
+    let change_list: Vec<serde_json::Value> =
+        changes.iter().map(|c| json!(format!("{}", c))).collect();
 
     let result = json!({
         "status": format!("{}", status),
@@ -132,7 +122,9 @@ mod tests {
 
     fn init() {
         static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| { bundlebase_catalog::init(); });
+        INIT.call_once(|| {
+            bundlebase_catalog::init();
+        });
     }
 
     async fn create_test_bundle() -> Arc<dyn BundleFacade> {
@@ -162,23 +154,41 @@ mod tests {
                 first_op: Arc::new(parking_lot::Mutex::new(None)),
             }
         }
-        fn start_count(&self) -> u32 { self.starts.load(std::sync::atomic::Ordering::SeqCst) }
-        fn finish_count(&self) -> u32 { self.finishes.load(std::sync::atomic::Ordering::SeqCst) }
-        fn first_operation(&self) -> Option<String> { self.first_op.lock().clone() }
+        fn start_count(&self) -> u32 {
+            self.starts.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn finish_count(&self) -> u32 {
+            self.finishes.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn first_operation(&self) -> Option<String> {
+            self.first_op.lock().clone()
+        }
     }
 
     impl bundlebase_common::progress::ProgressTracker for CountingTracker {
-        fn start(&self, operation: &str, _total: Option<u64>) -> bundlebase_common::progress::ProgressId {
-            self.starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        fn start(
+            &self,
+            operation: &str,
+            _total: Option<u64>,
+        ) -> bundlebase_common::progress::ProgressId {
+            self.starts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let mut lock = self.first_op.lock();
             if lock.is_none() {
                 *lock = Some(operation.to_string());
             }
             bundlebase_common::progress::ProgressId::new()
         }
-        fn update(&self, _id: bundlebase_common::progress::ProgressId, _current: u64, _message: Option<&str>) {}
+        fn update(
+            &self,
+            _id: bundlebase_common::progress::ProgressId,
+            _current: u64,
+            _message: Option<&str>,
+        ) {
+        }
         fn finish(&self, _id: bundlebase_common::progress::ProgressId) {
-            self.finishes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.finishes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -192,14 +202,27 @@ mod tests {
         let result = run_with_tracker(
             Arc::new(tracker.clone()),
             execute_query(&bundle, "SELECT 1 AS value"),
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok(), "Query failed: {:?}", result);
-        assert!(tracker.start_count() >= 1, "Expected at least one Start event");
-        assert!(tracker.finish_count() >= 1, "Expected at least one Finish event");
+        assert!(
+            tracker.start_count() >= 1,
+            "Expected at least one Start event"
+        );
+        assert!(
+            tracker.finish_count() >= 1,
+            "Expected at least one Finish event"
+        );
 
-        let op = tracker.first_operation().expect("No operation name recorded");
-        assert!(op.contains("SELECT 1"), "Operation should contain SQL, got: {}", op);
+        let op = tracker
+            .first_operation()
+            .expect("No operation name recorded");
+        assert!(
+            op.contains("SELECT 1"),
+            "Operation should contain SQL, got: {}",
+            op
+        );
     }
 
     /// Verify progress events fire for a bundlebase command (SHOW STATUS), not just SELECT.
@@ -211,11 +234,15 @@ mod tests {
         let result = run_with_tracker(
             Arc::new(tracker.clone()),
             execute_query(&bundle, "SHOW STATUS"),
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok(), "SHOW STATUS failed: {:?}", result);
         assert!(tracker.start_count() >= 1, "No Start event for SHOW STATUS");
-        assert!(tracker.finish_count() >= 1, "No Finish event for SHOW STATUS");
+        assert!(
+            tracker.finish_count() >= 1,
+            "No Finish event for SHOW STATUS"
+        );
     }
 
     #[tokio::test]

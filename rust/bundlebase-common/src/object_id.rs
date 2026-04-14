@@ -284,7 +284,11 @@ mod tests {
         for _ in 0..100 {
             let id = ObjectId::generate();
             let val = u64::from_be_bytes(id.0);
-            assert!(val >= 1000, "Generated ObjectId value {} is below 1000", val);
+            assert!(
+                val >= 1000,
+                "Generated ObjectId value {} is below 1000",
+                val
+            );
         }
     }
 

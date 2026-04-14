@@ -1,7 +1,7 @@
-use bundlebase::bundle::{DataBlock, Pack};
-use bundlebase_common::object_id::ObjectId;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::{DataBlock, Pack};
+use bundlebase_common::object_id::ObjectId;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::datasource::TableType;
 use datafusion::error::Result;
@@ -110,7 +110,9 @@ impl TableProvider for PackTable {
         }
 
         Some(Statistics {
-            num_rows: total_rows.map(Precision::Exact).unwrap_or(Precision::Absent),
+            num_rows: total_rows
+                .map(Precision::Exact)
+                .unwrap_or(Precision::Absent),
             total_byte_size: Precision::Absent,
             column_statistics: self
                 .schema
@@ -153,7 +155,10 @@ impl TableProvider for PackTable {
         // Arc<Field>s lets us move the projected schema into the per-block
         // futures without borrowing &self across awaits.
         let projected_pack_fields: Vec<(usize, Arc<Field>)> = match projection {
-            Some(proj) => proj.iter().map(|&i| (i, pack_schema.fields()[i].clone())).collect(),
+            Some(proj) => proj
+                .iter()
+                .map(|&i| (i, pack_schema.fields()[i].clone()))
+                .collect(),
             None => pack_schema
                 .fields()
                 .iter()
@@ -193,13 +198,14 @@ impl TableProvider for PackTable {
         // they only read DataBlock state and call into the async DataReader.
         let filters_owned: Vec<Expr> = filters.to_vec();
         let pack_fields_shared = Arc::new(projected_pack_fields);
-        let plan_futures = blocks_to_plan.into_iter().map(|block| {
-            let pack_fields = Arc::clone(&pack_fields_shared);
-            let filters_owned = filters_owned.clone();
-            async move {
-                Self::plan_for_block(block, state, &pack_fields, &filters_owned, limit).await
-            }
-        });
+        let plan_futures =
+            blocks_to_plan.into_iter().map(|block| {
+                let pack_fields = Arc::clone(&pack_fields_shared);
+                let filters_owned = filters_owned.clone();
+                async move {
+                    Self::plan_for_block(block, state, &pack_fields, &filters_owned, limit).await
+                }
+            });
         let inputs: Vec<Arc<dyn ExecutionPlan>> = try_join_all(plan_futures).await?;
 
         // If only one block, return its plan directly
@@ -271,7 +277,9 @@ impl PackTable {
             } else {
                 Some(existing_proj)
             };
-            let inner_plan = block.scan(state, scan_proj.as_ref(), filters, limit).await?;
+            let inner_plan = block
+                .scan(state, scan_proj.as_ref(), filters, limit)
+                .await?;
             let inner_schema = inner_plan.schema();
 
             let mut exprs: Vec<(Arc<dyn datafusion::physical_expr::PhysicalExpr>, String)> =

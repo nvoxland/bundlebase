@@ -1,9 +1,9 @@
 use super::commit::PyCommit;
-use bundlebase_command::BundleFacadeCommandExt;
-use bundlebase_common::BundlebaseError;
-use arrow::pyarrow::ToPyArrow;
 use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};
+use arrow::pyarrow::ToPyArrow;
+use bundlebase_command::BundleFacadeCommandExt;
+use bundlebase_common::BundlebaseError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -74,7 +74,11 @@ pub struct PyVerificationResults {
 impl From<&VerificationResults> for PyVerificationResults {
     fn from(results: &VerificationResults) -> Self {
         Self {
-            files: results.files.iter().map(PyFileVerificationResult::from).collect(),
+            files: results
+                .files
+                .iter()
+                .map(PyFileVerificationResult::from)
+                .collect(),
             passed_count: results.passed_count,
             failed_count: results.failed_count,
             skipped_count: results.skipped_count,
@@ -280,11 +284,7 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (data_dir=None))]
-    fn extend<'py>(
-        &self,
-        py: Python<'py>,
-        data_dir: Option<&str>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    fn extend<'py>(&self, py: Python<'py>, data_dir: Option<&str>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let data_dir_owned = data_dir.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -327,13 +327,16 @@ impl PyBundle {
 
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
-                Py::new(py, super::record_batch_stream::PyRecordBatchStream::new(stream, schema))
-                    .map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to create stream: {}",
-                            e
-                        ))
-                    })
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create stream: {}",
+                        e
+                    ))
+                })
             })
         })
     }
@@ -362,24 +365,20 @@ impl PyBundle {
         let identifier = identifier.to_string();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let bundle = inner
-                .view(&identifier)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to open view '{}': {}",
-                        identifier, e
-                    ))
-                })?;
+            let bundle = inner.view(&identifier).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to open view '{}': {}",
+                    identifier, e
+                ))
+            })?;
 
             Python::attach(|py| {
-                Py::new(py, PyBundle::new(bundle))
-                    .map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to create bundle: {}",
-                            e
-                        ))
-                    })
+                Py::new(py, PyBundle::new(bundle)).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create bundle: {}",
+                        e
+                    ))
+                })
             })
         })
     }
@@ -400,15 +399,12 @@ impl PyBundle {
         let key = key.to_string();
         let value = value.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner
-                .set_config(&scope, &key, &value)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to set config '{}': {}",
-                        key, e
-                    ))
-                })?;
+            inner.set_config(&scope, &key, &value).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to set config '{}': {}",
+                    key, e
+                ))
+            })?;
             Ok(format!("OK: SET CONFIG {}", key))
         })
     }
@@ -446,15 +442,12 @@ impl PyBundle {
         }
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let stream = inner
-                .describe_data(col_specs)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to describe data: {}",
-                        e
-                    ))
-                })?;
+            let stream = inner.describe_data(col_specs).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to describe data: {}",
+                    e
+                ))
+            })?;
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
                 Py::new(
@@ -491,15 +484,12 @@ impl PyBundle {
             }
         }
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let stream = inner
-                .test_connector(&name, args)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to test connector: {}",
-                        e
-                    ))
-                })?;
+            let stream = inner.test_connector(&name, args).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to test connector: {}",
+                    e
+                ))
+            })?;
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
                 Py::new(
@@ -536,15 +526,12 @@ impl PyBundle {
             }
         }
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let stream = inner
-                .test_temp_connector(&from_, args)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to test temp connector: {}",
-                        e
-                    ))
-                })?;
+            let stream = inner.test_temp_connector(&from_, args).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to test temp connector: {}",
+                    e
+                ))
+            })?;
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
                 Py::new(
@@ -565,23 +552,16 @@ impl PyBundle {
     ///
     /// Returns a record batch stream with columns: name, kind, input_types,
     /// return_type, runtime, entrypoint, platform, temporary.
-    fn describe_function<'py>(
-        &self,
-        name: &str,
-        py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    fn describe_function<'py>(&self, name: &str, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let sql = format!("DESCRIBE FUNCTION {}", name);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let stream = inner
-                .query(&sql, vec![], None)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to describe function: {}",
-                        e
-                    ))
-                })?;
+            let stream = inner.query(&sql, vec![], None).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to describe function: {}",
+                    e
+                ))
+            })?;
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
                 Py::new(
@@ -703,23 +683,16 @@ impl PyBundle {
             .collect()
     }
 
-    fn export_tar<'py>(
-        &self,
-        tar_path: &str,
-        py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    fn export_tar<'py>(&self, tar_path: &str, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let tar_path = tar_path.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner
-                .export_tar(&tar_path)
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to export to tar '{}': {}",
-                        tar_path, e
-                    ))
-                })
+            inner.export_tar(&tar_path).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to export to tar '{}': {}",
+                    tar_path, e
+                ))
+            })
         })
     }
 
@@ -729,23 +702,19 @@ impl PyBundle {
     fn verify_data<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let results = inner
-                .verify_data()
-                .await
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to verify data: {}",
+            let results = inner.verify_data().await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to verify data: {}",
+                    e
+                ))
+            })?;
+            Python::attach(|py| {
+                Py::new(py, PyVerificationResults::from(&results)).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create verification results: {}",
                         e
                     ))
-                })?;
-            Python::attach(|py| {
-                Py::new(py, PyVerificationResults::from(&results))
-                    .map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to create verification results: {}",
-                            e
-                        ))
-                    })
+                })
             })
         })
     }
@@ -812,10 +781,7 @@ impl PyBundleResolver {
 
 #[async_trait::async_trait]
 impl bundlebase_report::BundleResolver for PyBundleResolver {
-    async fn resolve(
-        &self,
-        bundle_ref: &str,
-    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+    async fn resolve(&self, bundle_ref: &str) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
         if bundle_ref == "." || bundle_ref == "bundle" {
             return Ok(self.facade.clone());
         }
@@ -833,10 +799,7 @@ impl bundlebase_report::BundleResolver for PyBundleResolver {
         }
 
         let bundle = Bundle::open(bundle_ref, None).await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to open bundle '{}': {}",
-                bundle_ref, e
-            ))
+            BundlebaseError::from(format!("Failed to open bundle '{}': {}", bundle_ref, e))
         })?;
 
         let arc_bundle: Arc<dyn BundleFacade> = bundle;

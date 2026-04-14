@@ -1,22 +1,24 @@
 //! Fetch command implementations.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::{AnyOperation, AttachBlockOp, BatchedSource, DetachBlockOp, SourceInfo};
-use bundlebase::ExpectedColumn;
-use bundlebase_data::attach_format::AttachFormat;
-use bundlebase_data::ObjectId;
-use bundlebase_data::BlockId;
-use bundlebase_common::progress::ProgressScope;
+use bundlebase::bundle::operation::{
+    AnyOperation, AttachBlockOp, BatchedSource, DetachBlockOp, SourceInfo,
+};
+use bundlebase::bundle::BundleFacade;
 use bundlebase::source::{FetchAction, FetchResults, SyncMode};
+use bundlebase::ExpectedColumn;
+use bundlebase::{Bundle, BundleBuilder};
+use bundlebase_common::progress::ProgressScope;
 use bundlebase_common::BundlebaseError;
+use bundlebase_data::attach_format::AttachFormat;
+use bundlebase_data::BlockId;
+use bundlebase_data::ObjectId;
 use futures::StreamExt;
 use log::{info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::BundleBuilderCommand;
-use bundlebase::{Bundle, BundleBuilder};
-use bundlebase::bundle::BundleFacade;
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
@@ -32,12 +34,20 @@ pub struct FetchCommand {
 impl FetchCommand {
     /// Create a new FetchCommand.
     pub fn new(pack: String, mode: SyncMode) -> Self {
-        Self { pack, mode, dry_run: false }
+        Self {
+            pack,
+            mode,
+            dry_run: false,
+        }
     }
 
     /// Create a new FetchCommand with dry_run flag.
     pub fn new_with_dry_run(pack: String, mode: SyncMode, dry_run: bool) -> Self {
-        Self { pack, mode, dry_run }
+        Self {
+            pack,
+            mode,
+            dry_run,
+        }
     }
 }
 
@@ -66,7 +76,8 @@ impl CommandParsing for FetchCommand {
             }
         }
 
-        let pack = pack.ok_or_else(|| BundlebaseError::from("FETCH statement missing pack name"))?;
+        let pack =
+            pack.ok_or_else(|| BundlebaseError::from("FETCH statement missing pack name"))?;
         let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH statement missing mode"))?;
 
         Ok(FetchCommand::new_with_dry_run(pack, mode, dry_run))
@@ -74,7 +85,11 @@ impl CommandParsing for FetchCommand {
 
     fn to_statement(&self) -> String {
         if self.dry_run {
-            format!("FETCH {} {} DRY RUN", quote_identifier(&self.pack), self.mode)
+            format!(
+                "FETCH {} {} DRY RUN",
+                quote_identifier(&self.pack),
+                self.mode
+            )
         } else {
             format!("FETCH {} {}", quote_identifier(&self.pack), self.mode)
         }
@@ -84,7 +99,10 @@ impl CommandParsing for FetchCommand {
 impl BundleBuilderCommand for FetchCommand {
     type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
+    async fn execute(
+        self: Box<Self>,
+        builder: &BundleBuilder,
+    ) -> Result<Vec<FetchResults>, BundlebaseError> {
         let pack_name = self.pack.clone();
         let pack_id = builder.resolve_pack_id(Some(&self.pack))?;
 
@@ -117,7 +135,10 @@ pub struct FetchAllCommand {
 impl FetchAllCommand {
     /// Create a new FetchAllCommand.
     pub fn new(mode: SyncMode) -> Self {
-        Self { mode, dry_run: false }
+        Self {
+            mode,
+            dry_run: false,
+        }
     }
 
     /// Create a new FetchAllCommand with dry_run flag.
@@ -163,7 +184,10 @@ impl CommandParsing for FetchAllCommand {
 impl BundleBuilderCommand for FetchAllCommand {
     type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
+    async fn execute(
+        self: Box<Self>,
+        builder: &BundleBuilder,
+    ) -> Result<Vec<FetchResults>, BundlebaseError> {
         let mode = self.mode;
 
         // Collect sources with their pack info to avoid borrow issues
@@ -203,11 +227,13 @@ async fn fetch_from_source(
 
     // Look up expected_schema and json_* read options from the CreateSourceOp in operations.
     let ops = builder.operations();
-    let (expected_schema, json_read_options) = ops.iter()
+    let (expected_schema, json_read_options) = ops
+        .iter()
         .find_map(|op| match op {
-            AnyOperation::CreateSource(src) if src.id == source_id => {
-                Some((src.expected_schema.clone(), super::extract_json_opts(&src.args)))
-            }
+            AnyOperation::CreateSource(src) if src.id == source_id => Some((
+                src.expected_schema.clone(),
+                super::extract_json_opts(&src.args),
+            )),
             _ => None,
         })
         .unwrap_or((None, None));
@@ -245,7 +271,7 @@ async fn fetch_from_source(
     // this batch. Without this, every parallel setup() generates fresh
     // ColumnIds for the same logical columns AND re-writes the same schema
     // file once per attach, blowing up both the merged schema and disk I/O.
-    let shared_ctx = AttachBlockOp::shared_attach_context_for(builder);
+    let shared_ctx = builder.shared_attach_context();
 
     let prepared_adds: Vec<Result<(AttachBlockOp, String), BundlebaseError>> =
         futures::stream::iter(add_actions.into_iter().enumerate())
@@ -256,24 +282,34 @@ async fn fetch_from_source(
                 let shared_ctx = shared_ctx.clone();
                 async move {
                     let (final_location, format, hash) = resolve_attach_location(
-                        builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
-                    ).await?;
-                    let op = AttachBlockOp::setup_with_shared_context(
+                        builder,
+                        &data.attach_location,
+                        data.hash.clone(),
+                        json_read_options.as_ref(),
+                    )
+                    .await?;
+                    let op = AttachBlockOp::setup(
                         pack_id,
                         &final_location,
                         format,
                         hash.as_deref(),
                         Some(SourceInfo {
                             id: source_id,
-                            location: data.source_location.clone(),
-                            version: data.version.clone(),
-                            batch_sources: None,
+                            batch_sources: vec![BatchedSource {
+                                location: data.source_location.clone(),
+                                version: data.version.clone(),
+                            }],
                         }),
                         expected_schema.as_deref(),
                         builder,
                         Some(&shared_ctx),
-                    ).await?;
-                    validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
+                    )
+                    .await?;
+                    validate_schema_against_expected(
+                        &op,
+                        expected_schema.as_deref(),
+                        &data.attach_location,
+                    );
                     setup_progress.update((idx + 1) as u64, Some(&data.attach_location));
                     Ok((op, data.attach_location.clone()))
                 }
@@ -288,9 +324,9 @@ async fn fetch_from_source(
         prepared_ops.push(result?);
     }
 
-    // Phase 2: Batch small files if batch_bytes is configured on the source.
-    let final_ops = if let Some(batch_bytes) = source.batch_bytes() {
-        batch_small_ops(prepared_ops, batch_bytes, source_id, builder).await?
+    // Phase 2: Batch small files if min_batch_bytes is configured on the source.
+    let final_ops = if let Some(min_batch_bytes) = source.min_batch_bytes() {
+        batch_small_ops(prepared_ops, min_batch_bytes, source_id, builder).await?
     } else {
         prepared_ops
     };
@@ -312,14 +348,21 @@ async fn fetch_from_source(
                 data,
             } => {
                 let bundle_snapshot = builder.bundle().clone();
-                let old_location =
-                    find_block_location_by_source(&bundle_snapshot, &source_id, old_source_location)?;
+                let old_location = find_block_location_by_source(
+                    &bundle_snapshot,
+                    &source_id,
+                    old_source_location,
+                )?;
                 let detach_op = DetachBlockOp::setup(&old_location, builder).await?;
                 builder.apply_operation(detach_op.into()).await?;
 
                 let (final_location, format, hash) = resolve_attach_location(
-                    builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
-                ).await?;
+                    builder,
+                    &data.attach_location,
+                    data.hash.clone(),
+                    json_read_options.as_ref(),
+                )
+                .await?;
                 let op = AttachBlockOp::setup(
                     pack_id,
                     &final_location,
@@ -327,21 +370,28 @@ async fn fetch_from_source(
                     hash.as_deref(),
                     Some(SourceInfo {
                         id: source_id,
-                        location: data.source_location.clone(),
-                        version: data.version.clone(),
-                        batch_sources: None,
+                        batch_sources: vec![BatchedSource {
+                            location: data.source_location.clone(),
+                            version: data.version.clone(),
+                        }],
                     }),
                     expected_schema.as_deref(),
                     builder,
+                    None,
                 )
                 .await?;
-                validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
+                validate_schema_against_expected(
+                    &op,
+                    expected_schema.as_deref(),
+                    &data.attach_location,
+                );
                 builder.apply_operation(op.into()).await?;
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }
             FetchAction::Remove { source_location } => {
                 let bundle_snapshot = builder.bundle().clone();
-                let location = find_block_location_by_source(&bundle_snapshot, &source_id, source_location)?;
+                let location =
+                    find_block_location_by_source(&bundle_snapshot, &source_id, source_location)?;
                 let detach_op = DetachBlockOp::setup(&location, builder).await?;
                 builder.apply_operation(detach_op.into()).await?;
                 info!("Removed {} from {}", location, pack_name);
@@ -407,7 +457,12 @@ fn find_block_location_by_source(
     for op in operations.iter().rev() {
         if let AnyOperation::ReplaceBlock(replace) = op {
             if let Some(ref info) = replace.source_info {
-                if &info.id == source_id && info.location == source_location {
+                if &info.id == source_id
+                    && info
+                        .batch_sources
+                        .iter()
+                        .any(|source| source.location == source_location)
+                {
                     return Ok(replace.new_location.clone());
                 }
             }
@@ -420,26 +475,19 @@ fn find_block_location_by_source(
         .find_map(|op| {
             if let AnyOperation::AttachBlock(attach) = op {
                 if let Some(ref info) = attach.source_info {
-                    if &info.id == source_id && info.location == source_location {
+                    if &info.id == source_id
+                        && info
+                            .batch_sources
+                            .iter()
+                            .any(|b| b.location == source_location)
+                    {
                         return Some(attach.location.clone());
-                    }
-                    // Also check batched source locations
-                    if let Some(ref batch_sources) = info.batch_sources {
-                        if batch_sources.iter().any(|b| b.location == source_location) {
-                            return Some(attach.location.clone());
-                        }
                     }
                 }
             }
             None
         })
-        .ok_or_else(|| {
-            format!(
-                "No block found for source_location '{}'",
-                source_location
-            )
-            .into()
-        })
+        .ok_or_else(|| format!("No block found for source_location '{}'", source_location).into())
 }
 
 /// Public wrapper for `batch_small_ops` — used by create_source.rs.
@@ -454,7 +502,10 @@ pub(crate) async fn batch_small_ops_public(
 
 /// Group ops into chunks where cumulative bytes reach `batch_bytes` threshold.
 /// Files larger than threshold become single-item chunks (passed through unchanged).
-fn group_by_size(ops: Vec<(AttachBlockOp, String)>, batch_bytes: usize) -> Vec<Vec<(AttachBlockOp, String)>> {
+fn group_by_size(
+    ops: Vec<(AttachBlockOp, String)>,
+    batch_bytes: usize,
+) -> Vec<Vec<(AttachBlockOp, String)>> {
     let mut chunks: Vec<Vec<(AttachBlockOp, String)>> = Vec::new();
     let mut current: Vec<(AttachBlockOp, String)> = Vec::new();
     let mut current_bytes: usize = 0;
@@ -514,7 +565,10 @@ async fn batch_small_ops(
 
     let total_batchable = parquet_ops.len();
     let progress = ProgressScope::new(
-        &format!("Batching {} parquet files (threshold {} bytes)", total_batchable, batch_bytes),
+        &format!(
+            "Batching {} parquet files (threshold {} bytes)",
+            total_batchable, batch_bytes
+        ),
         Some(total_batchable as u64),
     );
 
@@ -538,17 +592,22 @@ async fn batch_small_ops(
         // First pass: read all parquet files in parallel (I/O bound)
         let data_dir_clone = builder.bundle().data_dir();
         let locations: Vec<String> = chunk.iter().map(|(op, _)| op.location.clone()).collect();
-        let read_results: Vec<Result<(arrow_schema::SchemaRef, Vec<arrow::record_batch::RecordBatch>), BundlebaseError>> =
-            futures::stream::iter(locations.into_iter())
-                .map(|location| {
-                    let dir = data_dir_clone.clone();
-                    async move {
-                        read_parquet_batches(&location, dir.as_ref()).await
-                    }
-                })
-                .buffer_unordered(50)
-                .collect()
-                .await;
+        let read_results: Vec<
+            Result<
+                (
+                    arrow_schema::SchemaRef,
+                    Vec<arrow::record_batch::RecordBatch>,
+                ),
+                BundlebaseError,
+            >,
+        > = futures::stream::iter(locations.into_iter())
+            .map(|location| {
+                let dir = data_dir_clone.clone();
+                async move { read_parquet_batches(&location, dir.as_ref()).await }
+            })
+            .buffer_unordered(50)
+            .collect()
+            .await;
 
         let mut per_file_batches: Vec<Vec<arrow::record_batch::RecordBatch>> = Vec::new();
         let mut union_fields: Vec<arrow_schema::Field> = Vec::new();
@@ -592,16 +651,19 @@ async fn batch_small_ops(
         // fresh IDs for fields that only appear in later chunk members.
         // Re-use the shared attach context so names seen across this and
         // any other batches resolve to the same ColumnId.
-        let merged_shared_ctx =
-            bundlebase::bundle::operation::AttachBlockOp::shared_attach_context_for(builder);
+        let merged_shared_ctx = builder.shared_attach_context();
         let merged_column_ids: Vec<bundlebase_common::ColumnId> = {
             // Seed the name→id map from the source ops in this chunk so
             // fields they covered keep their original IDs.
             {
                 let mut name_to_id = merged_shared_ctx.name_to_id.lock();
                 for (src_op, _) in chunk.iter() {
-                    if let Some(src_schema) = src_op.schema.as_ref() {
-                        for (field, id) in src_schema.fields().iter().zip(src_op.column_ids.iter()) {
+                    if let Some(src_schema) = src_op.schema_cache.as_ref() {
+                        for (field, id) in src_schema
+                            .fields()
+                            .iter()
+                            .zip(src_op.column_ids_cache.iter())
+                        {
                             name_to_id.entry(field.name().clone()).or_insert(*id);
                         }
                     }
@@ -621,13 +683,14 @@ async fn batch_small_ops(
 
         // Persist the merged schema and (union-schema-sized) column-id list
         // as sidecar files using the same dedup mechanism as per-block setup.
-        let schema_path = bundlebase::bundle::operation::AttachBlockOp::write_schema_file(
-            &schema,
+        let schema_cache = schema;
+        let schema = bundlebase::bundle::operation::AttachBlockOp::write_schema_file(
+            &schema_cache,
             &merged_shared_ctx,
             data_dir.as_ref(),
         )
         .await?;
-        let column_ids_path = bundlebase::bundle::operation::AttachBlockOp::write_column_ids_file(
+        let column_ids = bundlebase::bundle::operation::AttachBlockOp::write_column_ids_file(
             &merged_column_ids,
             &merged_shared_ctx,
             data_dir.as_ref(),
@@ -636,14 +699,28 @@ async fn batch_small_ops(
 
         let chunk_len = chunk.len();
         let merged_op = build_merged_op(
-            first_op, &merged_location, &merged_hash, AttachFormat::Parquet,
-            &batch_sources, Some(total_rows), Some(total_bytes), schema, schema_path,
-            column_ids_path, merged_column_ids,
+            first_op,
+            &merged_location,
+            &merged_hash,
+            AttachFormat::Parquet,
+            &batch_sources,
+            Some(total_rows),
+            Some(total_bytes),
+            schema_cache,
+            schema,
+            column_ids,
+            merged_column_ids,
         );
-        result.push((merged_op, format!("parquet-batch-{} ({} files)", batch_idx, chunk_len)));
+        result.push((
+            merged_op,
+            format!("parquet-batch-{} ({} files)", batch_idx, chunk_len),
+        ));
         processed += chunk_len;
         progress.update(processed as u64, None);
-        info!("Batched {} parquet files into {}", chunk_len, merged_location);
+        info!(
+            "Batched {} parquet files into {}",
+            chunk_len, merged_location
+        );
     }
 
     Ok(result)
@@ -658,7 +735,10 @@ fn align_batch_to_schema(
     let num_rows = batch.num_rows();
     let mut columns: Vec<Arc<dyn arrow::array::Array>> = Vec::with_capacity(target.fields().len());
     for field in target.fields() {
-        if let Some((i, _)) = batch_schema.fields().iter().enumerate()
+        if let Some((i, _)) = batch_schema
+            .fields()
+            .iter()
+            .enumerate()
             .find(|(_, f)| f.name() == field.name())
         {
             columns.push(batch.column(i).clone());
@@ -672,14 +752,17 @@ fn align_batch_to_schema(
         .map_err(|e| BundlebaseError::from(format!("Failed to align batch: {}", e)))
 }
 
-/// Build BatchedSource entries from a chunk of ops (skip first, it becomes primary).
+/// Build BatchedSource entries from a chunk of ops.
 fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> {
-    chunk.iter().skip(1).filter_map(|(op, _)| {
-        op.source_info.as_ref().map(|si| BatchedSource {
-            location: si.location.clone(),
-            version: si.version.clone(),
+    chunk
+        .iter()
+        .flat_map(|(op, _)| {
+            op.source_info
+                .as_ref()
+                .map(|si| si.batch_sources.clone())
+                .unwrap_or_default()
         })
-    }).collect()
+        .collect()
 }
 
 /// Build a merged AttachBlockOp from a batch.
@@ -692,16 +775,18 @@ fn build_merged_op(
     batch_sources: &[BatchedSource],
     num_rows: Option<usize>,
     bytes: Option<usize>,
-    schema: arrow_schema::SchemaRef,
-    schema_path: String,
-    column_ids_path: String,
-    column_ids: Vec<bundlebase_common::ColumnId>,
+    schema_cache: arrow_schema::SchemaRef,
+    schema: String,
+    column_ids: String,
+    column_ids_cache: Vec<bundlebase_common::ColumnId>,
 ) -> AttachBlockOp {
     let merged_source_info = first_op.source_info.as_ref().map(|si| SourceInfo {
         id: si.id,
-        location: si.location.clone(),
-        version: si.version.clone(),
-        batch_sources: if batch_sources.is_empty() { None } else { Some(batch_sources.to_vec()) },
+        batch_sources: if batch_sources.is_empty() {
+            si.batch_sources.clone()
+        } else {
+            batch_sources.to_vec()
+        },
     });
 
     AttachBlockOp {
@@ -716,10 +801,10 @@ fn build_merged_op(
         layout: None,
         num_rows,
         bytes,
-        schema_path,
-        column_ids_path,
-        schema: Some(schema),
+        schema,
         column_ids,
+        schema_cache: Some(schema_cache),
+        column_ids_cache,
     }
 }
 
@@ -736,7 +821,7 @@ fn validate_schema_against_expected(
         Some(e) if !e.is_empty() => e,
         _ => return,
     };
-    let fetched_schema = match &op.schema {
+    let fetched_schema = match &op.schema_cache {
         Some(s) => s,
         None => return,
     };
@@ -773,7 +858,9 @@ fn validate_schema_against_expected(
         if !expected_names.contains(field.name().as_str()) {
             info!(
                 "New column '{}' ({:?}) found in fetched data at '{}'",
-                field.name(), field.data_type(), location
+                field.name(),
+                field.data_type(),
+                location
             );
         }
     }
@@ -782,9 +869,9 @@ fn validate_schema_against_expected(
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_fetch_base() {

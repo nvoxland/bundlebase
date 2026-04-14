@@ -1097,6 +1097,9 @@ CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS COP
 -- Force Parquet conversion for all data
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS PARQUET
 
+-- Merge many small files into larger parquet batches
+CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.jsonl') MIN BATCH 15M
+
 -- Excel files are automatically converted to Parquet even without SAVE AS
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.xlsx')
 ```

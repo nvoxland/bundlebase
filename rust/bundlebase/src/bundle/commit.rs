@@ -2,11 +2,11 @@ use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
+use crate::bundle::operation::{AnyOperation, BundleChange};
+use crate::BundlebaseError;
 use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
 use bundlebase_common::impl_dyn_command_response;
 use datafusion::execution::SendableRecordBatchStream;
-use crate::bundle::operation::{AnyOperation, BundleChange};
-use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -71,7 +71,8 @@ impl CommandResponse for CommitHistory {
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let ids: Vec<i32> = (0..self.0.len() as i32).collect();
-        let urls: Vec<Option<String>> = self.0
+        let urls: Vec<Option<String>> = self
+            .0
             .iter()
             .map(|c| c.url.as_ref().map(|u| u.to_string()))
             .collect();
@@ -162,7 +163,8 @@ changes: []
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        let expected = format!(r"author: test-user
+        let expected = format!(
+            r"author: test-user
 message: Remove column
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -171,7 +173,9 @@ changes:
   operations:
   - type: dropColumn
     id: {}
-", id1);
+",
+            id1
+        );
         assert_eq!(yaml, expected);
     }
 
@@ -198,7 +202,8 @@ changes:
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        let expected = format!(r"author: test-user
+        let expected = format!(
+            r"author: test-user
 message: Multiple ops
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -212,7 +217,8 @@ changes:
   - type: renameColumn
     id: {rename_id}
     newName: new
-");
+"
+        );
         assert_eq!(yaml, expected);
     }
 
@@ -334,7 +340,8 @@ changes:
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         // Should have newName in camelCase
-        let expected = format!(r"author: test-user
+        let expected = format!(
+            r"author: test-user
 message: Test camelCase
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -344,7 +351,8 @@ changes:
   - type: renameColumn
     id: {col_id}
     newName: first_name
-");
+"
+        );
         assert_eq!(yaml, expected);
     }
 
@@ -377,7 +385,8 @@ changes:
         assert!(first_line_after_dash > 0);
 
         // Verify the exact order
-        let expected = format!(r"author: test-user
+        let expected = format!(
+            r"author: test-user
 message: Test
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -387,7 +396,8 @@ changes:
   - type: renameColumn
     id: {col_id}
     newName: b
-");
+"
+        );
         assert_eq!(yaml, expected);
     }
 
@@ -498,7 +508,8 @@ changes:
         };
 
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
-        let expected = format!(r"author: test-user
+        let expected = format!(
+            r"author: test-user
 message: Rename
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -508,7 +519,8 @@ changes:
   - type: renameColumn
     id: {col_id}
     newName: col-with-dash
-");
+"
+        );
         assert_eq!(yaml, expected);
     }
 
@@ -636,12 +648,12 @@ changes:
             layout: None,
             num_rows: Some(100),
             bytes: Some(1000),
-            schema_path: "ab/cd1234567890ab.block.schema.yaml".to_string(),
-            column_ids_path: "ab/cd1234567890ab.block.columns.yaml".to_string(),
-            schema: Some(schema),
+            schema: "ab/cd1234567890ab.block.schema.yaml".to_string(),
+            column_ids: "ab/cd1234567890ab.block.columns.yaml".to_string(),
+            schema_cache: Some(schema),
             source_info: None,
             read_options: None,
-            column_ids: vec![ColumnId::generate(), ColumnId::generate()],
+            column_ids_cache: vec![ColumnId::generate(), ColumnId::generate()],
         };
 
         let remove_config = DropColumnOp::setup(ColumnId::generate());
@@ -690,21 +702,21 @@ changes:
         let yaml = r#"author: test-user
 message: Attach data
 timestamp: '2024-01-01T00:00:00Z'
-changes:
-- id: 12345678-1234-1234-1234-123456789012
-  description: Attach block
-  operations:
-  - type: attachBlock
-    pack: '000000000000003b'
-    location: memory:///test_data/userdata.parquet
-    format: parquet
-    version: test-version
-    hash: 0000000000000000000000000000000000000000000000000000000000000000
-    id: '000000000000002a'
-    numRows: 100
-    bytes: 1000
-    schemaPath: ab/cd0000000000.block.schema.yaml
-    columnIdsPath: ab/cd0000000000.block.columns.yaml
+    changes:
+    - id: 12345678-1234-1234-1234-123456789012
+      description: Attach block
+      operations:
+      - type: attachBlock
+        pack: '000000000000003b'
+        location: memory:///test_data/userdata.parquet
+        format: parquet
+        version: test-version
+        hash: 0000000000000000000000000000000000000000000000000000000000000000
+        id: '000000000000002a'
+        numRows: 100
+        bytes: 1000
+        schema: ab/cd0000000000.block.schema.yaml
+        columnIds: ab/cd0000000000.block.columns.yaml
 "#;
         let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
@@ -726,21 +738,21 @@ changes:
         let yaml = r#"author: nvoxland
 message: First commit
 timestamp: 2025-11-26T16:20:18Z
-changes:
-- id: 12345678-1234-1234-1234-123456789012
-  description: Attach and transform data
-  operations:
-  - type: attachBlock
-    location: memory:///test_data/userdata.parquet
-    format: parquet
-    version: '2'
-    hash: 0000000000000000000000000000000000000000000000000000000000000000
-    id: '00000000000000cc'
-    pack: '00000000000000dd'
-    numRows: 1000
-    bytes: 113629
-    schemaPath: ab/cd0000000000.block.schema.yaml
-    columnIdsPath: ab/cd0000000000.block.columns.yaml
+    changes:
+    - id: 12345678-1234-1234-1234-123456789012
+      description: Attach and transform data
+      operations:
+      - type: attachBlock
+        location: memory:///test_data/userdata.parquet
+        format: parquet
+        version: '2'
+        hash: 0000000000000000000000000000000000000000000000000000000000000000
+        id: '00000000000000cc'
+        pack: '00000000000000dd'
+        numRows: 1000
+        bytes: 113629
+        schema: ab/cd0000000000.block.schema.yaml
+        columnIds: ab/cd0000000000.block.columns.yaml
   - type: dropColumn
     id: '0000000000000aa3'
     name: title
@@ -755,15 +767,16 @@ changes:
         assert_eq!(commit.message, "First commit");
         assert_eq!(commit.operations().len(), 3);
 
-        // Verify AttachBlock operation. Schema is no longer inlined; only the
-        // sidecar reference is on the wire. The actual schema gets resolved
-        // by `Bundle::open` from the sidecar file.
+        // Verify AttachBlock operation.
         match &commit.operations()[0] {
             AnyOperation::AttachBlock(config) => {
                 assert_eq!(config.location, "memory:///test_data/userdata.parquet");
                 assert_eq!(config.version, "2");
-                assert_eq!(config.schema_path, "ab/cd0000000000.block.schema.yaml");
-                assert!(config.schema.is_none(), "schema is loaded lazily by Bundle::open");
+                assert_eq!(config.schema, "ab/cd0000000000.block.schema.yaml");
+                assert!(
+                    config.schema_cache.is_none(),
+                    "schema_cache is loaded lazily by Bundle::open"
+                );
             }
             _ => panic!("Expected AttachBlock operation"),
         }

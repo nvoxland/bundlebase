@@ -61,8 +61,12 @@ pub struct CreateSourceOp {
     /// Optional batch size threshold in bytes. When set, small files fetched from
     /// this source are concatenated into batches until the total raw bytes exceeds
     /// this threshold, reducing per-file overhead. None = no batching.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub batch_bytes: Option<usize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "batchBytes"
+    )]
+    pub min_batch_bytes: Option<usize>,
 
     /// Optional expected schema for this source.
     ///
@@ -88,7 +92,7 @@ impl CreateSourceOp {
             connector,
             args,
             save_as,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         }
     }
@@ -96,8 +100,15 @@ impl CreateSourceOp {
 
 impl Operation for CreateSourceOp {
     fn describe(&self) -> String {
-        let url = self.args.get("url").map(|s| s.as_str()).unwrap_or("<no url>");
-        format!("CREATE SOURCE {} at {} for pack {}", self.id, url, self.pack)
+        let url = self
+            .args
+            .get("url")
+            .map(|s| s.as_str())
+            .unwrap_or("<no url>");
+        format!(
+            "CREATE SOURCE {} at {} for pack {}",
+            self.id, url, self.pack
+        )
     }
 
     fn to_hollow(&self, context: &super::HollowContext) -> Option<super::AnyOperation> {
@@ -105,7 +116,11 @@ impl Operation for CreateSourceOp {
         let filled = CreateSourceOp {
             expected_schema: expected.map(|cols| {
                 cols.into_iter()
-                    .map(|(name, id, data_type)| ExpectedColumn { id, name, data_type })
+                    .map(|(name, id, data_type)| ExpectedColumn {
+                        id,
+                        name,
+                        data_type,
+                    })
                     .collect()
             }),
             ..self.clone()
@@ -114,18 +129,19 @@ impl Operation for CreateSourceOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // batch_bytes only applies when fetched data is converted to parquet.
+        // min_batch_bytes only applies when fetched data is converted to parquet.
         // SAVE AS COPY keeps original bytes; SAVE AS REF doesn't store data at all.
-        if self.batch_bytes.is_some() {
+        if self.min_batch_bytes.is_some() {
             if let Some(sa) = self.save_as.as_deref() {
                 let lowered = sa.to_lowercase();
                 if lowered == "copy" || lowered == "ref" {
                     return Err(format!(
-                        "batch_bytes is not valid with save_as='{}'. \
+                        "min_batch is not valid with save_as='{}'. \
                          Batching only applies when data is converted to parquet \
                          (save_as='auto' or save_as='parquet').",
                         lowered
-                    ).into());
+                    )
+                    .into());
                 }
             }
         }
@@ -137,7 +153,10 @@ impl Operation for CreateSourceOp {
 
         if self.connector.contains('.') {
             // Dotted name: verify connector exists and resolves for current platform
-            bundle.connector_registry().read().resolve_entry(&self.connector)?;
+            bundle
+                .connector_registry()
+                .read()
+                .resolve_entry(&self.connector)?;
         } else {
             // Built-in function: look up in registry
             let registry = bundle.connector_registry();
@@ -190,13 +209,16 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 
         assert_eq!(
             op.describe(),
-            format!("CREATE SOURCE {} at s3://bucket/data/ for pack {}", id, pack)
+            format!(
+                "CREATE SOURCE {} at s3://bucket/data/ for pack {}",
+                id, pack
+            )
         );
     }
 
@@ -210,7 +232,7 @@ mod tests {
             connector: "custom_function".to_string(),
             args: HashMap::new(),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 
@@ -278,7 +300,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 
@@ -293,7 +315,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_rejects_batch_bytes_with_save_as_copy() {
+    async fn test_check_rejects_min_batch_bytes_with_save_as_copy() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = CreateSourceOp {
             id: ObjectId::generate(),
@@ -301,17 +323,17 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
             save_as: Some("copy".to_string()),
-            batch_bytes: Some(1024 * 1024),
+            min_batch_bytes: Some(1024 * 1024),
             expected_schema: None,
         };
         let err = op.check(&bundle).await.expect_err("should reject");
         let msg = err.to_string();
-        assert!(msg.contains("batch_bytes"), "msg: {}", msg);
+        assert!(msg.contains("min_batch"), "msg: {}", msg);
         assert!(msg.contains("copy"), "msg: {}", msg);
     }
 
     #[tokio::test]
-    async fn test_check_rejects_batch_bytes_with_save_as_ref() {
+    async fn test_check_rejects_min_batch_bytes_with_save_as_ref() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = CreateSourceOp {
             id: ObjectId::generate(),
@@ -319,42 +341,50 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
             save_as: Some("ref".to_string()),
-            batch_bytes: Some(1024 * 1024),
+            min_batch_bytes: Some(1024 * 1024),
             expected_schema: None,
         };
         let err = op.check(&bundle).await.expect_err("should reject");
         let msg = err.to_string();
-        assert!(msg.contains("batch_bytes"), "msg: {}", msg);
+        assert!(msg.contains("min_batch"), "msg: {}", msg);
         assert!(msg.contains("ref"), "msg: {}", msg);
     }
 
     #[tokio::test]
-    async fn test_check_allows_batch_bytes_with_save_as_parquet() {
+    async fn test_check_allows_min_batch_bytes_with_save_as_parquet() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_pack(ObjectId::BASE_PACK, std::sync::Arc::new(crate::bundle::pack::Pack::new_base()));
+        bundle.add_pack(
+            ObjectId::BASE_PACK,
+            std::sync::Arc::new(crate::bundle::pack::Pack::new_base()),
+        );
         let op = CreateSourceOp {
             id: ObjectId::generate(),
             pack: ObjectId::BASE_PACK,
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
             save_as: Some("parquet".to_string()),
-            batch_bytes: Some(1024 * 1024),
+            min_batch_bytes: Some(1024 * 1024),
             expected_schema: None,
         };
-        op.check(&bundle).await.expect("should allow parquet + batch");
+        op.check(&bundle)
+            .await
+            .expect("should allow parquet + batch");
     }
 
     #[tokio::test]
-    async fn test_check_allows_batch_bytes_with_save_as_auto() {
+    async fn test_check_allows_min_batch_bytes_with_save_as_auto() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_pack(ObjectId::BASE_PACK, std::sync::Arc::new(crate::bundle::pack::Pack::new_base()));
+        bundle.add_pack(
+            ObjectId::BASE_PACK,
+            std::sync::Arc::new(crate::bundle::pack::Pack::new_base()),
+        );
         let op = CreateSourceOp {
             id: ObjectId::generate(),
             pack: ObjectId::BASE_PACK,
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
             save_as: None,
-            batch_bytes: Some(1024 * 1024),
+            min_batch_bytes: Some(1024 * 1024),
             expected_schema: None,
         };
         op.check(&bundle).await.expect("should allow auto + batch");

@@ -3,11 +3,11 @@
 //! Bridges `FunctionEntry` definitions (with `kind == Aggregate`) to DataFusion's UDAF system.
 //! Dispatches to Python via the `PythonFunctionBridge` aggregate methods.
 
-use crate::function_entry::FunctionEntry;
 use crate::bridge::ipc_bridge::{self, SubprocessCache};
 use crate::bridge::python_bridge::get_python_function_bridge;
-use bundlebase_common::BundlebaseError;
+use crate::function_entry::FunctionEntry;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{
     Accumulator, AggregateUDFImpl, Signature, TypeSignature, Volatility,
@@ -24,7 +24,9 @@ fn create_accumulator_for_entry(
     entry: &FunctionEntry,
     subprocess_cache: &SubprocessCache,
 ) -> DFResult<Box<dyn Accumulator>> {
-    entry.from.create_accumulator(name, &entry.name.name, &entry.return_type, subprocess_cache)
+    entry
+        .from
+        .create_accumulator(name, &entry.name.name, &entry.return_type, subprocess_cache)
 }
 
 /// Find the overload whose input_types match the actual argument types.
@@ -32,7 +34,9 @@ fn find_matching_overload<'a>(
     overloads: &'a [FunctionEntry],
     arg_types: &[DataType],
 ) -> Option<&'a FunctionEntry> {
-    overloads.iter().find(|entry| entry.input_types == arg_types)
+    overloads
+        .iter()
+        .find(|entry| entry.input_types == arg_types)
 }
 
 /// A DataFusion aggregate function backed by one or more FunctionEntry overloads.
@@ -60,7 +64,10 @@ impl Hash for AggregateFunction {
 
 impl AggregateFunction {
     /// Create a new aggregate function from a single FunctionEntry.
-    pub fn new(entry: FunctionEntry, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
+    pub fn new(
+        entry: FunctionEntry,
+        subprocess_cache: SubprocessCache,
+    ) -> Result<Self, BundlebaseError> {
         let name = entry.name.to_string();
         let signature = Signature::new(
             TypeSignature::Exact(entry.input_types.clone()),
@@ -75,7 +82,10 @@ impl AggregateFunction {
     }
 
     /// Create a composite aggregate function from multiple overloads.
-    pub fn new_composite(overloads: Vec<FunctionEntry>, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
+    pub fn new_composite(
+        overloads: Vec<FunctionEntry>,
+        subprocess_cache: SubprocessCache,
+    ) -> Result<Self, BundlebaseError> {
         if overloads.is_empty() {
             return Err("Cannot create composite aggregate function with no overloads".into());
         }
@@ -85,7 +95,10 @@ impl AggregateFunction {
             .map(|e| TypeSignature::Exact(e.input_types.clone()))
             .collect();
         let signature = if type_sigs.len() == 1 {
-            Signature::new(type_sigs.into_iter().next().expect("checked non-empty"), Volatility::Volatile)
+            Signature::new(
+                type_sigs.into_iter().next().expect("checked non-empty"),
+                Volatility::Volatile,
+            )
         } else {
             Signature::new(TypeSignature::OneOf(type_sigs), Volatility::Volatile)
         };
@@ -132,21 +145,24 @@ impl AggregateUDFImpl for AggregateFunction {
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]
         } else {
-            let arg_types: Vec<DataType> = args.input_fields.iter().map(|f| f.data_type().clone()).collect();
-            find_matching_overload(&self.overloads, &arg_types)
-                .ok_or_else(|| datafusion::common::DataFusionError::Plan(format!(
+            let arg_types: Vec<DataType> = args
+                .input_fields
+                .iter()
+                .map(|f| f.data_type().clone())
+                .collect();
+            find_matching_overload(&self.overloads, &arg_types).ok_or_else(|| {
+                datafusion::common::DataFusionError::Plan(format!(
                     "No overload of aggregate '{}' matches argument types {:?}",
                     self.name, arg_types
-                )))?
+                ))
+            })?
         };
 
         // IPC accumulators use Utf8 state (opaque state ID), others use return type
         let state_type = entry.from.aggregate_state_type(&entry.return_type);
 
         Ok(vec![Arc::new(arrow::datatypes::Field::new(
-            "state",
-            state_type,
-            true,
+            "state", state_type, true,
         ))])
     }
 
@@ -157,12 +173,17 @@ impl AggregateUDFImpl for AggregateFunction {
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]
         } else {
-            let arg_types: Vec<DataType> = acc_args.expr_fields.iter().map(|f| f.data_type().clone()).collect();
-            find_matching_overload(&self.overloads, &arg_types)
-                .ok_or_else(|| datafusion::common::DataFusionError::Execution(format!(
+            let arg_types: Vec<DataType> = acc_args
+                .expr_fields
+                .iter()
+                .map(|f| f.data_type().clone())
+                .collect();
+            find_matching_overload(&self.overloads, &arg_types).ok_or_else(|| {
+                datafusion::common::DataFusionError::Execution(format!(
                     "No overload of aggregate '{}' matches argument types {:?}",
                     self.name, arg_types
-                )))?
+                ))
+            })?
         };
         create_accumulator_for_entry(&self.name, entry, &self.subprocess_cache)
     }
@@ -178,10 +199,7 @@ pub(crate) struct PythonAccumulator {
 }
 
 impl Accumulator for PythonAccumulator {
-    fn update_batch(
-        &mut self,
-        values: &[arrow::array::ArrayRef],
-    ) -> DFResult<()> {
+    fn update_batch(&mut self, values: &[arrow::array::ArrayRef]) -> DFResult<()> {
         let bridge = get_python_function_bridge().map_err(|e| {
             datafusion::common::DataFusionError::Execution(format!(
                 "Cannot invoke accumulate for '{}': {}",
@@ -201,10 +219,7 @@ impl Accumulator for PythonAccumulator {
         Ok(())
     }
 
-    fn merge_batch(
-        &mut self,
-        states: &[arrow::array::ArrayRef],
-    ) -> DFResult<()> {
+    fn merge_batch(&mut self, states: &[arrow::array::ArrayRef]) -> DFResult<()> {
         let bridge = get_python_function_bridge().map_err(|e| {
             datafusion::common::DataFusionError::Execution(format!(
                 "Cannot invoke merge for '{}': {}",
@@ -274,10 +289,7 @@ pub(crate) struct IpcAccumulator {
 }
 
 impl Accumulator for IpcAccumulator {
-    fn update_batch(
-        &mut self,
-        values: &[arrow::array::ArrayRef],
-    ) -> DFResult<()> {
+    fn update_batch(&mut self, values: &[arrow::array::ArrayRef]) -> DFResult<()> {
         ipc_bridge::ipc_aggregate_accumulate(
             &self.subprocess_cache,
             &self.entrypoint,
@@ -293,10 +305,7 @@ impl Accumulator for IpcAccumulator {
         })
     }
 
-    fn merge_batch(
-        &mut self,
-        states: &[arrow::array::ArrayRef],
-    ) -> DFResult<()> {
+    fn merge_batch(&mut self, states: &[arrow::array::ArrayRef]) -> DFResult<()> {
         if states.is_empty() {
             return Ok(());
         }
@@ -360,13 +369,13 @@ impl Accumulator for IpcAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bundlebase_common::platform::Platform;
-        use crate::runtime::UdfRuntime;
-    use crate::function_entry::FunctionKind;
-    use bundlebase_common::object_id::ObjectId;
     use crate::bridge::ipc_bridge::new_subprocess_cache;
+    use crate::function_entry::FunctionKind;
     use crate::parse_python_entrypoint;
+    use crate::runtime::UdfRuntime;
     use bundlebase_common::namespaced_name::NamespacedName;
+    use bundlebase_common::object_id::ObjectId;
+    use bundlebase_common::platform::Platform;
 
     #[test]
     fn test_signature_construction() {
@@ -428,9 +437,13 @@ mod tests {
             temporary: true,
             kind: FunctionKind::Aggregate,
         };
-        let agg = AggregateFunction::new_composite(vec![entry], new_subprocess_cache()).expect("should create");
+        let agg = AggregateFunction::new_composite(vec![entry], new_subprocess_cache())
+            .expect("should create");
         assert_eq!(agg.name(), "acme.my_sum");
-        assert_eq!(agg.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
+        assert_eq!(
+            agg.return_type(&[DataType::Int64]).unwrap(),
+            DataType::Int64
+        );
     }
 
     #[test]
@@ -455,10 +468,18 @@ mod tests {
             temporary: true,
             kind: FunctionKind::Aggregate,
         };
-        let agg = AggregateFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache()).expect("should create");
+        let agg =
+            AggregateFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache())
+                .expect("should create");
         assert_eq!(agg.name(), "acme.my_sum");
-        assert_eq!(agg.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
-        assert_eq!(agg.return_type(&[DataType::Float64]).unwrap(), DataType::Float64);
+        assert_eq!(
+            agg.return_type(&[DataType::Int64]).unwrap(),
+            DataType::Int64
+        );
+        assert_eq!(
+            agg.return_type(&[DataType::Float64]).unwrap(),
+            DataType::Float64
+        );
         assert!(agg.return_type(&[DataType::Boolean]).is_err());
     }
 }

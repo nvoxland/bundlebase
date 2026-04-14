@@ -3,7 +3,9 @@
 use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::connector::SaveAs;
 use crate::data::ObjectId;
-use crate::source::{AttachedFileInfo, FetchAction, ConnectorRegistry, SyncMode, orchestrate_fetch};
+use crate::source::{
+    orchestrate_fetch, AttachedFileInfo, ConnectorRegistry, FetchAction, SyncMode,
+};
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -23,8 +25,9 @@ pub struct Source {
     args: HashMap<String, String>,
     /// How to save fetched data.
     save_as: SaveAs,
+
     /// Optional size threshold in bytes for batching small files together.
-    batch_bytes: Option<usize>,
+    min_batch_bytes: Option<usize>,
     /// Attached files from this source, keyed by source_location
     attached_files: RwLock<HashMap<String, AttachedFileInfo>>,
 }
@@ -46,7 +49,7 @@ impl Source {
         connector: String,
         args: HashMap<String, String>,
         save_as: SaveAs,
-        batch_bytes: Option<usize>,
+        min_batch_bytes: Option<usize>,
     ) -> Self {
         Self {
             id,
@@ -54,7 +57,7 @@ impl Source {
             connector: RwLock::new(connector),
             args,
             save_as,
-            batch_bytes,
+            min_batch_bytes,
             attached_files: RwLock::new(HashMap::new()),
         }
     }
@@ -69,7 +72,9 @@ impl Source {
                 .ok_or_else(|| format!("Unknown connector '{}'", op.connector))?;
         }
 
-        let save_as = op.save_as.as_deref()
+        let save_as = op
+            .save_as
+            .as_deref()
             .map(SaveAs::parse)
             .transpose()?
             .unwrap_or(SaveAs::Auto);
@@ -80,12 +85,12 @@ impl Source {
             op.connector.clone(),
             op.args.clone(),
             save_as,
-            op.batch_bytes,
+            op.min_batch_bytes,
         ))
     }
 
-    pub fn batch_bytes(&self) -> Option<usize> {
-        self.batch_bytes
+    pub fn min_batch_bytes(&self) -> Option<usize> {
+        self.min_batch_bytes
     }
 
     pub fn id(&self) -> &ObjectId {
@@ -237,8 +242,14 @@ mod tests {
 
         assert_eq!(source.id(), &id);
         assert_eq!(source.pack(), &pack);
-        assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
-        assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
+        assert_eq!(
+            source.args().get("url").map(|s| s.as_str()),
+            Some("s3://bucket/data/")
+        );
+        assert_eq!(
+            source.args().get("patterns").map(|s| s.as_str()),
+            Some("**/*")
+        );
         assert_eq!(source.connector(), "remote_dir");
     }
 
@@ -254,15 +265,21 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 
         let source = Source::from_op(&op, &registry).unwrap();
         assert_eq!(source.id(), &id);
         assert_eq!(source.pack(), &pack);
-        assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
-        assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
+        assert_eq!(
+            source.args().get("url").map(|s| s.as_str()),
+            Some("s3://bucket/data/")
+        );
+        assert_eq!(
+            source.args().get("patterns").map(|s| s.as_str()),
+            Some("**/*.parquet")
+        );
         assert_eq!(source.connector(), "remote_dir");
     }
 
@@ -278,7 +295,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: args.clone(),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 
@@ -299,7 +316,7 @@ mod tests {
             connector: "unknown_function".to_string(),
             args: HashMap::new(),
             save_as: None,
-            batch_bytes: None,
+            min_batch_bytes: None,
             expected_schema: None,
         };
 

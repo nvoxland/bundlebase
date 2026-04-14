@@ -16,16 +16,17 @@ pub mod exit;
 pub mod help;
 mod sql;
 
-use bundlebase_command::{CommandResponse, OutputShape};
-use bundlebase_command::parser::{parse_command, split_statements};
 use bundlebase::BundleFacade;
+use bundlebase_command::parser::{parse_command, split_statements};
+use bundlebase_command::{CommandResponse, OutputShape};
 use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
-pub type ReplCommandResult = Result<Option<(SendableRecordBatchStream, OutputShape)>, BundlebaseError>;
+pub type ReplCommandResult =
+    Result<Option<(SendableRecordBatchStream, OutputShape)>, BundlebaseError>;
 
 /// Metadata for a repl command - all info about a command in one place
 pub struct ReplCommandDef {
@@ -56,12 +57,7 @@ impl ReplCommand {
     }
 
     pub fn all_commands() -> impl Iterator<Item = &'static ReplCommandDef> {
-        [
-            &clear::DEF,
-            &exit::DEF,
-            &help::DEF,
-        ]
-        .into_iter()
+        [&clear::DEF, &exit::DEF, &help::DEF].into_iter()
     }
 
     /// Parse from input string (without leading `/`)
@@ -74,7 +70,10 @@ impl ReplCommand {
         // Find matching command using names
         for command_def in Self::all_commands() {
             if first_word == command_def.name.to_uppercase()
-                || command_def.aliases.iter().any(|a| first_word == a.to_uppercase())
+                || command_def
+                    .aliases
+                    .iter()
+                    .any(|a| first_word == a.to_uppercase())
             {
                 return (command_def.create)(args);
             }
@@ -86,10 +85,7 @@ impl ReplCommand {
         ))
     }
 
-    pub async fn execute(
-        &self,
-        bundle: &Arc<dyn BundleFacade>,
-    ) -> ReplCommandResult {
+    pub async fn execute(&self, bundle: &Arc<dyn BundleFacade>) -> ReplCommandResult {
         (self.definition().execute)(self, bundle).await
     }
 }
@@ -121,9 +117,7 @@ fn parse_single(input: &str) -> Result<Command, String> {
     if input.starts_with('/') {
         let repl_input = input[1..].trim();
         if repl_input.is_empty() {
-            return Err(
-                "Empty command after '/'. Type /help for available commands.".to_string(),
-            );
+            return Err("Empty command after '/'. Type /help for available commands.".to_string());
         }
         return ReplCommand::parse(repl_input).map(Command::Repl);
     }
@@ -133,7 +127,10 @@ fn parse_single(input: &str) -> Result<Command, String> {
     if let Err(e) = parse_command(input) {
         // Check if the user might have meant a repl command
         if let Some(suggestion) = suggest_repl_command(input) {
-            return Err(format!("Invalid SQL: {}. Did you mean '{}'?", e, suggestion));
+            return Err(format!(
+                "Invalid SQL: {}. Did you mean '{}'?",
+                e, suggestion
+            ));
         }
         // If it's not a repl command suggestion and it's a syntax error,
         // it might be standard SQL (SELECT, etc.) - let it through
@@ -219,10 +216,7 @@ pub fn get_parameter_names(_command_name: &str) -> Vec<String> {
 }
 
 /// Execute a command, returning a stream and output shape (or None for Exit/Clear)
-pub async fn execute(
-    cmd: Command,
-    bundle: &Arc<dyn BundleFacade>,
-) -> ReplCommandResult {
+pub async fn execute(cmd: Command, bundle: &Arc<dyn BundleFacade>) -> ReplCommandResult {
     match cmd {
         Command::Sql(sql_str) => {
             let (stream, shape) = sql::execute(bundle, &sql_str).await?;
@@ -269,22 +263,46 @@ mod tests {
 
     #[test]
     fn test_parse_repl_commands() {
-        assert!(matches!(parse_one("/help").unwrap(), Command::Repl(ReplCommand::Help)));
-        assert!(matches!(parse_one("/exit").unwrap(), Command::Repl(ReplCommand::Exit)));
-        assert!(matches!(parse_one("/quit").unwrap(), Command::Repl(ReplCommand::Exit)));
-        assert!(matches!(parse_one("/clear").unwrap(), Command::Repl(ReplCommand::Clear)));
+        assert!(matches!(
+            parse_one("/help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse_one("/exit").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
+        assert!(matches!(
+            parse_one("/quit").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
+        assert!(matches!(
+            parse_one("/clear").unwrap(),
+            Command::Repl(ReplCommand::Clear)
+        ));
     }
 
     #[test]
     fn test_parse_repl_commands_case_insensitive() {
-        assert!(matches!(parse_one("/HELP").unwrap(), Command::Repl(ReplCommand::Help)));
-        assert!(matches!(parse_one("/Help").unwrap(), Command::Repl(ReplCommand::Help)));
-        assert!(matches!(parse_one("/EXIT").unwrap(), Command::Repl(ReplCommand::Exit)));
+        assert!(matches!(
+            parse_one("/HELP").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse_one("/Help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse_one("/EXIT").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
     }
 
     #[test]
     fn test_parse_repl_commands_with_space_after_slash() {
-        assert!(matches!(parse_one("/ help").unwrap(), Command::Repl(ReplCommand::Help)));
+        assert!(matches!(
+            parse_one("/ help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
     }
 
     #[test]
@@ -362,6 +380,10 @@ mod tests {
         let result = parse("SHOW HISTORY; HELP");
         assert!(result.is_err(), "Should fail validation: {:?}", result);
         let err = result.unwrap_err();
-        assert!(err.contains("Statement 2"), "Error should reference statement number: {}", err);
+        assert!(
+            err.contains("Statement 2"),
+            "Error should reference statement number: {}",
+            err
+        );
     }
 }

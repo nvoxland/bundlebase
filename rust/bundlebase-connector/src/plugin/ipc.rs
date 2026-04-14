@@ -4,14 +4,14 @@
 //! with Arrow IPC (length-prefix framed) for bulk data transfer.
 //! This enables users to write connectors in any language.
 
+use arrow::ipc::reader::StreamReader;
 use bundlebase_common::connector::{
-    SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
-use bundlebase_common::{ConfigProvider, BundlebaseError};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 use url::Url;
-use arrow::ipc::reader::StreamReader;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-
 
 // ---------------------------------------------------------------------------
 // JSON-RPC types
@@ -193,21 +192,32 @@ impl SubprocessHandle {
 
         let response: JsonRpcResponse =
             serde_json::from_str(response_line.trim()).map_err(|e| {
-                format!("Failed to parse handshake response: {} (raw: {})", e, response_line.trim())
+                format!(
+                    "Failed to parse handshake response: {} (raw: {})",
+                    e,
+                    response_line.trim()
+                )
             })?;
 
         if let Some(err) = response.error {
             if err.code == -32601 {
                 log::warn!("IPC source subprocess does not support handshake (method_not_found), proceeding without version check");
             } else {
-                log::warn!("IPC source subprocess handshake returned error (code {}): {}", err.code, err.message);
+                log::warn!(
+                    "IPC source subprocess handshake returned error (code {}): {}",
+                    err.code,
+                    err.message
+                );
             }
             return Ok(());
         }
 
         if let Some(result) = response.result {
             if let Some(version) = result.get("protocol_version").and_then(|v| v.as_str()) {
-                log::info!("IPC source subprocess handshake successful, protocol_version={}", version);
+                log::info!(
+                    "IPC source subprocess handshake successful, protocol_version={}",
+                    version
+                );
             }
         }
 
@@ -256,8 +266,15 @@ impl SubprocessHandle {
             return Err("IPC source process closed stdout unexpectedly".into());
         }
 
-        let response: JsonRpcResponse = serde_json::from_str(response_line.trim())
-            .map_err(|e| format!("Failed to parse JSON-RPC response for '{}': {} (raw: {})", method, e, response_line.trim()))?;
+        let response: JsonRpcResponse =
+            serde_json::from_str(response_line.trim()).map_err(|e| {
+                format!(
+                    "Failed to parse JSON-RPC response for '{}': {} (raw: {})",
+                    method,
+                    e,
+                    response_line.trim()
+                )
+            })?;
 
         if response.id != id {
             return Err(format!(
@@ -315,7 +332,6 @@ impl SubprocessHandle {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // IpcConnector
 // ---------------------------------------------------------------------------
@@ -337,10 +353,7 @@ impl IpcConnector {
     }
 
     /// Ensure the subprocess is spawned, using the `call` arg.
-    async fn ensure_spawned(
-        &self,
-        args: &HashMap<String, String>,
-    ) -> Result<(), BundlebaseError> {
+    async fn ensure_spawned(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         let mut guard = self.handle.lock().await;
         if guard.is_none() {
             let call = shared_utils::require_arg(args, "call", "ipc")?;
@@ -399,18 +412,15 @@ impl Connector for IpcConnector {
 
         let mut params = serde_json::to_value(&filtered_args)
             .map_err(|e| format!("Failed to serialize discover params: {}", e))?;
-        params["attached_locations"] =
-            serde_json::to_value(attached_locations)
-                .map_err(|e| format!("Failed to serialize attached_locations: {}", e))?;
+        params["attached_locations"] = serde_json::to_value(attached_locations)
+            .map_err(|e| format!("Failed to serialize attached_locations: {}", e))?;
 
         let mut guard = self.handle.lock().await;
         let handle = guard
             .as_mut()
             .ok_or("IPC source subprocess not initialized")?;
 
-        let result = handle
-            .send_request("discover", params)
-            .await?;
+        let result = handle.send_request("discover", params).await?;
 
         // Parse response: { "locations": [...] }
         let locations = result
@@ -506,8 +516,7 @@ impl Connector for IpcConnector {
             .map_err(|e| format!("Failed to create Arrow IPC stream reader: {}", e))?;
 
         let batch_stream = Box::pin(futures::stream::iter(reader.map(|batch_result| {
-            batch_result
-                .map_err(|e| format!("Failed to read Arrow IPC record batch: {}", e).into())
+            batch_result.map_err(|e| format!("Failed to read Arrow IPC record batch: {}", e).into())
         })));
         Ok(Some(SourceData::Arrow(batch_stream)))
     }
@@ -529,14 +538,12 @@ impl Connector for IpcConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use std::path::PathBuf;
 
     /// Create a config with allow_external_code=true for tests.
     fn test_config() -> Arc<dyn bundlebase_common::ConfigProvider> {
-        crate::test_utils::test_config_with_values(&[
-            ("system", "allow_external_code", "true"),
-        ])
+        crate::test_utils::test_config_with_values(&[("system", "allow_external_code", "true")])
     }
 
     // --- parse_call tests ---
@@ -556,10 +563,7 @@ mod tests {
     #[test]
     fn test_parse_call_docker() {
         let result = parse_call("docker:my-image").expect("docker: prefix should parse");
-        assert_eq!(
-            result,
-            vec!["docker", "run", "-i", "--rm", "my-image"]
-        );
+        assert_eq!(result, vec!["docker", "run", "-i", "--rm", "my-image"]);
     }
 
     #[test]
@@ -622,7 +626,9 @@ mod tests {
         let result = func.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.expect_err("should fail");
-        assert!(err.to_string().contains("External code execution is disabled"));
+        assert!(err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 
     #[tokio::test]
@@ -640,7 +646,9 @@ mod tests {
 
         let result = func.data(&location, &args, &config).await;
         let err = result.err().expect("should fail");
-        assert!(err.to_string().contains("External code execution is disabled"));
+        assert!(err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 
     // --- Integration tests with mock subprocess ---
@@ -665,7 +673,11 @@ mod tests {
             .output()
             .ok()?;
         let python = String::from_utf8(output.stdout).ok()?.trim().to_string();
-        if python.is_empty() { None } else { Some(python) }
+        if python.is_empty() {
+            None
+        } else {
+            Some(python)
+        }
     }
 
     fn make_ipc_args() -> Option<HashMap<String, String>> {
@@ -683,7 +695,10 @@ mod tests {
     async fn test_discover_via_subprocess() {
         let args = match make_ipc_args() {
             Some(a) => a,
-            None => { eprintln!("Skipping: poetry not available"); return; }
+            None => {
+                eprintln!("Skipping: poetry not available");
+                return;
+            }
         };
         let func = IpcConnector::new();
         let config = test_config();
@@ -705,7 +720,10 @@ mod tests {
     async fn test_data_returns_arrow_batches() {
         let args = match make_ipc_args() {
             Some(a) => a,
-            None => { eprintln!("Skipping: poetry not available"); return; }
+            None => {
+                eprintln!("Skipping: poetry not available");
+                return;
+            }
         };
         let func = IpcConnector::new();
         let config = test_config();
@@ -741,7 +759,10 @@ mod tests {
 
         let args = match make_ipc_args() {
             Some(a) => a,
-            None => { eprintln!("Skipping: poetry not available"); return; }
+            None => {
+                eprintln!("Skipping: poetry not available");
+                return;
+            }
         };
         // test_file_1 sends 2 batches; verify they're all present
         let func = IpcConnector::new();
@@ -778,7 +799,10 @@ mod tests {
     async fn test_stable_url_none() {
         let args = match make_ipc_args() {
             Some(a) => a,
-            None => { eprintln!("Skipping: poetry not available"); return; }
+            None => {
+                eprintln!("Skipping: poetry not available");
+                return;
+            }
         };
         let func = IpcConnector::new();
         let config = test_config();
@@ -801,7 +825,10 @@ mod tests {
     async fn test_subprocess_error_handling() {
         let args = match make_ipc_args() {
             Some(a) => a,
-            None => { eprintln!("Skipping: poetry not available"); return; }
+            None => {
+                eprintln!("Skipping: poetry not available");
+                return;
+            }
         };
         let func = IpcConnector::new();
         let config = test_config();
@@ -819,7 +846,9 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        let err_msg = result.expect_err("unknown method should return error").to_string();
+        let err_msg = result
+            .expect_err("unknown method should return error")
+            .to_string();
         assert!(err_msg.contains("Method not found"));
     }
 
@@ -833,10 +862,7 @@ mod tests {
 
     fn make_go_ipc_args() -> HashMap<String, String> {
         let mut args = HashMap::new();
-        args.insert(
-            "call".to_string(),
-            go_binary_path().display().to_string(),
-        );
+        args.insert("call".to_string(), go_binary_path().display().to_string());
         args
     }
 
@@ -844,7 +870,10 @@ mod tests {
     async fn test_discover_via_go_subprocess() {
         let binary = go_binary_path();
         if !binary.exists() {
-            eprintln!("Skipping Go integration test: binary not found at {:?}", binary);
+            eprintln!(
+                "Skipping Go integration test: binary not found at {:?}",
+                binary
+            );
             return;
         }
         let func = IpcConnector::new();
@@ -868,7 +897,10 @@ mod tests {
     async fn test_data_via_go_subprocess() {
         let binary = go_binary_path();
         if !binary.exists() {
-            eprintln!("Skipping Go integration test: binary not found at {:?}", binary);
+            eprintln!(
+                "Skipping Go integration test: binary not found at {:?}",
+                binary
+            );
             return;
         }
         use futures::StreamExt;
@@ -914,10 +946,7 @@ mod tests {
 
     fn make_rust_ipc_args() -> HashMap<String, String> {
         let mut args = HashMap::new();
-        args.insert(
-            "call".to_string(),
-            rust_binary_path().display().to_string(),
-        );
+        args.insert("call".to_string(), rust_binary_path().display().to_string());
         args
     }
 

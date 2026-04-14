@@ -3,12 +3,12 @@
 //! Evaluates SET expressions against matching rows, collects updated values
 //! keyed by RowId, and stores them in the builder's pending_updates accumulator.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::bundle_schema;
 use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 use tracing::debug;
 
 /// A single SET assignment: column = expression
@@ -74,9 +74,8 @@ impl CommandParsing for UpdateCommand {
             }
         }
 
-        let where_clause = where_clause.ok_or_else(|| -> BundlebaseError {
-            "UPDATE statement missing WHERE clause".into()
-        })?;
+        let where_clause = where_clause
+            .ok_or_else(|| -> BundlebaseError { "UPDATE statement missing WHERE clause".into() })?;
 
         if assignments.is_empty() {
             return Err("UPDATE statement missing SET assignments".into());
@@ -86,10 +85,16 @@ impl CommandParsing for UpdateCommand {
     }
 
     fn to_statement(&self) -> String {
-        let sets: Vec<String> = self.assignments.iter()
+        let sets: Vec<String> = self
+            .assignments
+            .iter()
             .map(|a| format!("{} = {}", a.column, a.expression))
             .collect();
-        format!("UPDATE bundle SET {} WHERE {}", sets.join(", "), self.where_clause)
+        format!(
+            "UPDATE bundle SET {} WHERE {}",
+            sets.join(", "),
+            self.where_clause
+        )
     }
 }
 
@@ -102,14 +107,20 @@ impl BundleBuilderCommand for UpdateCommand {
         let where_clause = bundle_schema.translate_sql(&self.where_clause);
 
         // Translate column names and expressions to internal name
-        let columns: Vec<String> = self.assignments.iter().map(|a| {
-            bundle_schema.translate_sql(&a.column)
-        }).collect();
-        let expressions: Vec<String> = self.assignments.iter().map(|a| {
-            bundle_schema.translate_sql(&a.expression)
-        }).collect();
+        let columns: Vec<String> = self
+            .assignments
+            .iter()
+            .map(|a| bundle_schema.translate_sql(&a.column))
+            .collect();
+        let expressions: Vec<String> = self
+            .assignments
+            .iter()
+            .map(|a| bundle_schema.translate_sql(&a.expression))
+            .collect();
 
-        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &where_clause).await?;
+        let updated_count = builder
+            .evaluate_update_cols(&columns, &expressions, &where_clause)
+            .await?;
         debug!("[UPDATE] Updated {} rows", updated_count);
 
         if updated_count > 0 {
@@ -120,22 +131,35 @@ impl BundleBuilderCommand for UpdateCommand {
             // DataFrame-level operations see the updated values.
             // Uses CASE WHEN to replace values matching the WHERE condition.
             // Build using internal name names from the internal column map.
-            let assignment_map: std::collections::HashMap<&str, &str> = columns.iter()
+            let assignment_map: std::collections::HashMap<&str, &str> = columns
+                .iter()
                 .zip(expressions.iter())
                 .map(|(c, e)| (c.as_str(), e.as_str()))
                 .collect();
-            let select_cols: Vec<String> = bundle_schema.keys().map(|col_id| {
-                let internal_name = bundle_schema.internal_name(col_id).expect("column ID from schema keys");
-                let quoted = format!("\"{}\"", internal_name);
-                if let Some(expr) = assignment_map.get(internal_name.as_str()) {
-                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, expr, quoted, quoted)
-                } else {
-                    quoted
-                }
-            }).collect();
+            let select_cols: Vec<String> = bundle_schema
+                .keys()
+                .map(|col_id| {
+                    let internal_name = bundle_schema
+                        .internal_name(col_id)
+                        .expect("column ID from schema keys");
+                    let quoted = format!("\"{}\"", internal_name);
+                    if let Some(expr) = assignment_map.get(internal_name.as_str()) {
+                        format!(
+                            "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
+                            where_clause, expr, quoted, quoted
+                        )
+                    } else {
+                        quoted
+                    }
+                })
+                .collect();
             let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
             debug!("[UPDATE] Applying CASE WHEN transform for in-session visibility");
-            builder.apply_operation(bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()).await?;
+            builder
+                .apply_operation(
+                    bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into(),
+                )
+                .await?;
         }
 
         Ok(format!("Updated {} rows", updated_count))
@@ -221,7 +245,10 @@ mod parsing_tests {
     #[test]
     fn test_parse_update_roundtrip() {
         let cmd = UpdateCommand::new(
-            vec![SetAssignment { column: "salary".to_string(), expression: "100".to_string() }],
+            vec![SetAssignment {
+                column: "salary".to_string(),
+                expression: "100".to_string(),
+            }],
             "id = 1",
         );
         let statement = cmd.to_statement();

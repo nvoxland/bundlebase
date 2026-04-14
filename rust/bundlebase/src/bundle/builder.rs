@@ -1,34 +1,34 @@
-use bundlebase_common::command_response::{CommandResponse, single_batch_stream, OutputShape};
-use bundlebase_common::impl_dyn_command_response;
 use crate::bundle::facade::BundleFacade;
+use crate::bundle::function_entry::FunctionRegistry;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
-use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
-use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
-use crate::bundle::function_entry::FunctionRegistry;
+use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation, SharedAttachContext};
 use crate::bundle::{bundle_schema, sql, AlwaysUpdateRule, Bundle, ReportEntry};
-use crate::source::ConnectorRegistry;
-use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
-use crate::index::{IndexDefinition};
-use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
+use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle_config::{PassedBundleConfig, Scope};
+use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
+use crate::index::IndexDefinition;
+use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
+use crate::source::ConnectorRegistry;
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
+use bundlebase_common::impl_dyn_command_response;
 use chrono::DateTime;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
+use tracing::{debug, info};
 use url::Url;
 
 /// Format a system time as ISO8601 UTC string (e.g., "2024-01-01T12:34:56Z")
@@ -148,10 +148,8 @@ impl CommandResponse for BundleStatus {
         let ids: Vec<i32> = (0..changes.len() as i32).collect();
         let change_ids: Vec<String> = changes.iter().map(|c| c.id.to_string()).collect();
         let descriptions: Vec<&str> = changes.iter().map(|c| c.description.as_str()).collect();
-        let operation_counts: Vec<i32> = changes
-            .iter()
-            .map(|c| c.operations.len() as i32)
-            .collect();
+        let operation_counts: Vec<i32> =
+            changes.iter().map(|c| c.operations.len() as i32).collect();
 
         let batch = RecordBatch::try_new(
             Self::schema(),
@@ -215,7 +213,12 @@ pub struct BundleBuilder {
     pending_delete_wheres: RwLock<Vec<String>>,
     /// Updated cell values accumulated by UPDATE commands, written to an overlay parquet on commit.
     /// Maps RowId → (ColumnId → ScalarValue).
-    pending_updates: RwLock<std::collections::HashMap<bundlebase_common::RowId, std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>>>,
+    pending_updates: RwLock<
+        std::collections::HashMap<
+            bundlebase_common::RowId,
+            std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>,
+        >,
+    >,
     /// WHERE clauses from UPDATE commands, stored for historical reference in the operation log.
     pending_update_wheres: RwLock<Vec<String>>,
 }
@@ -252,6 +255,24 @@ impl Clone for BundleBuilder {
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 impl BundleBuilder {
+    /// Build a [`SharedAttachContext`] seeded with the bundle's existing
+    /// column-name -> ColumnId map. Pass into attach setup for a batch of
+    /// parallel attaches.
+    pub fn shared_attach_context(&self) -> Arc<SharedAttachContext> {
+        let existing_ops = self.operations();
+        let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
+        let map: HashMap<String, crate::object_id::ColumnId> = resolved
+            .columns()
+            .iter()
+            .map(|(id, name)| (name.clone(), *id))
+            .collect();
+        Arc::new(SharedAttachContext {
+            name_to_id: parking_lot::Mutex::new(map),
+            schema_paths: parking_lot::Mutex::new(HashMap::new()),
+            column_ids_paths: parking_lot::Mutex::new(HashMap::new()),
+        })
+    }
+
     /// Creates a new empty BundleBuilder in a working directory.
     ///
     /// # Arguments
@@ -300,7 +321,10 @@ impl BundleBuilder {
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by empty_internal(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        crate::catalog::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
+        crate::catalog::register_schema_providers(
+            &builder.bundle.ctx,
+            Arc::downgrade(&builder) as Weak<dyn BundleFacade>,
+        )?;
 
         Ok(builder)
     }
@@ -349,7 +373,10 @@ impl BundleBuilder {
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by Bundle::open(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        crate::catalog::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
+        crate::catalog::register_schema_providers(
+            &builder.bundle.ctx,
+            Arc::downgrade(&builder) as Weak<dyn BundleFacade>,
+        )?;
 
         Ok(builder)
     }
@@ -373,13 +400,12 @@ impl BundleBuilder {
         config: Option<PassedBundleConfig>,
     ) -> Result<(), BundlebaseError> {
         use crate::bundle::commit::BundleCommit;
-        use crate::bundle::operation::{BundleChange, SetMinVersionOp, SetMaxVersionOp};
+        use crate::bundle::operation::{BundleChange, SetMaxVersionOp, SetMinVersionOp};
 
         let bundle_config = Arc::new(BundleConfig::new(config.as_ref())?);
         let config_provider: Arc<dyn crate::ConfigProvider> =
             Arc::clone(&bundle_config) as Arc<dyn crate::ConfigProvider>;
-        let data_dir =
-            crate::io::writable_dir_from_str(path, config_provider.clone()).await?;
+        let data_dir = crate::io::writable_dir_from_str(path, config_provider.clone()).await?;
         let manifest_dir = data_dir.writable_subdir(META_DIR)?;
 
         // Verify this is a bundle (init file exists)
@@ -454,20 +480,30 @@ impl BundleBuilder {
         use crate::source::fetch::download_to_data_dir;
         use bundlebase_common::source_utils::json_to_parquet_with_options;
 
-        let file = crate::io::readable_file_from_path(location, self.data_dir(), self.config()).await?;
+        let file =
+            crate::io::readable_file_from_path(location, self.data_dir(), self.config()).await?;
         let json_bytes = file
             .read_bytes()
             .await?
             .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
 
-        let record_path = json_opts.get("json_record_path").map(|s| s.as_str()).unwrap_or("");
+        let record_path = json_opts
+            .get("json_record_path")
+            .map(|s| s.as_str())
+            .unwrap_or("");
         let sep = json_opts.get("json_sep").map(|s| s.as_str()).unwrap_or("_");
         let meta_paths: Vec<&str> = json_opts
             .get("json_meta")
-            .map(|s| s.split(',').filter(|p| !p.is_empty()).map(|p| p.trim()).collect())
+            .map(|s| {
+                s.split(',')
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.trim())
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let parquet_bytes = json_to_parquet_with_options(&json_bytes, record_path, sep, &meta_paths)?;
+        let parquet_bytes =
+            json_to_parquet_with_options(&json_bytes, record_path, sep, &meta_paths)?;
 
         let data_dir = self.data_dir();
         let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -515,7 +551,11 @@ impl BundleBuilder {
             // Use the bundle's existing ID rather than generating a new one
             let version_str = bundlebase_common::format_version_string();
             let init_commit = InitCommit {
-                id: if from.is_none() { Some(bundle_id) } else { None },
+                id: if from.is_none() {
+                    Some(bundle_id)
+                } else {
+                    None
+                },
                 from: from.clone(),
                 view: None,
                 min_version: Some(version_str.clone()),
@@ -539,12 +579,15 @@ impl BundleBuilder {
         let deleted_ids = std::mem::take(&mut *self.pending_deletes.write());
         let delete_wheres = std::mem::take(&mut *self.pending_delete_wheres.write());
         if !deleted_ids.is_empty() {
-            use crate::bundle::tombstone;
             use crate::bundle::operation::DeleteOp;
+            use crate::bundle::tombstone;
 
             // Serialize and write tombstone file via content-addressed storage
             let tomb_bytes = tombstone::serialize_rowids(&deleted_ids);
-            debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
+            debug!(
+                "[DELETE] Writing tombstone file ({} bytes)",
+                tomb_bytes.len()
+            );
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
             let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -569,13 +612,16 @@ impl BundleBuilder {
         let pending_upd = std::mem::take(&mut *self.pending_updates.write());
         let update_wheres = std::mem::take(&mut *self.pending_update_wheres.write());
         if !pending_upd.is_empty() {
-            use crate::bundle::update_overlay;
             use crate::bundle::operation::UpdateDataOp;
+            use crate::bundle::update_overlay;
 
             // Collect column types from the bundle schema
             let schema = self.bundle.schema().await?;
             let col_names = bundle_schema::BundleSchema::resolved(&self.operations());
-            let mut column_types: std::collections::HashMap<crate::object_id::ColumnId, arrow::datatypes::DataType> = std::collections::HashMap::new();
+            let mut column_types: std::collections::HashMap<
+                crate::object_id::ColumnId,
+                arrow::datatypes::DataType,
+            > = std::collections::HashMap::new();
             for (col_id, real_name) in col_names.columns() {
                 if let Some((_, field)) = schema.column_with_name(real_name) {
                     column_types.insert(*col_id, field.data_type().clone());
@@ -583,7 +629,11 @@ impl BundleBuilder {
             }
 
             let overlay_bytes = update_overlay::write_overlay_parquet(&pending_upd, &column_types)?;
-            debug!("[UPDATE] Writing overlay file ({} bytes, {} rows)", overlay_bytes.len(), pending_upd.len());
+            debug!(
+                "[UPDATE] Writing overlay file ({} bytes, {} rows)",
+                overlay_bytes.len(),
+                pending_upd.len()
+            );
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(overlay_bytes)]);
             let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -597,7 +647,9 @@ impl BundleBuilder {
 
             let update_op = UpdateDataOp::new(&overlay_filename, update_wheres.join("; "));
             if let Some(last_change) = changes.last_mut() {
-                last_change.operations.push(AnyOperation::UpdateData(update_op));
+                last_change
+                    .operations
+                    .push(AnyOperation::UpdateData(update_op));
             }
         }
 
@@ -640,7 +692,8 @@ impl BundleBuilder {
         // (tombstone DeleteOps and overlay UpdateDataOps)
         for change in &commit_struct.changes {
             for op in &change.operations {
-                let is_commit_time_op = matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
+                let is_commit_time_op =
+                    matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
                 if is_commit_time_op {
                     self.bundle.apply_operation(op.clone()).await?;
                 }
@@ -711,7 +764,10 @@ impl BundleBuilder {
         }
 
         // Remove the last change and capture its description
-        let undone = self.status.write().pop_change()
+        let undone = self
+            .status
+            .write()
+            .pop_change()
             .expect("status was non-empty");
         let description = undone.description.clone();
 
@@ -740,7 +796,11 @@ impl BundleBuilder {
         sql: &str,
         context: &str,
     ) -> Result<(), BundlebaseError> {
-        let temp_names = self.bundle.function_registry().read().temporary_only_names();
+        let temp_names = self
+            .bundle
+            .function_registry()
+            .read()
+            .temporary_only_names();
         if temp_names.is_empty() {
             return Ok(());
         }
@@ -755,14 +815,16 @@ impl BundleBuilder {
                      the bundle is reopened. Either import '{}' as a persistent function \
                      (IMPORT FUNCTION) or remove the filter before committing.",
                     name, name
-                ).into());
+                )
+                .into());
             } else {
                 return Err(format!(
                     "Cannot create view: SQL references temporary function '{}'. \
                      Views are persisted and must not depend on temporary functions. \
                      Import '{}' as a persistent function (IMPORT FUNCTION) first.",
                     name, name
-                ).into());
+                )
+                .into());
             }
         }
 
@@ -786,7 +848,8 @@ impl BundleBuilder {
             let arc = Bundle::empty(Some(passed_config)).await?;
             let bundle = (*arc).clone();
             bundle.refresh_data_dir().await?;
-            *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config()).await?;
+            *bundle.data_dir.write() =
+                writable_dir_from_url(&Url::parse(&url)?, bundle.config()).await?;
             *bundle.id.write() = original_id;
             bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
             bundle
@@ -804,11 +867,7 @@ impl BundleBuilder {
 
     pub async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
         if self.bundle.is_view() && !op.allowed_on_view() {
-            return Err(format!(
-                "Operation '{}' is not allowed on a view",
-                op.describe()
-            )
-            .into());
+            return Err(format!("Operation '{}' is not allowed on a view", op.describe()).into());
         }
 
         self.bundle.apply_operation(op.clone()).await?;
@@ -839,23 +898,34 @@ impl BundleBuilder {
 
         // Resolve column names to ColumnIds.
         // columns/expressions/where_clause use internal names.
-        let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns.iter()
+        let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns
+            .iter()
             .map(|internal_name| {
-                let col_id = bundle_schema::parse_internal_name(internal_name)
-                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' is not a valid internal name", internal_name)))?;
+                let col_id =
+                    bundle_schema::parse_internal_name(internal_name).ok_or_else(|| {
+                        BundlebaseError::from(format!(
+                            "Column '{}' is not a valid internal name",
+                            internal_name
+                        ))
+                    })?;
                 Ok((internal_name.clone(), col_id))
             })
             .collect::<Result<Vec<_>, BundlebaseError>>()?;
 
         // Build SELECT clause for expression evaluation (already in internal name terms)
-        let select_exprs: Vec<String> = columns.iter().zip(expressions.iter())
+        let select_exprs: Vec<String> = columns
+            .iter()
+            .zip(expressions.iter())
             .map(|(col, expr)| format!("{} AS {}", expr, col))
             .collect();
         let select_list = select_exprs.join(", ");
 
         let mut updated_count = 0usize;
 
-        let base_pack = self.bundle.packs().read()
+        let base_pack = self
+            .bundle
+            .packs()
+            .read()
             .get(&ObjectId::BASE_PACK)
             .cloned();
 
@@ -863,7 +933,8 @@ impl BundleBuilder {
             let blocks = pack.blocks();
             for (idx, block) in blocks.iter().enumerate() {
                 let block_ref = ObjectIdAlias::from(idx as u16);
-                let mut stream = block.reader()
+                let mut stream = block
+                    .reader()
                     .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
                     .await?;
 
@@ -876,17 +947,24 @@ impl BundleBuilder {
                     let batch = {
                         let schema = batch.schema();
                         let col_id_list = block.column_ids();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
+                        let new_fields: Vec<arrow::datatypes::Field> = schema
+                            .fields()
+                            .iter()
                             .zip(col_id_list.iter())
                             .map(|(f, col_id)| {
-                                f.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id))
+                                f.as_ref()
+                                    .clone()
+                                    .with_name(bundle_schema::generate_internal_name(col_id))
                             })
                             .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
                             new_fields,
                             schema.metadata().clone(),
                         ));
-                        arrow::record_batch::RecordBatch::try_new(new_schema, batch.columns().to_vec())?
+                        arrow::record_batch::RecordBatch::try_new(
+                            new_schema,
+                            batch.columns().to_vec(),
+                        )?
                     };
 
                     // Evaluate: SELECT _rowid, <set_exprs> FROM (data with _rowid) WHERE <condition>
@@ -898,24 +976,27 @@ impl BundleBuilder {
 
                     let mut config = datafusion::prelude::SessionConfig::new();
                     config.options_mut().sql_parser.enable_ident_normalization = false;
-                    let temp_ctx = SessionContext::new_with_config_rt(
-                        config,
-                        self.bundle.ctx().runtime_env(),
-                    );
+                    let temp_ctx =
+                        SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
                     let mem_table = datafusion::datasource::MemTable::try_new(
                         batch.schema(),
                         vec![vec![batch.clone()]],
                     )?;
                     temp_ctx.register_table("__update_batch", Arc::new(mem_table))?;
 
-                    let result_df = temp_ctx.sql(&eval_sql).await
+                    let result_df = temp_ctx
+                        .sql(&eval_sql)
+                        .await
                         .map_err(|e| BundlebaseError::from(e.to_string()))?;
-                    let result_batches = result_df.collect().await
+                    let result_batches = result_df
+                        .collect()
+                        .await
                         .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
                     let mut pending = self.pending_updates.write();
                     for result_batch in &result_batches {
-                        let idx_col = result_batch.column(0)
+                        let idx_col = result_batch
+                            .column(0)
                             .as_any()
                             .downcast_ref::<arrow::array::Int64Array>()
                             .ok_or_else(|| BundlebaseError::from("Expected Int64 _idx column"))?;
@@ -927,13 +1008,16 @@ impl BundleBuilder {
                             }
                             let row_id = row_ids[batch_idx];
 
-                            let cell_updates = pending.entry(row_id).or_insert_with(std::collections::HashMap::new);
+                            let cell_updates = pending
+                                .entry(row_id)
+                                .or_insert_with(std::collections::HashMap::new);
                             for (col_idx, (_, col_id)) in col_ids.iter().enumerate() {
                                 // Column is at position col_idx + 1 (after _idx)
                                 let value = datafusion::scalar::ScalarValue::try_from_array(
                                     result_batch.column(col_idx + 1),
                                     row,
-                                ).map_err(|e| BundlebaseError::from(e.to_string()))?;
+                                )
+                                .map_err(|e| BundlebaseError::from(e.to_string()))?;
                                 cell_updates.insert(*col_id, value);
                             }
                             updated_count += 1;
@@ -944,7 +1028,9 @@ impl BundleBuilder {
         }
 
         if updated_count > 0 {
-            self.pending_update_wheres.write().push(where_clause.to_string());
+            self.pending_update_wheres
+                .write()
+                .push(where_clause.to_string());
         }
 
         Ok(updated_count)
@@ -957,13 +1043,26 @@ impl BundleBuilder {
             log::debug!("[UPDATE] No pending updates to flush");
             return;
         }
-        log::debug!("[UPDATE] Flushing {} pending updates to blocks", pending.len());
+        log::debug!(
+            "[UPDATE] Flushing {} pending updates to blocks",
+            pending.len()
+        );
 
         // Group by block_ref
-        let mut by_block: std::collections::HashMap<u16, std::collections::HashMap<bundlebase_common::RowId, std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>>> = std::collections::HashMap::new();
+        let mut by_block: std::collections::HashMap<
+            u16,
+            std::collections::HashMap<
+                bundlebase_common::RowId,
+                std::collections::HashMap<
+                    crate::object_id::ColumnId,
+                    datafusion::scalar::ScalarValue,
+                >,
+            >,
+        > = std::collections::HashMap::new();
         for (row_id, cell_updates) in pending.iter() {
             let block_idx = row_id.block_ref().as_u16();
-            by_block.entry(block_idx)
+            by_block
+                .entry(block_idx)
                 .or_default()
                 .insert(*row_id, cell_updates.clone());
         }
@@ -973,7 +1072,8 @@ impl BundleBuilder {
             let blocks = pack.blocks();
             for (block_idx, block_updates) in by_block {
                 if let Some(block) = blocks.get(block_idx as usize) {
-                    let overlay = crate::bundle::update_overlay::UpdateOverlay::from_pending(&block_updates);
+                    let overlay =
+                        crate::bundle::update_overlay::UpdateOverlay::from_pending(&block_updates);
                     block.add_update_overlay(overlay);
                 }
             }
@@ -996,9 +1096,15 @@ impl BundleBuilder {
     /// Add RowIds to the pending delete set.
     ///
     /// These will be written to a tombstone file on commit.
-    pub fn mark_deleted(&self, row_ids: std::collections::HashSet<bundlebase_common::RowId>, where_clause: &str) {
+    pub fn mark_deleted(
+        &self,
+        row_ids: std::collections::HashSet<bundlebase_common::RowId>,
+        where_clause: &str,
+    ) {
         self.pending_deletes.write().extend(row_ids);
-        self.pending_delete_wheres.write().push(where_clause.to_string());
+        self.pending_delete_wheres
+            .write()
+            .push(where_clause.to_string());
     }
 
     /// Collect RowIds of rows matching a WHERE clause from all blocks.
@@ -1012,7 +1118,10 @@ impl BundleBuilder {
         use futures::StreamExt;
 
         let mut matching_ids = std::collections::HashSet::new();
-        let base_pack = self.bundle.packs().read()
+        let base_pack = self
+            .bundle
+            .packs()
+            .read()
             .get(&ObjectId::BASE_PACK)
             .cloned();
 
@@ -1020,7 +1129,8 @@ impl BundleBuilder {
             let blocks = pack.blocks();
             for (idx, block) in blocks.iter().enumerate() {
                 let block_ref = ObjectIdAlias::from(idx as u16);
-                let mut stream = block.reader()
+                let mut stream = block
+                    .reader()
                     .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
                     .await?;
 
@@ -1033,17 +1143,24 @@ impl BundleBuilder {
                     let batch = {
                         let schema = batch.schema();
                         let col_ids = block.column_ids();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
+                        let new_fields: Vec<arrow::datatypes::Field> = schema
+                            .fields()
+                            .iter()
                             .zip(col_ids.iter())
                             .map(|(f, col_id)| {
-                                f.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id))
+                                f.as_ref()
+                                    .clone()
+                                    .with_name(bundle_schema::generate_internal_name(col_id))
                             })
                             .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
                             new_fields,
                             schema.metadata().clone(),
                         ));
-                        arrow::record_batch::RecordBatch::try_new(new_schema, batch.columns().to_vec())?
+                        arrow::record_batch::RecordBatch::try_new(
+                            new_schema,
+                            batch.columns().to_vec(),
+                        )?
                     };
 
                     let filter_sql = format!(
@@ -1053,26 +1170,26 @@ impl BundleBuilder {
 
                     let mut config = datafusion::prelude::SessionConfig::new();
                     config.options_mut().sql_parser.enable_ident_normalization = false;
-                    let temp_ctx = SessionContext::new_with_config_rt(
-                        config,
-                        self.bundle.ctx().runtime_env(),
-                    );
+                    let temp_ctx =
+                        SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
                     let mem_table = datafusion::datasource::MemTable::try_new(
                         batch.schema(),
                         vec![vec![batch.clone()]],
                     )?;
                     temp_ctx.register_table("__delete_batch", Arc::new(mem_table))?;
 
-                    let idx_df = temp_ctx.sql(&filter_sql).await
-                        .map_err(|e| BundlebaseError::from(format!(
+                    let idx_df = temp_ctx.sql(&filter_sql).await.map_err(|e| {
+                        BundlebaseError::from(format!(
                             "Failed to evaluate WHERE clause '{}' on block {}: {}",
                             where_clause, idx, e
-                        )))?;
-                    let idx_batches = idx_df.collect().await
-                        .map_err(|e| BundlebaseError::from(format!(
+                        ))
+                    })?;
+                    let idx_batches = idx_df.collect().await.map_err(|e| {
+                        BundlebaseError::from(format!(
                             "Failed to collect filtered rows for WHERE '{}' on block {}: {}",
                             where_clause, idx, e
-                        )))?;
+                        ))
+                    })?;
 
                     for idx_batch in &idx_batches {
                         let idx_col = idx_batch.column(0);
@@ -1080,11 +1197,21 @@ impl BundleBuilder {
                             use arrow::array::{Array, AsArray};
                             use arrow::datatypes::DataType;
                             let val = match idx_col.data_type() {
-                                DataType::UInt64 => idx_col.as_primitive::<arrow::datatypes::UInt64Type>().value(i) as usize,
-                                DataType::Int64 => idx_col.as_primitive::<arrow::datatypes::Int64Type>().value(i) as usize,
-                                dt => return Err(format!(
-                                    "Unexpected column type {:?} from ROW_NUMBER()", dt
-                                ).into()),
+                                DataType::UInt64 => idx_col
+                                    .as_primitive::<arrow::datatypes::UInt64Type>()
+                                    .value(i)
+                                    as usize,
+                                DataType::Int64 => idx_col
+                                    .as_primitive::<arrow::datatypes::Int64Type>()
+                                    .value(i)
+                                    as usize,
+                                dt => {
+                                    return Err(format!(
+                                        "Unexpected column type {:?} from ROW_NUMBER()",
+                                        dt
+                                    )
+                                    .into())
+                                }
                             };
                             if val < row_ids.len() {
                                 matching_ids.insert(row_ids[val]);
@@ -1144,7 +1271,10 @@ impl BundleBuilder {
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle.function_registry().read().refresh_version_udf(self.version());
+                        self.bundle
+                            .function_registry()
+                            .read()
+                            .refresh_version_udf(self.version());
                     }
                 }
                 Ok(())
@@ -1209,7 +1339,10 @@ impl BundleBuilder {
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle.function_registry().read().refresh_version_udf(self.version());
+                        self.bundle
+                            .function_registry()
+                            .read()
+                            .refresh_version_udf(self.version());
                     }
                 }
             }
@@ -1233,7 +1366,11 @@ impl BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        Ok(self.bundle().connector_registry().write().remove_entry(name, platform.as_ref(), true))
+        Ok(self
+            .bundle()
+            .connector_registry()
+            .write()
+            .remove_entry(name, platform.as_ref(), true))
     }
 
     /// Drop runtime-only function (session-only, no operation created).
@@ -1244,7 +1381,10 @@ impl BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        self.bundle().function_registry().write().drop_temp(name, platform.as_ref())
+        self.bundle()
+            .function_registry()
+            .write()
+            .drop_temp(name, platform.as_ref())
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.
@@ -1270,10 +1410,9 @@ impl BundleBuilder {
             let index_column_ids: Vec<ColumnId> = index_def.column_ids().to_vec();
 
             // Use the first column ID for "needs reindex" checks
-            let first_col_id = index_column_ids.first()
-                .ok_or_else(|| BundlebaseError::from(
-                    format!("Index '{}' has no columns defined", index_id)
-                ))?;
+            let first_col_id = index_column_ids.first().ok_or_else(|| {
+                BundlebaseError::from(format!("Index '{}' has no columns defined", index_id))
+            })?;
 
             debug!("Checking index on column IDs {:?}", &index_column_ids);
 
@@ -1338,7 +1477,6 @@ impl BundleBuilder {
                 .ok_or_else(|| format!("Unknown join '{}'", join_name).into()),
         }
     }
-
 }
 
 #[async_trait]
@@ -1405,10 +1543,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.dataframe().await
     }
 
-    async fn extend(
-        &self,
-        data_dir: Option<&str>,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    async fn extend(&self, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         // Create a new builder based on the current bundle state without modifying self
         let current_bundle = Arc::new(self.bundle.deref().clone());
         BundleBuilder::extend(current_bundle, data_dir).await
@@ -1485,7 +1620,11 @@ impl BundleFacade for BundleBuilder {
         name: &str,
         platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        Ok(self.bundle.connector_registry().write().remove_entry(name, platform, true))
+        Ok(self
+            .bundle
+            .connector_registry()
+            .write()
+            .remove_entry(name, platform, true))
     }
 
     async fn drop_temp_function(
@@ -1493,7 +1632,10 @@ impl BundleFacade for BundleBuilder {
         name: &str,
         platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        self.bundle.function_registry().write().drop_temp(name, platform)
+        self.bundle
+            .function_registry()
+            .write()
+            .drop_temp(name, platform)
     }
 
     async fn rename_temp_connector(

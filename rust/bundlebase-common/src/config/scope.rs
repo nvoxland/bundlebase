@@ -1,7 +1,7 @@
 //! Configuration scope — a normalized, boundary-aware scope identifier.
 
-use crate::BundlebaseError;
 use crate::config::ConfigScope;
+use crate::BundlebaseError;
 use serde::Serialize;
 use std::fmt;
 
@@ -135,10 +135,7 @@ impl Scope {
                 return Ok(Self(input.to_string()));
             }
         }
-        Err(BundlebaseError::from(format!(
-            "Unknown scope: {}",
-            input
-        )))
+        Err(BundlebaseError::from(format!("Unknown scope: {}", input)))
     }
 
     /// Check whether this scope matches a query scope.
@@ -228,7 +225,9 @@ mod tests {
     fn test_from_url() {
         let scope = ConfigScope::new("s3");
         assert_eq!(
-            Scope::from_url("s3://bucket/path", &scope).unwrap().as_str(),
+            Scope::from_url("s3://bucket/path", &scope)
+                .unwrap()
+                .as_str(),
             "s3/bucket/path"
         );
     }
@@ -236,10 +235,7 @@ mod tests {
     #[test]
     fn test_from_url_no_path() {
         let scope = ConfigScope::new("s3");
-        assert_eq!(
-            Scope::from_url("s3://", &scope).unwrap().as_str(),
-            "s3"
-        );
+        assert_eq!(Scope::from_url("s3://", &scope).unwrap().as_str(), "s3");
     }
 
     #[test]
@@ -274,17 +270,17 @@ mod tests {
 
     #[test]
     fn test_display() {
-        assert_eq!(
-            format!("{}", Scope::from_name("s3/abc").unwrap()),
-            "s3/abc"
-        );
+        assert_eq!(format!("{}", Scope::from_name("s3/abc").unwrap()), "s3/abc");
     }
 
     #[test]
     fn test_new_with_known_scopes() {
         let scopes = [ConfigScope::new("s3"), ConfigScope::new("gs")];
         assert_eq!(Scope::new("s3", &scopes).unwrap().as_str(), "s3");
-        assert_eq!(Scope::new("s3/bucket", &scopes).unwrap().as_str(), "s3/bucket");
+        assert_eq!(
+            Scope::new("s3/bucket", &scopes).unwrap().as_str(),
+            "s3/bucket"
+        );
         assert!(Scope::new("unknown", &scopes).is_err());
     }
 

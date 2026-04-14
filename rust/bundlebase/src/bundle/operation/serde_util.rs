@@ -477,7 +477,9 @@ where
     }
 }
 
-pub(crate) fn deserialize_schema_internal(value: &serde_yaml_ng::Value) -> Result<Arc<Schema>, String> {
+pub(crate) fn deserialize_schema_internal(
+    value: &serde_yaml_ng::Value,
+) -> Result<Arc<Schema>, String> {
     let map = value
         .as_mapping()
         .ok_or_else(|| "Schema must be a mapping".to_string())?;

@@ -1,16 +1,19 @@
 //! Fetch orchestration for source data discovery and materialization.
 
-use crate::connector::{
-    AttachedFileInfo, Connector, SaveAs, DiscoveredLocation, FetchAction, MaterializedData,
-    ResolvedSaveAs, SourceData,
-};
-use bundlebase_common::source_utils::{convert_to_parquet, detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
-use arrow::record_batch::RecordBatch;
 use super::SyncMode;
+use crate::connector::{
+    AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, ResolvedSaveAs,
+    SaveAs, SourceData,
+};
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
 use crate::progress::ProgressScope;
 use crate::{BundlebaseError, ConfigProvider};
+use arrow::record_batch::RecordBatch;
+use bundlebase_common::source_utils::{
+    convert_to_parquet, detect_format_from_bytes, filename_from_url, http_status_error,
+    record_batch_stream_to_parquet,
+};
 use bytes::Bytes;
 use futures::stream;
 use futures::StreamExt;
@@ -38,9 +41,10 @@ pub async fn download_io_file_to_data_dir(
     file: &ObjectStoreFile,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<WriteResult, BundlebaseError> {
-    let data = file.read_bytes().await?.ok_or_else(|| {
-        BundlebaseError::from(format!("File not found: {}", file.url()))
-    })?;
+    let data = file
+        .read_bytes()
+        .await?
+        .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", file.url())))?;
     let filename = filename_from_url(file.url());
     let ext_str = filename.rsplit('.').next().unwrap_or("dat");
     let format = bundlebase_common::ContentFormat::from_extension(ext_str)
@@ -98,26 +102,27 @@ pub async fn download_http_to_data_dir(
     }
 
     // Stream the response body with progress reporting.
-    let data = bundlebase_common::source_utils::stream_response(
-        &format!("Downloading {}", url),
-        response,
-    ).await?;
+    let data =
+        bundlebase_common::source_utils::stream_response(&format!("Downloading {}", url), response)
+            .await?;
 
-    info!("Downloaded {} ({:.1} MB)", url, data.len() as f64 / 1_048_576.0);
+    info!(
+        "Downloaded {} ({:.1} MB)",
+        url,
+        data.len() as f64 / 1_048_576.0
+    );
 
     // Resolve "auto" format hint by inspecting content
     let resolved_hint = match format_hint {
-        Some("auto") => {
-            match detect_format_from_bytes(&data) {
-                Some(fmt) => Some(fmt),
-                None => {
-                    return Err(BundlebaseError::from(format!(
+        Some("auto") => match detect_format_from_bytes(&data) {
+            Some(fmt) => Some(fmt),
+            None => {
+                return Err(BundlebaseError::from(format!(
                         "Could not detect format of data from '{}'. Specify format explicitly with WITH (format='csv')",
                         url
                     )));
-                }
             }
-        }
+        },
         other => other,
     };
 
@@ -125,7 +130,9 @@ pub async fn download_http_to_data_dir(
 
     // Determine format from filename extension or format hint
     let ext_str = if let Some(fmt) = resolved_hint {
-        let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods"];
+        let known_extensions = [
+            "csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods",
+        ];
         let has_known_ext = filename
             .rsplit('.')
             .next()
@@ -156,7 +163,8 @@ async fn collect_byte_stream(
 ) -> Result<Bytes, BundlebaseError> {
     let mut buffer = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| BundlebaseError::from(format!("Failed to read byte stream: {}", e)))?;
+        let chunk = chunk
+            .map_err(|e| BundlebaseError::from(format!("Failed to read byte stream: {}", e)))?;
         buffer.extend_from_slice(&chunk);
     }
     Ok(Bytes::from(buffer))
@@ -231,7 +239,14 @@ async fn get_data_for_location(
 
     // Try data() first
     if let Some(source_data) = func.data(location, args, config).await? {
-        return save_source_data(source_data, &strategy, &location.format, &location.location, data_dir).await;
+        return save_source_data(
+            source_data,
+            &strategy,
+            &location.format,
+            &location.location,
+            data_dir,
+        )
+        .await;
     }
 
     // Try stable_url()
@@ -302,8 +317,11 @@ async fn save_source_data(
         (SourceData::RawBytes(_), ResolvedSaveAs::Ref) => {
             // Ref with data() shouldn't happen — data() returns bytes to store,
             // not a URL reference. This would be a connector bug.
-            Err("Connector returned data bytes but save_as resolved to 'ref'. \
-                 This is unexpected — connectors that support ref should use stable_url().".into())
+            Err(
+                "Connector returned data bytes but save_as resolved to 'ref'. \
+                 This is unexpected — connectors that support ref should use stable_url()."
+                    .into(),
+            )
         }
     }
 }
@@ -318,7 +336,8 @@ async fn save_from_url(
 ) -> Result<FetchedData, BundlebaseError> {
     match strategy {
         ResolvedSaveAs::Copy => {
-            let result = materialize_url(url, true, data_dir, config, Some(format.extension())).await?;
+            let result =
+                materialize_url(url, true, data_dir, config, Some(format.extension())).await?;
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
                 .unwrap_or_else(|_| result.file.url().to_string());
@@ -333,21 +352,22 @@ async fn save_from_url(
             // Use reqwest only for HTTP(S); for all other schemes (memory://, s3://, file://, etc.)
             // use ObjectStoreFile so the same object-store backends work here as elsewhere.
             let raw_bytes = if url.scheme() == "http" || url.scheme() == "https" {
-                let response = reqwest::get(url.as_str())
-                    .await
-                    .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
+                let response = reqwest::get(url.as_str()).await.map_err(|e| {
+                    BundlebaseError::from(format!("Failed to download '{}': {}", url, e))
+                })?;
                 if !response.status().is_success() {
                     return Err(http_status_error(url, response.status(), None).into());
                 }
                 bundlebase_common::source_utils::stream_response(
                     &format!("Downloading {}", url),
                     response,
-                ).await?
+                )
+                .await?
             } else {
                 let file = ObjectStoreFile::from_url(url, config.clone())?;
-                file.read_bytes().await?.ok_or_else(|| {
-                    BundlebaseError::from(format!("File not found: {}", url))
-                })?
+                file.read_bytes()
+                    .await?
+                    .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", url)))?
             };
             let parquet_bytes = convert_to_parquet(&raw_bytes, format)?;
             let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -366,7 +386,11 @@ async fn save_from_url(
 }
 
 /// Build FetchedData from a WriteResult.
-fn make_fetched_data(data_dir: &dyn IOReadWriteDir, result: &WriteResult, source_url: &str) -> FetchedData {
+fn make_fetched_data(
+    data_dir: &dyn IOReadWriteDir,
+    result: &WriteResult,
+    source_url: &str,
+) -> FetchedData {
     let attach_location = data_dir
         .relative_path(result.file.as_ref())
         .unwrap_or_else(|_| result.file.url().to_string());
@@ -398,7 +422,6 @@ pub async fn orchestrate_fetch(
     attached_files: &HashMap<String, AttachedFileInfo>,
     config: &Arc<dyn ConfigProvider>,
 ) -> Result<Vec<FetchAction>, BundlebaseError> {
-
     let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
     let discovered = func.discover(args, &attached_locations, config).await?;
 
@@ -438,30 +461,28 @@ pub async fn orchestrate_fetch(
     progress.update(0, Some(&format!("Fetching {} files", pending.len())));
 
     // Fetch data for all pending locations concurrently
-    let fetch_results: Vec<Result<FetchAction, BundlebaseError>> =
-        futures::stream::iter(pending)
-            .map(|(kind, location)| async move {
-                let data = get_data_for_location(
-                    func, &location, args, config, data_dir, &save_as,
-                ).await?;
-                let materialized = MaterializedData {
-                    attach_location: data.attach_location,
-                    source_location: location.location.clone(),
-                    source_url: data.source_url,
-                    hash: data.hash,
-                    version: location.version.clone(),
-                };
-                Ok(match kind {
-                    PendingKind::Add => FetchAction::Add(materialized),
-                    PendingKind::Replace => FetchAction::Replace {
-                        old_source_location: location.location.clone(),
-                        data: materialized,
-                    },
-                })
+    let fetch_results: Vec<Result<FetchAction, BundlebaseError>> = futures::stream::iter(pending)
+        .map(|(kind, location)| async move {
+            let data =
+                get_data_for_location(func, &location, args, config, data_dir, &save_as).await?;
+            let materialized = MaterializedData {
+                attach_location: data.attach_location,
+                source_location: location.location.clone(),
+                source_url: data.source_url,
+                hash: data.hash,
+                version: location.version.clone(),
+            };
+            Ok(match kind {
+                PendingKind::Add => FetchAction::Add(materialized),
+                PendingKind::Replace => FetchAction::Replace {
+                    old_source_location: location.location.clone(),
+                    data: materialized,
+                },
             })
-            .buffer_unordered(100)
-            .collect()
-            .await;
+        })
+        .buffer_unordered(100)
+        .collect()
+        .await;
 
     // Collect results, propagating any errors
     let mut actions = Vec::with_capacity(fetch_results.len());
@@ -489,20 +510,25 @@ pub async fn read_parquet_batches(
     location: &str,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<(arrow_schema::SchemaRef, Vec<RecordBatch>), BundlebaseError> {
-    let file = data_dir.file(location)
+    let file = data_dir
+        .file(location)
         .map_err(|e| BundlebaseError::from(format!("Failed to open {}: {}", location, e)))?;
-    let bytes = file.read_bytes().await
+    let bytes = file
+        .read_bytes()
+        .await
         .map_err(|e| BundlebaseError::from(format!("Failed to read {}: {}", location, e)))?
         .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
 
-    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
-        Bytes::from(bytes),
-    )
-    .map_err(|e| BundlebaseError::from(format!("Failed to read parquet {}: {}", location, e)))?;
+    let builder =
+        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(Bytes::from(bytes))
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to read parquet {}: {}", location, e))
+            })?;
 
     let schema = builder.schema().clone();
-    let reader = builder.build()
-    .map_err(|e| BundlebaseError::from(format!("Failed to build reader {}: {}", location, e)))?;
+    let reader = builder.build().map_err(|e| {
+        BundlebaseError::from(format!("Failed to build reader {}: {}", location, e))
+    })?;
     let mut batches = Vec::new();
     for batch_result in reader {
         let batch = batch_result
@@ -522,9 +548,12 @@ pub async fn write_merged_jsonl(
     // Note: parallelizing this would require an Arc<dyn IOReadWriteDir> parameter.
     let mut merged = Vec::new();
     for location in locations {
-        let file = data_dir.file(location)
+        let file = data_dir
+            .file(location)
             .map_err(|e| BundlebaseError::from(format!("Failed to open {}: {}", location, e)))?;
-        let bytes = file.read_bytes().await
+        let bytes = file
+            .read_bytes()
+            .await
             .map_err(|e| BundlebaseError::from(format!("Failed to read {}: {}", location, e)))?
             .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
         merged.extend_from_slice(&bytes);

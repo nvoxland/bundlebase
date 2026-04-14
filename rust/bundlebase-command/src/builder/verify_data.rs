@@ -1,16 +1,16 @@
 //! VerifyData command implementation.
 
-use crate::{CommandParsing, Rule};
-use bundlebase::BundleFacade;
-use bundlebase::bundle::operation::UpdateVersionOp;
-use bundlebase_io::readable_file_from_path;
-use bundlebase_io::plugin::object_store::ObjectStoreFile;
-use bundlebase_io::IOReadFile;
-use bundlebase_data::BlockId;
-use bundlebase_common::BundlebaseError;
-use std::sync::Arc;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::UpdateVersionOp;
 use bundlebase::BundleBuilder;
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
+use bundlebase_data::BlockId;
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
+use bundlebase_io::readable_file_from_path;
+use bundlebase_io::IOReadFile;
+use std::sync::Arc;
 
 // Re-export verification types from core
 pub use bundlebase::bundle::verification::{FileVerificationResult, VerificationResults};
@@ -135,9 +135,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
                     // Read the current version from the file
                     let adapter_factory = Arc::clone(&builder.bundle().reader_factory);
                     let temp_id = BlockId::generate();
-                    if let Ok(adapter) = adapter_factory
-                        .detect(&location, &temp_id, builder)
-                        .await
+                    if let Ok(adapter) = adapter_factory.detect(&location, &temp_id, builder).await
                     {
                         if let Ok(file_version) = adapter.read_version().await {
                             if file_version != current_version {
@@ -250,9 +248,9 @@ async fn verify_index_exists(path: &str, builder: &BundleBuilder) -> FileVerific
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_verify_data() {

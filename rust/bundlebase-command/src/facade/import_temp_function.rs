@@ -8,14 +8,14 @@
 use crate::parser::{escape_string, extract_string_content};
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase_common::Platform;
-use bundlebase_udf::runtime::{UdfRuntime, RuntimeType};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::arrow_types::parse_arrow_type_name;
-use bundlebase_udf::{FunctionEntry, FunctionKind};
-use bundlebase_common::NamespacedName;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase_common::NamespacedName;
+use bundlebase_common::Platform;
+use bundlebase_udf::runtime::{RuntimeType, UdfRuntime};
+use bundlebase_udf::{FunctionEntry, FunctionKind};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -33,11 +33,7 @@ pub struct ImportTempFunctionCommand {
 }
 
 impl ImportTempFunctionCommand {
-    pub fn new(
-        name: impl Into<String>,
-        from: impl Into<String>,
-        platform: Platform,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, from: impl Into<String>, platform: Platform) -> Self {
         Self {
             name: name.into(),
             from: from.into(),
@@ -59,7 +55,10 @@ impl ImportTempFunctionCommand {
         }
 
         facade.function_registry().write().add_and_register(entry)?;
-        facade.function_registry().read().refresh_version_udf(facade.version());
+        facade
+            .function_registry()
+            .read()
+            .refresh_version_udf(facade.version());
         Ok(())
     }
 
@@ -151,7 +150,10 @@ impl CommandParsing for ImportTempFunctionCommand {
     fn to_statement(&self) -> String {
         let mut with_parts = Vec::new();
         if self.platform != Platform::any() {
-            with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
+            with_parts.push(format!(
+                "platform = {}",
+                escape_string(&self.platform.to_string())
+            ));
         }
 
         if with_parts.is_empty() {
@@ -185,14 +187,13 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
             // Wildcard/bulk mode
             let namespace = self.wildcard_namespace().to_string();
 
-            let manifest = from.load_manifest()?
-                .ok_or_else(|| -> BundlebaseError {
-                    format!(
-                        "Wildcard function discovery not supported for '{}' runtime",
-                        from.runtime_name()
-                    )
-                    .into()
-                })?;
+            let manifest = from.load_manifest()?.ok_or_else(|| -> BundlebaseError {
+                format!(
+                    "Wildcard function discovery not supported for '{}' runtime",
+                    from.runtime_name()
+                )
+                .into()
+            })?;
 
             let mut count = 0;
             for manifest_entry in &manifest.functions {
@@ -204,9 +205,13 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 let return_type = parse_arrow_type_name(&manifest_entry.return_type)?;
                 let kind: FunctionKind = manifest_entry.kind.parse()?;
 
-                let symbol = manifest_entry.symbol.as_deref().unwrap_or(&manifest_entry.name);
+                let symbol = manifest_entry
+                    .symbol
+                    .as_deref()
+                    .unwrap_or(&manifest_entry.name);
                 let entrypoint = format!("{}:{}", from.to_entrypoint_string(), symbol);
-                let func_from = UdfRuntime::parse_from(&format!("{}::{}", from.runtime_name(), entrypoint))?;
+                let func_from =
+                    UdfRuntime::parse_from(&format!("{}::{}", from.runtime_name(), entrypoint))?;
                 let name = format!("{}.{}", namespace, manifest_entry.name);
                 let namespaced: NamespacedName = name.parse()?;
 
@@ -226,11 +231,14 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
 
             Ok(format!(
                 "Loaded {} temporary function(s) from '{}'",
-                count, from.to_entrypoint_string()
+                count,
+                from.to_entrypoint_string()
             ))
         } else {
             // Single function mode — auto-detect types from manifest
-            let namespaced: NamespacedName = self.name.parse()
+            let namespaced: NamespacedName = self
+                .name
+                .parse()
                 .map_err(|e: bundlebase_common::BundlebaseError| e)?;
 
             // Use the symbol from the from string (e.g., "MySum" from "module:MySum")
@@ -243,7 +251,9 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 _ => FunctionKind::Scalar,
             };
 
-            let input_types = manifest_entry.input_types.iter()
+            let input_types = manifest_entry
+                .input_types
+                .iter()
                 .map(|s| parse_arrow_type_name(s))
                 .collect::<Result<Vec<_>, _>>()?;
             let return_type = parse_arrow_type_name(&manifest_entry.return_type)?;
@@ -266,9 +276,9 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_import_temp_function() {
@@ -300,13 +310,13 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_temp_function_roundtrip() {
-        let cmd = ImportTempFunctionCommand::new(
-            "acme.double_val",
-            "python::mod:func",
-            Platform::any(),
-        );
+        let cmd =
+            ImportTempFunctionCommand::new("acme.double_val", "python::mod:func", Platform::any());
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT TEMP FUNCTION acme.double_val FROM 'python::mod:func'");
+        assert_eq!(
+            statement,
+            "IMPORT TEMP FUNCTION acme.double_val FROM 'python::mod:func'"
+        );
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::ImportTempFunction(c) => {

@@ -1,20 +1,21 @@
-use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundleConfig};
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{read_yaml, readable_file_from_url};
+use std::sync::Arc;
 use url::Url;
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 #[tokio::test]
 async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
@@ -26,7 +27,8 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     assert_eq!(None, c1.bundle().from());
     assert_eq!(*temp1.url(), c1.url());
-    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     c1.commit("Initial commit").await?;
 
     let init_commit = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
@@ -77,7 +79,8 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
 
     // Create base bundle
     let c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     c1.commit("Base commit").await?;
 
     // Extend and commit
@@ -112,7 +115,8 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 
     // Create 3-level bundle chain
     let c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     c1.commit("Base commit").await?;
 
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
@@ -146,7 +150,9 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     let temp = random_memory_url();
 
     let bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     bundle.drop_column("Country").await?;
 
@@ -178,8 +184,11 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     let local_file = temp1.writable_file("local_data.csv")?;
 
     // Read source data and write to local location
-    let source_obj =
-        readable_file_from_url(&Url::parse(source_file)?, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
+    let source_obj = readable_file_from_url(
+        &Url::parse(source_file)?,
+        Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
+    )
+    .await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -192,7 +201,9 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Extend to Bundle B in different location
     let bundle_a_reopened = Bundle::open(&temp1.url().to_string(), None).await?;
-    let bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string())).await?;
+    let bundle_b = bundle_a_reopened
+        .extend(Some(&temp2.url().to_string()))
+        .await?;
     bundle_b.drop_column("Country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
@@ -239,7 +250,8 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
 
     // Create base bundle
     let c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     c1.commit("Initial commit").await?;
 
     // Get the ID from the base bundle's InitCommit
@@ -248,11 +260,18 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
         .await?
         .expect("Should have init commit");
     let base_id = init_commit1.id.expect("Base bundle should have id");
-    assert!(init_commit1.from.is_none(), "Base bundle should not have 'from'");
+    assert!(
+        init_commit1.from.is_none(),
+        "Base bundle should not have 'from'"
+    );
 
     // Extend to second bundle
     let base1 = Bundle::open(&temp1.url().to_string(), None).await?;
-    assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
+    assert_eq!(
+        base_id,
+        base1.id(),
+        "Opened bundle should have same ID as InitCommit"
+    );
 
     let c2 = base1.extend(Some(&temp2.url().to_string())).await?;
     c2.drop_column("Country").await?;
@@ -263,7 +282,10 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     let init_commit2: InitCommit = read_yaml(init_file2.as_ref())
         .await?
         .expect("Should have init commit");
-    assert!(init_commit2.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
+    assert!(
+        init_commit2.id.is_none(),
+        "Extended bundle should NOT have 'id' in InitCommit"
+    );
     assert_eq!(
         Some(temp1.url().clone()),
         init_commit2.from,
@@ -287,7 +309,10 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     let init_commit3: InitCommit = read_yaml(init_file3.as_ref())
         .await?
         .expect("Should have init commit");
-    assert!(init_commit3.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
+    assert!(
+        init_commit3.id.is_none(),
+        "Extended bundle should NOT have 'id' in InitCommit"
+    );
     assert_eq!(
         Some(temp2.url().clone()),
         init_commit3.from,

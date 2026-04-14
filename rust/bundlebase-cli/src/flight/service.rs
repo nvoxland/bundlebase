@@ -5,8 +5,6 @@
 //! affect other sessions. Authentication is required for all requests.
 
 use super::metadata;
-use bundlebase_command::BundleFacadeCommandExt;
-use arrow_flight::FlightData;
 use super::prepared_statements::PreparedStatement;
 use crate::auth::BundlebaseAuthenticator;
 use arrow::datatypes::{Schema, SchemaRef};
@@ -23,11 +21,13 @@ use arrow_flight::sql::{
     CommandPreparedStatementQuery, CommandPreparedStatementUpdate, CommandStatementQuery,
     ProstMessageExt, SqlInfo, TicketStatementQuery,
 };
+use arrow_flight::FlightData;
 use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use base64::prelude::*;
 use bundlebase::{Bundle, BundleFacade, PassedBundleConfig};
+use bundlebase_command::BundleFacadeCommandExt;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -125,7 +125,9 @@ impl BundlebaseFlightSqlService {
                     let sessions = cleanup_sessions.read();
                     sessions
                         .iter()
-                        .filter(|(_, session)| session.last_accessed.elapsed() > SESSION_IDLE_TIMEOUT)
+                        .filter(|(_, session)| {
+                            session.last_accessed.elapsed() > SESSION_IDLE_TIMEOUT
+                        })
                         .map(|(token, _)| token.clone())
                         .collect()
                 };
@@ -173,10 +175,7 @@ impl BundlebaseFlightSqlService {
                 // Token was issued by this server but session was dropped.
                 // Re-create the session for the existing token.
                 if self.issued_tokens.read().contains(token) {
-                    info!(
-                        "Session for token {} expired, re-creating",
-                        token
-                    );
+                    info!("Session for token {} expired, re-creating", token);
                     let session = self.create_session().await?;
                     let state = Arc::clone(&session.bundle);
                     self.sessions.write().insert(token.to_string(), session);
@@ -241,7 +240,9 @@ impl BundlebaseFlightSqlService {
         bundle: &Arc<dyn BundleFacade>,
         sql: &str,
     ) -> Result<SchemaRef, Status> {
-        let (schema, _shape) = bundle.response_schema(sql).await
+        let (schema, _shape) = bundle
+            .response_schema(sql)
+            .await
             .map_err(|e| Status::internal(format!("Failed to get schema: {}", e)))?;
         Ok(schema)
     }
@@ -511,7 +512,9 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Executing prepared statement: {} -> {}", handle, sql);
 
-        let record_stream = bundle.execute(&sql, vec![]).await
+        let record_stream = bundle
+            .execute(&sql, vec![])
+            .await
             .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
@@ -521,8 +524,8 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         // Convert to FlightData stream
         let schema = record_stream.schema();
-        let batch_stream = record_stream
-            .map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
+        let batch_stream =
+            record_stream.map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(schema)
             .build(batch_stream)
@@ -629,7 +632,9 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         let bundle = self.get_bundle(&request).await?;
 
         // Execute directly via BundleFacade
-        let record_stream = bundle.execute(&sql, vec![]).await
+        let record_stream = bundle
+            .execute(&sql, vec![])
+            .await
             .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
@@ -639,8 +644,8 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         // Convert to FlightData stream
         let schema = record_stream.schema();
-        let batch_stream = record_stream
-            .map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
+        let batch_stream =
+            record_stream.map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(schema)
             .build(batch_stream)
@@ -713,9 +718,10 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             .get_token(&request)
             .ok()
             .and_then(|token| {
-                self.sessions.read().get(&token).map(|session| {
-                    session.bundle.function_registry().read().namespaces()
-                })
+                self.sessions
+                    .read()
+                    .get(&token)
+                    .map(|session| session.bundle.function_registry().read().namespaces())
             })
             .unwrap_or_default();
         metadata::do_get_schemas(&function_namespaces)
@@ -738,13 +744,16 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         // Try to get cached bundle schema and function entries from session
         let token = self.get_token(&request).ok();
-        let bundle_schema = token.as_ref()
+        let bundle_schema = token
+            .as_ref()
             .and_then(|t| self.get_bundle_schema_for_token(t));
-        let function_entries = token.as_ref()
+        let function_entries = token
+            .as_ref()
             .and_then(|t| {
-                self.sessions.read().get(t.as_str()).map(|session| {
-                    session.bundle.function_registry().read().names()
-                })
+                self.sessions
+                    .read()
+                    .get(t.as_str())
+                    .map(|session| session.bundle.function_registry().read().names())
             })
             .unwrap_or_default();
         metadata::do_get_tables(cmd, bundle_schema, &function_entries)

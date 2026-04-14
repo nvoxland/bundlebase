@@ -9,11 +9,11 @@
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
 use bundlebase_common::connector::{
-    SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
-use bundlebase_common::{ConfigProvider, BundlebaseError};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 
 use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
 use arrow::record_batch::RecordBatch;
@@ -70,16 +70,18 @@ fn get_python_bridge() -> Result<&'static Arc<dyn NativePythonBridge>, Bundlebas
 // C ABI types for shared libraries
 // ---------------------------------------------------------------------------
 
-type DiscoverFn =
-    unsafe extern "C" fn(args_json: *const c_char, out_json: *mut *mut c_char) -> i32;
+type DiscoverFn = unsafe extern "C" fn(args_json: *const c_char, out_json: *mut *mut c_char) -> i32;
 type DataFn = unsafe extern "C" fn(
     location_json: *const c_char,
     args_json: *const c_char,
     out: *mut FFI_ArrowArrayStream,
 ) -> i32;
 type FreeFn = unsafe extern "C" fn(ptr: *mut c_char);
-type StableUrlFn =
-    unsafe extern "C" fn(location_json: *const c_char, args_json: *const c_char, out_json: *mut *mut c_char) -> i32;
+type StableUrlFn = unsafe extern "C" fn(
+    location_json: *const c_char,
+    args_json: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32;
 
 // ---------------------------------------------------------------------------
 // SharedLibStrategy
@@ -106,8 +108,12 @@ impl SharedLibHandle {
             .map_err(|e| format!("Failed to load shared library '{}': {}", path, e))?;
 
         let discover: DiscoverFn = unsafe {
-            *lib.get(b"bundlebase_discover\0")
-                .map_err(|e| format!("Symbol 'bundlebase_discover' not found in '{}': {}", path, e))?
+            *lib.get(b"bundlebase_discover\0").map_err(|e| {
+                format!(
+                    "Symbol 'bundlebase_discover' not found in '{}': {}",
+                    path, e
+                )
+            })?
         };
         let data: DataFn = unsafe {
             *lib.get(b"bundlebase_data\0")
@@ -117,9 +123,8 @@ impl SharedLibHandle {
             *lib.get(b"bundlebase_free\0")
                 .map_err(|e| format!("Symbol 'bundlebase_free' not found in '{}': {}", path, e))?
         };
-        let stable_url: Option<StableUrlFn> = unsafe {
-            lib.get(b"bundlebase_stable_url\0").ok().map(|s| *s)
-        };
+        let stable_url: Option<StableUrlFn> =
+            unsafe { lib.get(b"bundlebase_stable_url\0").ok().map(|s| *s) };
 
         Ok(Self {
             _lib: lib,
@@ -256,10 +261,7 @@ impl FfiConnector {
     }
 
     /// Ensure the shared library is loaded (only for `ffi:` calls).
-    async fn ensure_lib_loaded(
-        &self,
-        path: &str,
-    ) -> Result<(), BundlebaseError> {
+    async fn ensure_lib_loaded(&self, path: &str) -> Result<(), BundlebaseError> {
         let mut guard = self.lib_handle.lock().await;
         if guard.is_none() {
             let handle = SharedLibHandle::load(path)?;
@@ -276,8 +278,7 @@ fn filtered_args_json(args: &HashMap<String, String>) -> Result<String, Bundleba
         .filter(|(k, _)| k.as_str() != "call")
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    serde_json::to_string(&filtered)
-        .map_err(|e| format!("Failed to serialize args: {}", e).into())
+    serde_json::to_string(&filtered).map_err(|e| format!("Failed to serialize args: {}", e).into())
 }
 
 /// Build a JSON string for a DiscoveredLocation.
@@ -375,8 +376,8 @@ fn build_discover_args_json(
         .filter(|(k, _)| k.as_str() != "call")
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let mut value = serde_json::to_value(&filtered)
-        .map_err(|e| format!("Failed to serialize args: {}", e))?;
+    let mut value =
+        serde_json::to_value(&filtered).map_err(|e| format!("Failed to serialize args: {}", e))?;
     value["attached_locations"] = serde_json::to_value(attached_locations)
         .map_err(|e| format!("Failed to serialize attached_locations: {}", e))?;
     serde_json::to_string(&value)
@@ -444,18 +445,20 @@ impl Connector for FfiConnector {
                     Some(reader) => {
                         // Stream batches lazily from the ArrowArrayStreamReader
                         // instead of collecting all into memory.
-                        let batch_stream = Box::pin(futures::stream::unfold(reader, |mut reader| async move {
-                            match reader.next() {
-                                Some(Ok(batch)) => Some((Ok(batch), reader)),
-                                Some(Err(e)) => Some((
-                                    Err(BundlebaseError::from(format!(
-                                        "Failed to read record batch from stream: {}", e
-                                    ))),
-                                    reader,
-                                )),
-                                None => None,
-                            }
-                        }));
+                        let batch_stream =
+                            Box::pin(futures::stream::unfold(reader, |mut reader| async move {
+                                match reader.next() {
+                                    Some(Ok(batch)) => Some((Ok(batch), reader)),
+                                    Some(Err(e)) => Some((
+                                        Err(BundlebaseError::from(format!(
+                                            "Failed to read record batch from stream: {}",
+                                            e
+                                        ))),
+                                        reader,
+                                    )),
+                                    None => None,
+                                }
+                            }));
                         Ok(Some(SourceData::Arrow(batch_stream)))
                     }
                     None => Ok(None),
@@ -465,9 +468,8 @@ impl Connector for FfiConnector {
                 let bridge = get_python_bridge()?;
                 match bridge.data(&call_str, &loc_json, &args_json)? {
                     Some(batches) => {
-                        let batch_stream = Box::pin(futures::stream::iter(
-                            batches.into_iter().map(Ok),
-                        ));
+                        let batch_stream =
+                            Box::pin(futures::stream::iter(batches.into_iter().map(Ok)));
                         Ok(Some(SourceData::Arrow(batch_stream)))
                     }
                     None => Ok(None),
@@ -503,8 +505,8 @@ impl Connector for FfiConnector {
 
         match url_str {
             Some(s) => {
-                let url = Url::parse(&s)
-                    .map_err(|e| format!("Invalid stable URL '{}': {}", s, e))?;
+                let url =
+                    Url::parse(&s).map_err(|e| format!("Invalid stable URL '{}': {}", s, e))?;
                 Ok(Some(url))
             }
             None => Ok(None),
@@ -519,7 +521,6 @@ impl Connector for FfiConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_parse_ffi_call_lib() {
@@ -592,8 +593,7 @@ mod tests {
         args.insert("custom".to_string(), "value".to_string());
 
         let json = filtered_args_json(&args).expect("should serialize");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json).expect("should parse JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("should parse JSON");
         assert!(parsed.get("call").is_none());
         assert_eq!(parsed.get("custom").and_then(|v| v.as_str()), Some("value"));
     }
@@ -607,8 +607,7 @@ mod tests {
             version: "v1".to_string(),
         };
         let json = location_json(&loc).expect("should serialize");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&json).expect("should parse JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("should parse JSON");
         assert_eq!(
             parsed.get("location").and_then(|v| v.as_str()),
             Some("test.parquet")
@@ -627,7 +626,9 @@ mod tests {
         let result = func.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.expect_err("should fail");
-        assert!(err.to_string().contains("External code execution is disabled"));
+        assert!(err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 
     #[tokio::test]
@@ -645,7 +646,9 @@ mod tests {
 
         let result = func.data(&location, &args, &config).await;
         let err = result.err().expect("should fail");
-        assert!(err.to_string().contains("External code execution is disabled"));
+        assert!(err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 
     #[tokio::test]
@@ -663,7 +666,9 @@ mod tests {
 
         let result = func.stable_url(&location, &args, &config).await;
         let err = result.err().expect("should fail");
-        assert!(err.to_string().contains("External code execution is disabled"));
+        assert!(err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 
     #[tokio::test]
@@ -675,13 +680,17 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
 
-        let config = crate::test_utils::test_config_with_values(&[
-            ("system", "allow_external_code", "true"),
-        ]) as Arc<dyn bundlebase_common::ConfigProvider>;
+        let config = crate::test_utils::test_config_with_values(&[(
+            "system",
+            "allow_external_code",
+            "true",
+        )]) as Arc<dyn bundlebase_common::ConfigProvider>;
 
         let result = func.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.expect_err("should fail (no bridge)");
-        assert!(!err.to_string().contains("External code execution is disabled"));
+        assert!(!err
+            .to_string()
+            .contains("External code execution is disabled"));
     }
 }

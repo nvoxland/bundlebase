@@ -1,6 +1,6 @@
-use bundlebase_common::{BlockId, ObjectId, VersionedBlockId};
-use bundlebase_common::IndexedBlocks;
 use bundlebase_common::ColumnId;
+use bundlebase_common::IndexedBlocks;
+use bundlebase_common::{BlockId, ObjectId, VersionedBlockId};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,17 +14,13 @@ pub enum IndexType {
     /// B-tree style index for equality/range queries
     BTree,
     /// BM25 inverted full-text search index spanning one or more columns
-    Inverted {
-        tokenizer: TokenizerConfig,
-    },
+    Inverted { tokenizer: TokenizerConfig },
 }
 
 impl IndexType {
     /// Create a new Text index type with the specified tokenizer.
     pub fn text(tokenizer: TokenizerConfig) -> Self {
-        IndexType::Inverted {
-            tokenizer,
-        }
+        IndexType::Inverted { tokenizer }
     }
 
     /// Check if this is an inverted/full-text index
@@ -133,11 +129,9 @@ impl FromStr for IndexType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "btree" => Ok(IndexType::BTree),
-            "text" => {
-                Ok(IndexType::Inverted {
-                    tokenizer: TokenizerConfig::default(),
-                })
-            }
+            "text" => Ok(IndexType::Inverted {
+                tokenizer: TokenizerConfig::default(),
+            }),
             other => Err(ParseIndexTypeError(format!(
                 "Unknown index type '{}'. Valid options: btree, text",
                 other
@@ -221,7 +215,6 @@ impl FromStr for TokenizerConfig {
 }
 
 impl TokenizerConfig {
-
     /// Get the tantivy tokenizer name
     pub fn tantivy_tokenizer_name(&self) -> &'static str {
         match self {

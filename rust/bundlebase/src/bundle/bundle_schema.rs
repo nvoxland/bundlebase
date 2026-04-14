@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
-
 /// Prefix used for stable internal column names (`col_<hex_id>`).
 const INTERNAL_NAME_PREFIX: &str = "col_";
 
@@ -80,12 +79,16 @@ impl BundleSchema {
                 AnyOperation::AttachBlock(attach) => {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());
-                    if let Some(schema) = &attach.schema {
-                        for (field, id) in schema.fields().iter().zip(attach.column_ids.iter()) {
+                    if let Some(schema) = &attach.schema_cache {
+                        for (field, id) in schema
+                            .fields()
+                            .iter()
+                            .zip(attach.column_ids_cache.iter())
+                        {
                             col_blocks.entry(*id).or_default().push(block_entry.clone());
                             if seen_physical.insert(*id) {
                                 physical_fields.push(Arc::new(
-                                    field.as_ref().clone().with_name(generate_internal_name(id))
+                                    field.as_ref().clone().with_name(generate_internal_name(id)),
                                 ));
                                 physical_col_ids.push(*id);
                             }
@@ -151,12 +154,16 @@ impl BundleSchema {
                 AnyOperation::AttachBlock(attach) => {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());
-                    if let Some(schema) = &attach.schema {
-                        for (field, id) in schema.fields().iter().zip(attach.column_ids.iter()) {
+                    if let Some(schema) = &attach.schema_cache {
+                        for (field, id) in schema
+                            .fields()
+                            .iter()
+                            .zip(attach.column_ids_cache.iter())
+                        {
                             col_blocks.entry(*id).or_default().push(block_entry.clone());
                             if seen_physical.insert(*id) {
                                 physical_fields.push(Arc::new(
-                                    field.as_ref().clone().with_name(generate_internal_name(id))
+                                    field.as_ref().clone().with_name(generate_internal_name(id)),
                                 ));
                                 physical_col_ids.push(*id);
                             }
@@ -208,7 +215,8 @@ impl BundleSchema {
 
     /// Resolve a user-visible column name to its ColumnId.
     pub fn column_id(&self, name: &str) -> Option<ColumnId> {
-        self.columns.iter()
+        self.columns
+            .iter()
             .find(|(_, n)| n.as_str() == name)
             .map(|(id, _)| *id)
     }
@@ -230,8 +238,13 @@ impl BundleSchema {
 
     /// Returns an unqualified DataFusion Column for a known column's internal name.
     /// Returns an error if the ColumnId is not registered in this schema.
-    pub fn internal_column(&self, id: &ColumnId) -> Result<datafusion::common::Column, crate::BundlebaseError> {
-        Ok(datafusion::common::Column::new_unqualified(self.internal_name(id)?))
+    pub fn internal_column(
+        &self,
+        id: &ColumnId,
+    ) -> Result<datafusion::common::Column, crate::BundlebaseError> {
+        Ok(datafusion::common::Column::new_unqualified(
+            self.internal_name(id)?,
+        ))
     }
 
     /// Check if a column is computed (from AddColumn) vs physical (from AttachBlock).
@@ -252,7 +265,9 @@ impl BundleSchema {
     /// Returns the unified physical schema: all unique physical columns across all blocks,
     /// deduplicated by ColumnId, with internal names and original field types.
     pub fn physical_schema(&self) -> SchemaRef {
-        self.physical_schema.clone().unwrap_or_else(|| Arc::new(Schema::empty()))
+        self.physical_schema
+            .clone()
+            .unwrap_or_else(|| Arc::new(Schema::empty()))
     }
 
     /// Returns the ordered ColumnIds corresponding to the physical schema fields.
@@ -284,7 +299,10 @@ impl BundleSchema {
     }
 
     /// Access a mutable entry for a ColumnId.
-    pub fn entry(&mut self, id: ColumnId) -> std::collections::hash_map::Entry<'_, ColumnId, String> {
+    pub fn entry(
+        &mut self,
+        id: ColumnId,
+    ) -> std::collections::hash_map::Entry<'_, ColumnId, String> {
         self.columns.entry(id)
     }
 
@@ -301,13 +319,18 @@ impl BundleSchema {
         if let Some(cached) = &self.internal_schema {
             return Some(cached.clone());
         }
-        let internal_fields: Vec<Arc<arrow::datatypes::Field>> = schema.fields().iter().filter_map(|f| {
-            self.columns.iter()
-                .find(|(_, name)| name.as_str() == f.name())
-                .map(|(id, _)| {
-                    Arc::new(f.as_ref().clone().with_name(generate_internal_name(id)))
-                })
-        }).collect();
+        let internal_fields: Vec<Arc<arrow::datatypes::Field>> = schema
+            .fields()
+            .iter()
+            .filter_map(|f| {
+                self.columns
+                    .iter()
+                    .find(|(_, name)| name.as_str() == f.name())
+                    .map(|(id, _)| {
+                        Arc::new(f.as_ref().clone().with_name(generate_internal_name(id)))
+                    })
+            })
+            .collect();
         Some(Arc::new(Schema::new(internal_fields)))
     }
 
@@ -378,11 +401,15 @@ impl BundleSchema {
     }
 
     /// Rename DataFrame columns from internal names to user-visible names.
-    pub fn rename_to_real_names(&self, mut df: datafusion::dataframe::DataFrame) -> Result<datafusion::dataframe::DataFrame, crate::BundlebaseError> {
+    pub fn rename_to_real_names(
+        &self,
+        mut df: datafusion::dataframe::DataFrame,
+    ) -> Result<datafusion::dataframe::DataFrame, crate::BundlebaseError> {
         for (id, user_name) in &self.columns {
             let int_name = generate_internal_name(id);
             if df.schema().has_column_with_unqualified_name(&int_name) {
-                df = df.with_column_renamed(&int_name, user_name)
+                df = df
+                    .with_column_renamed(&int_name, user_name)
                     .map_err(|e| Box::new(e) as crate::BundlebaseError)?;
             }
         }
@@ -410,11 +437,6 @@ pub fn parse_internal_name(name: &str) -> Option<ColumnId> {
         .and_then(|hex| ColumnId::try_from(hex).ok())
 }
 
-
-
-
-
-
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
@@ -426,7 +448,7 @@ mod tests {
 
     // --- Test helpers for building fake operations ---
 
-    use crate::bundle::operation::{AttachBlockOp, AddColumnOp, RenameColumnOp, DropColumnOp};
+    use crate::bundle::operation::{AddColumnOp, AttachBlockOp, DropColumnOp, RenameColumnOp};
     use crate::data::ObjectId;
 
     fn fake_attach(names: &[&str], ids: &[ColumnId]) -> AnyOperation {
@@ -446,14 +468,18 @@ mod tests {
             layout: None,
             num_rows: None,
             bytes: None,
-            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
-            schema: Some(Arc::new(Schema::new(fields))),
-            column_ids: ids.to_vec(),
+            schema: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
+            schema_cache: Some(Arc::new(Schema::new(fields))),
+            column_ids_cache: ids.to_vec(),
         })
     }
 
-    fn fake_attach_with_block_id(names: &[&str], ids: &[ColumnId], block_id: BlockId) -> AnyOperation {
+    fn fake_attach_with_block_id(
+        names: &[&str],
+        ids: &[ColumnId],
+        block_id: BlockId,
+    ) -> AnyOperation {
         let fields: Vec<Arc<Field>> = names
             .iter()
             .map(|n| Arc::new(Field::new(*n, DataType::Utf8, true)))
@@ -470,10 +496,10 @@ mod tests {
             layout: None,
             num_rows: None,
             bytes: None,
-            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
-            schema: Some(Arc::new(Schema::new(fields))),
-            column_ids: ids.to_vec(),
+            schema: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
+            schema_cache: Some(Arc::new(Schema::new(fields))),
+            column_ids_cache: ids.to_vec(),
         })
     }
 
@@ -520,7 +546,11 @@ mod tests {
         ];
 
         let schema = BundleSchema::initial(&ops);
-        assert_eq!(schema.len(), 2, "Should deduplicate shared ColumnIds across blocks");
+        assert_eq!(
+            schema.len(),
+            2,
+            "Should deduplicate shared ColumnIds across blocks"
+        );
     }
 
     #[test]
@@ -548,9 +578,21 @@ mod tests {
         ];
 
         let schema = BundleSchema::initial(&ops);
-        assert_eq!(schema.len(), 2, "Renames/drops should not affect initial names");
-        assert_eq!(schema.get(&id_a), Some(&"col_a".to_string()), "Should keep original name");
-        assert_eq!(schema.get(&id_b), Some(&"col_b".to_string()), "Dropped column should still appear");
+        assert_eq!(
+            schema.len(),
+            2,
+            "Renames/drops should not affect initial names"
+        );
+        assert_eq!(
+            schema.get(&id_a),
+            Some(&"col_a".to_string()),
+            "Should keep original name"
+        );
+        assert_eq!(
+            schema.get(&id_b),
+            Some(&"col_b".to_string()),
+            "Dropped column should still appear"
+        );
     }
 
     // --- BundleSchema::resolved tests ---
@@ -568,7 +610,10 @@ mod tests {
         let schema = BundleSchema::resolved(&ops);
         assert_eq!(schema.len(), 1, "Dropped column should be removed");
         assert_eq!(schema.get(&id_a), Some(&"renamed_a".to_string()));
-        assert!(schema.get(&id_b).is_none(), "Dropped column should not appear");
+        assert!(
+            schema.get(&id_b).is_none(),
+            "Dropped column should not appear"
+        );
     }
 
     // --- BundleSchema::column_id / column_name tests ---
@@ -608,7 +653,11 @@ mod tests {
         let bs = BundleSchema::initial(&ops);
         let schema = bs.physical_schema();
         let col_ids = bs.physical_column_ids();
-        assert_eq!(schema.fields().len(), 3, "Should have 3 unique fields: a, b, c");
+        assert_eq!(
+            schema.fields().len(),
+            3,
+            "Should have 3 unique fields: a, b, c"
+        );
         assert_eq!(col_ids.len(), 3);
         // Fields use internal names instead of physical names
         assert_eq!(schema.field(0).name(), &generate_internal_name(&id_a));
@@ -629,9 +678,18 @@ mod tests {
         ];
 
         let schema = BundleSchema::initial(&ops);
-        assert!(!schema.is_computed(&id_physical), "AttachBlock column is not computed");
-        assert!(schema.is_computed(&id_computed), "AddColumn column is computed");
-        assert!(!schema.is_computed(&id_unknown), "Unknown column is not computed");
+        assert!(
+            !schema.is_computed(&id_physical),
+            "AttachBlock column is not computed"
+        );
+        assert!(
+            schema.is_computed(&id_computed),
+            "AddColumn column is computed"
+        );
+        assert!(
+            !schema.is_computed(&id_unknown),
+            "Unknown column is not computed"
+        );
     }
 
     // --- BundleSchema::blocks_for_column tests ---

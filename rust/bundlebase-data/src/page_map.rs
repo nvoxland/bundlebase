@@ -165,9 +165,15 @@ impl StatValue {
             (StatValue::Date32(a), StatValue::Date32(b)) => Some(a.cmp(b)),
             (StatValue::Date64(a), StatValue::Date64(b)) => Some(a.cmp(b)),
             (StatValue::TimestampSecond(a), StatValue::TimestampSecond(b)) => Some(a.cmp(b)),
-            (StatValue::TimestampMillisecond(a), StatValue::TimestampMillisecond(b)) => Some(a.cmp(b)),
-            (StatValue::TimestampMicrosecond(a), StatValue::TimestampMicrosecond(b)) => Some(a.cmp(b)),
-            (StatValue::TimestampNanosecond(a), StatValue::TimestampNanosecond(b)) => Some(a.cmp(b)),
+            (StatValue::TimestampMillisecond(a), StatValue::TimestampMillisecond(b)) => {
+                Some(a.cmp(b))
+            }
+            (StatValue::TimestampMicrosecond(a), StatValue::TimestampMicrosecond(b)) => {
+                Some(a.cmp(b))
+            }
+            (StatValue::TimestampNanosecond(a), StatValue::TimestampNanosecond(b)) => {
+                Some(a.cmp(b))
+            }
             (StatValue::Time32Second(a), StatValue::Time32Second(b)) => Some(a.cmp(b)),
             (StatValue::Time32Millisecond(a), StatValue::Time32Millisecond(b)) => Some(a.cmp(b)),
             (StatValue::Time64Microsecond(a), StatValue::Time64Microsecond(b)) => Some(a.cmp(b)),
@@ -442,8 +448,9 @@ impl PageMap {
         let pages_size = page_count * 12;
         // stats_offset points to the byte immediately after the page entries
         let stats_offset = (HEADER_SIZE + pages_size) as u64;
-        let stats_blob = postcard::to_stdvec(&self.column_stats)
-            .map_err(|e| BundlebaseError::from(format!("Failed to serialize column stats: {}", e)))?;
+        let stats_blob = postcard::to_stdvec(&self.column_stats).map_err(|e| {
+            BundlebaseError::from(format!("Failed to serialize column stats: {}", e))
+        })?;
 
         let mut buffer = Vec::with_capacity(HEADER_SIZE + pages_size + stats_blob.len());
 
@@ -479,21 +486,29 @@ impl PageMap {
             return Err(format!("Unsupported layout version: {}", version).into());
         }
 
-        let total_rows = u64::from_le_bytes(bytes[9..17].try_into().map_err(|_| {
-            BundlebaseError::from("Invalid layout file: bad total_rows")
-        })?);
+        let total_rows = u64::from_le_bytes(
+            bytes[9..17]
+                .try_into()
+                .map_err(|_| BundlebaseError::from("Invalid layout file: bad total_rows"))?,
+        );
 
-        let file_size = u64::from_le_bytes(bytes[17..25].try_into().map_err(|_| {
-            BundlebaseError::from("Invalid layout file: bad file_size")
-        })?);
+        let file_size = u64::from_le_bytes(
+            bytes[17..25]
+                .try_into()
+                .map_err(|_| BundlebaseError::from("Invalid layout file: bad file_size"))?,
+        );
 
-        let page_count = u32::from_le_bytes(bytes[25..29].try_into().map_err(|_| {
-            BundlebaseError::from("Invalid layout file: bad page_count")
-        })?) as usize;
+        let page_count = u32::from_le_bytes(
+            bytes[25..29]
+                .try_into()
+                .map_err(|_| BundlebaseError::from("Invalid layout file: bad page_count"))?,
+        ) as usize;
 
-        let stats_offset = u64::from_le_bytes(bytes[29..37].try_into().map_err(|_| {
-            BundlebaseError::from("Invalid layout file: bad stats_offset")
-        })?) as usize;
+        let stats_offset = u64::from_le_bytes(
+            bytes[29..37]
+                .try_into()
+                .map_err(|_| BundlebaseError::from("Invalid layout file: bad stats_offset"))?,
+        ) as usize;
 
         let pages_end = HEADER_SIZE + page_count * 12;
         if bytes.len() < pages_end {
@@ -529,8 +544,9 @@ impl PageMap {
         // should surface as an explicit error, not silently-empty stats that
         // disable filter pruning.
         let column_stats = if stats_offset < bytes.len() {
-            postcard::from_bytes(&bytes[stats_offset..])
-                .map_err(|e| BundlebaseError::from(format!("Failed to decode column stats: {}", e)))?
+            postcard::from_bytes(&bytes[stats_offset..]).map_err(|e| {
+                BundlebaseError::from(format!("Failed to decode column stats: {}", e))
+            })?
         } else {
             Vec::new()
         };
@@ -561,7 +577,10 @@ impl PageMap {
             return None;
         }
         // Binary search: find the last page where row_begin <= row_number
-        match self.pages.binary_search_by_key(&row_number, |p| p.row_begin) {
+        match self
+            .pages
+            .binary_search_by_key(&row_number, |p| p.row_begin)
+        {
             Ok(idx) => Some(idx),
             Err(idx) => {
                 if idx == 0 {
@@ -710,7 +729,12 @@ async fn resolve_without_layout(
         0
     };
 
-    let offsets = scan_newline_offsets(&bytes[data_start as usize..], data_start, 0, &sorted_targets);
+    let offsets = scan_newline_offsets(
+        &bytes[data_start as usize..],
+        data_start,
+        0,
+        &sorted_targets,
+    );
     Ok(offsets)
 }
 
@@ -789,7 +813,10 @@ mod tests {
 
         assert_eq!(result.total_rows, 6);
         assert_eq!(result.file_size, data.len() as u64);
-        assert!(result.pages.len() >= 2, "Should have multiple pages with 10-byte page size");
+        assert!(
+            result.pages.len() >= 2,
+            "Should have multiple pages with 10-byte page size"
+        );
 
         // First page always starts at 0
         assert_eq!(result.pages[0].physical_start, 0);
@@ -850,8 +877,18 @@ mod tests {
             is_strictly_decreasing: false,
             distinct_count: 42,
             page_stats: vec![
-                PageStats { min: Some(StatValue::Float64(1.0)), max: Some(StatValue::Float64(50.0)), distinct_count: 20, bloom_filter: None },
-                PageStats { min: Some(StatValue::Float64(51.0)), max: Some(StatValue::Float64(99.0)), distinct_count: 22, bloom_filter: None },
+                PageStats {
+                    min: Some(StatValue::Float64(1.0)),
+                    max: Some(StatValue::Float64(50.0)),
+                    distinct_count: 20,
+                    bloom_filter: None,
+                },
+                PageStats {
+                    min: Some(StatValue::Float64(51.0)),
+                    max: Some(StatValue::Float64(99.0)),
+                    distinct_count: 22,
+                    bloom_filter: None,
+                },
             ],
             ..Default::default()
         };
@@ -859,8 +896,14 @@ mod tests {
             total_rows: 100,
             file_size: 50000,
             pages: vec![
-                PageGroup { physical_start: 0, row_begin: 0 },
-                PageGroup { physical_start: 25000, row_begin: 50 },
+                PageGroup {
+                    physical_start: 0,
+                    row_begin: 0,
+                },
+                PageGroup {
+                    physical_start: 25000,
+                    row_begin: 50,
+                },
             ],
             column_stats: vec![stats],
         };
@@ -880,10 +923,22 @@ mod tests {
         assert!(loaded.column_stats[0].is_all_numeric);
         assert_eq!(loaded.column_stats[0].distinct_count, 42);
         assert_eq!(loaded.column_stats[0].page_stats.len(), 2);
-        assert_eq!(loaded.column_stats[0].page_stats[0].min, Some(StatValue::Float64(1.0)));
-        assert_eq!(loaded.column_stats[0].page_stats[0].max, Some(StatValue::Float64(50.0)));
-        assert_eq!(loaded.column_stats[0].page_stats[1].min, Some(StatValue::Float64(51.0)));
-        assert_eq!(loaded.column_stats[0].page_stats[1].max, Some(StatValue::Float64(99.0)));
+        assert_eq!(
+            loaded.column_stats[0].page_stats[0].min,
+            Some(StatValue::Float64(1.0))
+        );
+        assert_eq!(
+            loaded.column_stats[0].page_stats[0].max,
+            Some(StatValue::Float64(50.0))
+        );
+        assert_eq!(
+            loaded.column_stats[0].page_stats[1].min,
+            Some(StatValue::Float64(51.0))
+        );
+        assert_eq!(
+            loaded.column_stats[0].page_stats[1].max,
+            Some(StatValue::Float64(99.0))
+        );
     }
 
     #[test]
@@ -906,9 +961,18 @@ mod tests {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
-                PageGroup { physical_start: 0, row_begin: 0 },
-                PageGroup { physical_start: 50000, row_begin: 100 },
-                PageGroup { physical_start: 100000, row_begin: 200 },
+                PageGroup {
+                    physical_start: 0,
+                    row_begin: 0,
+                },
+                PageGroup {
+                    physical_start: 50000,
+                    row_begin: 100,
+                },
+                PageGroup {
+                    physical_start: 100000,
+                    row_begin: 200,
+                },
             ],
             column_stats: vec![],
         };
@@ -929,9 +993,18 @@ mod tests {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
-                PageGroup { physical_start: 0, row_begin: 0 },
-                PageGroup { physical_start: 50000, row_begin: 100 },
-                PageGroup { physical_start: 100000, row_begin: 200 },
+                PageGroup {
+                    physical_start: 0,
+                    row_begin: 0,
+                },
+                PageGroup {
+                    physical_start: 50000,
+                    row_begin: 100,
+                },
+                PageGroup {
+                    physical_start: 100000,
+                    row_begin: 200,
+                },
             ],
             column_stats: vec![],
         };
@@ -947,9 +1020,18 @@ mod tests {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
-                PageGroup { physical_start: 0, row_begin: 0 },
-                PageGroup { physical_start: 50000, row_begin: 100 },
-                PageGroup { physical_start: 100000, row_begin: 200 },
+                PageGroup {
+                    physical_start: 0,
+                    row_begin: 0,
+                },
+                PageGroup {
+                    physical_start: 50000,
+                    row_begin: 100,
+                },
+                PageGroup {
+                    physical_start: 100000,
+                    row_begin: 200,
+                },
             ],
             column_stats: vec![],
         };
@@ -977,8 +1059,13 @@ mod tests {
             assert!(page_idx.is_some(), "Row {} should have a page", row);
 
             let (row_begin, row_end) = layout.page_row_range(page_idx.unwrap());
-            assert!(row >= row_begin && row < row_end,
-                "Row {} should be in page range [{}, {})", row, row_begin, row_end);
+            assert!(
+                row >= row_begin && row < row_end,
+                "Row {} should be in page range [{}, {})",
+                row,
+                row_begin,
+                row_end
+            );
         }
     }
 

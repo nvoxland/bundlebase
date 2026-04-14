@@ -41,71 +41,72 @@
 //! - `verification`: Commands that return `VerificationResults`
 //! - `facade`: Read-only commands using `BundleFacadeCommand` (ExplainPlan)
 
-use bundlebase::BundleFacade;
+use arrow::datatypes::SchemaRef;
 use bundlebase::source::FetchResults;
 use bundlebase::BundleBuilder;
+use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::SchemaRef;
 
-pub mod parser;
 pub mod builder;
-pub mod facade;
-pub mod response;
-pub mod facade_ext;
 pub mod builder_ext;
+pub mod facade;
+pub mod facade_ext;
+pub mod parser;
+pub mod response;
 pub mod sql_utils;
 
 // Re-export response types
-pub use response::OutputShape;
-pub use response::CommandResponse;
 pub use bundlebase_common::impl_dyn_command_response;
+pub use response::CommandResponse;
+pub use response::OutputShape;
 
 // Re-export Rule from parser for use by commands
 pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    CreateReportCommand, DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
-    DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
-    DropReportCommand, DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
-    RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
-    RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
-    ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand,
-    SetNameCommand,
-    NormalizeColumnNamesCommand, UndoCommand, VerifyDataCommand, ExportHollowCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand,
+    CommitCommand, CreateIndexCommand, CreateReportCommand, CreateSourceCommand, CreateViewCommand,
+    DeleteCommand, DetachBlockCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand,
+    DropCastColumnCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand, ExportHollowCommand,
+    FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand,
+    ImportJoinCommand, JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand,
+    ReindexCommand, RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand,
+    RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand, SaveConfigCommand,
+    SetDescriptionCommand, SetNameCommand, UndoCommand, UpdateCommand, VerifyDataCommand,
 };
 
 // Re-export verification result types
 pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
-pub use facade::DescribeDataCommand;
-pub use facade::ExportDataCommand;
-pub use facade::TestConnectorCommand;
 pub use facade::DescribeConnectorCommand;
+pub use facade::DescribeDataCommand;
 pub use facade::DescribeFunctionCommand;
-pub use facade::ImportTempConnectorCommand;
-pub use facade::ImportTempFunctionCommand;
 pub use facade::DropTempConnectorCommand;
 pub use facade::DropTempFunctionCommand;
+pub use facade::ExplainPlanCommand;
+pub use facade::ExportDataCommand;
+pub use facade::GenerateReportCommand;
+pub use facade::ImportTempConnectorCommand;
+pub use facade::ImportTempFunctionCommand;
+pub use facade::ProfileColumnCommand;
 pub use facade::RenameTempConnectorCommand;
 pub use facade::RenameTempFunctionCommand;
-pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
-pub use facade::{
-    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
-    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
-    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
-    ShowCountCommand, ShowReportsCommand,
-};
 pub use facade::SyntaxCommand;
-pub use facade::ProfileColumnCommand;
-pub use facade::GenerateReportCommand;
+pub use facade::TestConnectorCommand;
+pub use facade::{
+    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowBlocksCommand, ShowColumnsCommand,
+    ShowCommandsCommand, ShowConfigCommand, ShowConnectorsCommand, ShowCountCommand,
+    ShowDetailsCommand, ShowFunctionsCommand, ShowHistoryCommand, ShowIndexesCommand,
+    ShowPacksCommand, ShowReportsCommand, ShowStatusCommand, ShowViewsCommand,
+};
 
 // Re-export extension traits
-pub use facade_ext::BundleFacadeCommandExt;
 pub use builder_ext::BundleBuilderExt;
+pub use facade_ext::BundleFacadeCommandExt;
 
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
@@ -459,7 +460,38 @@ impl BundleCommand {
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
-                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::ShowReports(_) | BundleCommand::GenerateReport(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_) => {
+                    BundleCommand::ExportData(_)
+                    | BundleCommand::DescribeConnector(_)
+                    | BundleCommand::DescribeFunction(_)
+                    | BundleCommand::ImportTempConnector(_)
+                    | BundleCommand::ImportTempFunction(_)
+                    | BundleCommand::DropTempConnector(_)
+                    | BundleCommand::DropTempFunction(_)
+                    | BundleCommand::RenameTempConnector(_)
+                    | BundleCommand::RenameTempFunction(_)
+                    | BundleCommand::ExplainPlan(_)
+                    | BundleCommand::SetConfig(_)
+                    | BundleCommand::ShowAlwaysDeletes(_)
+                    | BundleCommand::ShowAlwaysUpdates(_)
+                    | BundleCommand::ShowDetails(_)
+                    | BundleCommand::ShowHistory(_)
+                    | BundleCommand::ShowStatus(_)
+                    | BundleCommand::ShowViews(_)
+                    | BundleCommand::ShowIndexes(_)
+                    | BundleCommand::ShowPacks(_)
+                    | BundleCommand::ShowBlocks(_)
+                    | BundleCommand::ShowConfig(_)
+                    | BundleCommand::ShowCommands(_)
+                    | BundleCommand::ShowConnectors(_)
+                    | BundleCommand::ShowFunctions(_)
+                    | BundleCommand::ShowColumns(_)
+                    | BundleCommand::ShowCount(_)
+                    | BundleCommand::ShowReports(_)
+                    | BundleCommand::GenerateReport(_)
+                    | BundleCommand::Syntax(_)
+                    | BundleCommand::DescribeData(_)
+                    | BundleCommand::TestConnector(_)
+                    | BundleCommand::ProfileColumn(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -473,7 +505,39 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_))
+        matches!(
+            self,
+            BundleCommand::ExportData(_)
+                | BundleCommand::DescribeConnector(_)
+                | BundleCommand::DescribeFunction(_)
+                | BundleCommand::ImportTempConnector(_)
+                | BundleCommand::ImportTempFunction(_)
+                | BundleCommand::DropTempConnector(_)
+                | BundleCommand::DropTempFunction(_)
+                | BundleCommand::RenameTempConnector(_)
+                | BundleCommand::RenameTempFunction(_)
+                | BundleCommand::ExplainPlan(_)
+                | BundleCommand::SetConfig(_)
+                | BundleCommand::ShowAlwaysDeletes(_)
+                | BundleCommand::ShowAlwaysUpdates(_)
+                | BundleCommand::ShowDetails(_)
+                | BundleCommand::ShowHistory(_)
+                | BundleCommand::ShowStatus(_)
+                | BundleCommand::ShowViews(_)
+                | BundleCommand::ShowIndexes(_)
+                | BundleCommand::ShowPacks(_)
+                | BundleCommand::ShowBlocks(_)
+                | BundleCommand::ShowConfig(_)
+                | BundleCommand::ShowCommands(_)
+                | BundleCommand::ShowConnectors(_)
+                | BundleCommand::ShowFunctions(_)
+                | BundleCommand::ShowColumns(_)
+                | BundleCommand::ShowCount(_)
+                | BundleCommand::Syntax(_)
+                | BundleCommand::DescribeData(_)
+                | BundleCommand::TestConnector(_)
+                | BundleCommand::ProfileColumn(_)
+        )
     }
 }
 
@@ -931,20 +995,14 @@ mod tests {
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("patterns".to_string(), "**/*.parquet".to_string());
 
-        let cmd = BundleCommand::CreateSource(CreateSourceCommand::new(
-            "remote_dir",
-            args.clone(),
-            None,
-        ));
+        let cmd =
+            BundleCommand::CreateSource(CreateSourceCommand::new("remote_dir", args.clone(), None));
 
         match cmd {
             BundleCommand::CreateSource(cmd) => {
                 assert_eq!(cmd.connector, "remote_dir");
                 assert_eq!(cmd.args.get("url"), Some(&"s3://bucket/data/".to_string()));
-                assert_eq!(
-                    cmd.args.get("patterns"),
-                    Some(&"**/*.parquet".to_string())
-                );
+                assert_eq!(cmd.args.get("patterns"), Some(&"**/*.parquet".to_string()));
                 assert_eq!(cmd.pack, None);
             }
             _ => panic!("Expected CreateSource variant"),
@@ -992,5 +1050,4 @@ mod tests {
             _ => panic!("Expected FetchAll variant"),
         }
     }
-
 }

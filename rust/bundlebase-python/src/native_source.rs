@@ -3,9 +3,9 @@
 //! Implements `NativePythonBridge` to allow Python `Connector` objects
 //! to be used as native (in-process) data sources via PyO3.
 
+use ::bundlebase::source::ffi::NativePythonBridge;
 use arrow::pyarrow::FromPyArrow;
 use arrow::record_batch::RecordBatch;
-use ::bundlebase::source::ffi::NativePythonBridge;
 use bundlebase_common::BundlebaseError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -52,11 +52,9 @@ impl PyNativeBridge {
     }
 
     /// Parse args JSON, extracting attached_locations and preserving raw JSON values.
-    fn parse_args_json(
-        json: &str,
-    ) -> Result<(serde_json::Value, Vec<String>), BundlebaseError> {
-        let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| format!("Failed to parse args JSON: {}", e))?;
+    fn parse_args_json(json: &str) -> Result<(serde_json::Value, Vec<String>), BundlebaseError> {
+        let value: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| format!("Failed to parse args JSON: {}", e))?;
 
         let attached: Vec<String> = value
             .get("attached_locations")
@@ -157,12 +155,14 @@ impl NativePythonBridge for PyNativeBridge {
             for loc in locations.iter() {
                 let location: String = loc
                     .getattr("location")
-                    .map_err(|e| format!(
-                        "Location missing 'location' attr: {}. \
+                    .map_err(|e| {
+                        format!(
+                            "Location missing 'location' attr: {}. \
                          Expected a Location object with 'location' (str), \
                          'must_copy' (bool), 'format' (str), 'version' (str) attributes",
-                        e
-                    ))?
+                            e
+                        )
+                    })?
                     .extract()
                     .map_err(|e| format!("Location.location is not a string: {}", e))?;
                 let must_copy: bool = loc
@@ -267,10 +267,7 @@ impl NativePythonBridge for PyNativeBridge {
                 .map_err(|e| format!("Failed to get normalize_to_batches: {}", e))?;
 
             // Get optional schema() from the source for dict-to-Arrow conversion
-            let py_schema = source
-                .call_method0("schema")
-                .ok()
-                .filter(|s| !s.is_none());
+            let py_schema = source.call_method0("schema").ok().filter(|s| !s.is_none());
 
             let normalize_kwargs = pyo3::types::PyDict::new(py);
             if let Some(schema) = py_schema {

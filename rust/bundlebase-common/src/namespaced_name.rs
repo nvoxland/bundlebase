@@ -93,7 +93,10 @@ impl<'de> Deserialize<'de> for NamespacedName {
 /// Enforces single-level dotted namespace: exactly one dot, both parts must
 /// start with a letter or underscore and contain only alphanumeric characters
 /// and underscores.
-pub fn parse_dotted_name<'a>(name: &'a str, entity_type: &str) -> Result<(&'a str, &'a str), BundlebaseError> {
+pub fn parse_dotted_name<'a>(
+    name: &'a str,
+    entity_type: &str,
+) -> Result<(&'a str, &'a str), BundlebaseError> {
     let parts: Vec<&str> = name.split('.').collect();
 
     if parts.len() < 2 {
@@ -213,7 +216,10 @@ mod tests {
     fn test_parse_dotted_name_rejects_multi_level() {
         let result = parse_dotted_name("a.b.c", "Connector");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces are not supported"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Multi-level namespaces are not supported"));
     }
 
     #[test]

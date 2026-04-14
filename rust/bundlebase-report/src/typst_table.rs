@@ -6,7 +6,10 @@ use crate::query::BoundedQueryResult;
 use bundlebase_common::BundlebaseError;
 
 /// Generate Typst markup for a table block with its query results.
-pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<String, BundlebaseError> {
+pub fn render_table(
+    table: &TableBlock,
+    data: &BoundedQueryResult,
+) -> Result<String, BundlebaseError> {
     if data.columns.is_empty() {
         return Err(BundlebaseError::from("Table query returned no columns"));
     }
@@ -28,8 +31,7 @@ pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<Str
     lines.push(format!("  columns: {},", columns_spec));
 
     // Border/stroke
-    let border = get_opt_str(opts, "border")
-        .unwrap_or_else(|| defaults::TABLE_BORDER.to_string());
+    let border = get_opt_str(opts, "border").unwrap_or_else(|| defaults::TABLE_BORDER.to_string());
     lines.push(format!("  stroke: {},", border));
 
     // Alignment
@@ -57,7 +59,10 @@ pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<Str
             header_fill, zebra_color
         ));
     } else {
-        lines.push(format!("  fill: (_, y) => if y == 0 {{ {} }},", header_fill));
+        lines.push(format!(
+            "  fill: (_, y) => if y == 0 {{ {} }},",
+            header_fill
+        ));
     }
 
     // Header row
@@ -238,10 +243,7 @@ mod tests {
     fn test_render_table_with_nulls() {
         let data = BoundedQueryResult {
             columns: vec!["name".to_string(), "value".to_string()],
-            rows: vec![vec![
-                serde_json::json!("test"),
-                serde_json::Value::Null,
-            ]],
+            rows: vec![vec![serde_json::json!("test"), serde_json::Value::Null]],
         };
         let table = TableBlock {
             bundle: "test".to_string(),

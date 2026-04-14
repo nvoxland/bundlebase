@@ -67,7 +67,10 @@ impl Operation for DropConnectorOp {
         // Verify at least one of the target IDs still exists
         let registry = bundle.connector_registry();
         let registry_guard = registry.read();
-        let found = self.ids.iter().any(|id| registry_guard.entries().iter().any(|e| e.id == *id));
+        let found = self
+            .ids
+            .iter()
+            .any(|id| registry_guard.entries().iter().any(|e| e.id == *id));
         if !found {
             return Err("Connector entries not found. Use IMPORT CONNECTOR first.".into());
         }
@@ -83,18 +86,25 @@ impl Operation for DropConnectorOp {
         let name = {
             let registry = bundle.connector_registry();
             let reg = registry.read();
-            reg.entries().iter()
+            reg.entries()
+                .iter()
                 .find(|e| self.ids.contains(&e.id))
                 .map(|e| e.name.to_string())
         };
 
         // Remove entries by ID
-        bundle.connector_registry().write().remove_entries_by_ids(&self.ids);
+        bundle
+            .connector_registry()
+            .write()
+            .remove_entries_by_ids(&self.ids);
 
         // Remove sources referencing this connector (only if all entries for the name are gone)
         if let Some(name) = name {
             if !bundle.connector_registry().read().has_entry(&name) {
-                bundle.sources.write().retain(|_, source| source.connector() != name);
+                bundle
+                    .sources
+                    .write()
+                    .retain(|_, source| source.connector() != name);
             }
         }
 
@@ -113,9 +123,7 @@ mod tests {
     #[test]
     fn test_describe() {
         let id = ObjectId::generate();
-        let op = DropConnectorOp {
-            ids: vec![id],
-        };
+        let op = DropConnectorOp { ids: vec![id] };
         assert_eq!(op.describe(), format!("DROP CONNECTOR: {}", id));
     }
 
@@ -154,17 +162,18 @@ mod tests {
     async fn test_check_connector_defined() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::test").unwrap(),
-            platform: Platform::any(),
-            temporary: false,
-        });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::test").unwrap(),
+                platform: Platform::any(),
+                temporary: false,
+            });
 
-        let op = DropConnectorOp {
-            ids: vec![id],
-        };
+        let op = DropConnectorOp { ids: vec![id] };
         let result = op.check(&bundle).await;
         assert!(result.is_ok());
     }
@@ -173,17 +182,18 @@ mod tests {
     async fn test_apply_removes_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::test").unwrap(),
-            platform: Platform::any(),
-            temporary: false,
-        });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::test").unwrap(),
+                platform: Platform::any(),
+                temporary: false,
+            });
 
-        let op = DropConnectorOp {
-            ids: vec![id],
-        };
+        let op = DropConnectorOp { ids: vec![id] };
         op.apply(&bundle).await.expect("apply");
 
         assert!(!bundle.connector_registry().read().has_entry("acme.weather"));
@@ -194,20 +204,26 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id1 = ObjectId::generate();
         let id2 = ObjectId::generate();
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id: id1,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::test1").unwrap(),
-            platform: Platform::any(),
-            temporary: false,
-        });
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id: id2,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::test2").unwrap(),
-            platform: "linux/amd64".parse().unwrap(),
-            temporary: false,
-        });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id: id1,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::test1").unwrap(),
+                platform: Platform::any(),
+                temporary: false,
+            });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id: id2,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::test2").unwrap(),
+                platform: "linux/amd64".parse().unwrap(),
+                temporary: false,
+            });
 
         let op = DropConnectorOp {
             ids: vec![id1, id2],
@@ -222,28 +238,36 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id1 = ObjectId::generate();
         let id2 = ObjectId::generate();
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id: id1,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::wildcard").unwrap(),
-            platform: Platform::any(),
-            temporary: false,
-        });
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id: id2,
-            name: NamespacedName::new("acme", "weather"),
-            from: UdfRuntime::parse_from("ffi::linux-specific").unwrap(),
-            platform: "linux/amd64".parse().unwrap(),
-            temporary: false,
-        });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id: id1,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::wildcard").unwrap(),
+                platform: Platform::any(),
+                temporary: false,
+            });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id: id2,
+                name: NamespacedName::new("acme", "weather"),
+                from: UdfRuntime::parse_from("ffi::linux-specific").unwrap(),
+                platform: "linux/amd64".parse().unwrap(),
+                temporary: false,
+            });
 
-        let op = DropConnectorOp {
-            ids: vec![id2],
-        };
+        let op = DropConnectorOp { ids: vec![id2] };
         op.apply(&bundle).await.expect("apply");
 
         // Wildcard entry should remain
-        let resolved = bundle.connector_registry().read().resolve_entry("acme.weather").expect("should resolve");
+        let resolved = bundle
+            .connector_registry()
+            .read()
+            .resolve_entry("acme.weather")
+            .expect("should resolve");
         assert_eq!(resolved.from.to_entrypoint_string(), "wildcard");
     }
 }

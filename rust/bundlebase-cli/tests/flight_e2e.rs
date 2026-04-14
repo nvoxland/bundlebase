@@ -339,7 +339,16 @@ async fn test_star_empty_bundle() {
     // Verify schema has exactly one no_data column (not duplicated)
     if let Some(batch) = batches.first() {
         let schema = batch.schema();
-        assert_eq!(schema.fields().len(), 1, "Empty bundle should have exactly 1 column, got: {:?}", schema.fields().iter().map(|f| f.name().as_str()).collect::<Vec<_>>());
+        assert_eq!(
+            schema.fields().len(),
+            1,
+            "Empty bundle should have exactly 1 column, got: {:?}",
+            schema
+                .fields()
+                .iter()
+                .map(|f| f.name().as_str())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(schema.field(0).name(), "no_data");
     }
 
@@ -409,12 +418,9 @@ async fn test_quoted_alias_qualified_wildcard() {
     data.attach(&mut server).await;
 
     // DBeaver-style double-quoting of identifiers
-    let batches = execute_query(
-        &mut server,
-        r#"SELECT "t".* FROM "bundle" "t""#,
-    )
-    .await
-    .expect(r#"SELECT "t".* FROM "bundle" "t" should succeed"#);
+    let batches = execute_query(&mut server, r#"SELECT "t".* FROM "bundle" "t""#)
+        .await
+        .expect(r#"SELECT "t".* FROM "bundle" "t" should succeed"#);
 
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
@@ -427,12 +433,9 @@ async fn test_fully_qualified_table() {
     data.attach(&mut server).await;
 
     // Fully qualified catalog.schema.table reference
-    let batches = execute_query(
-        &mut server,
-        r#"SELECT * FROM bundlebase."default".bundle"#,
-    )
-    .await
-    .expect("SELECT * FROM bundlebase.default.bundle should succeed");
+    let batches = execute_query(&mut server, r#"SELECT * FROM bundlebase."default".bundle"#)
+        .await
+        .expect("SELECT * FROM bundlebase.default.bundle should succeed");
 
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
@@ -673,13 +676,12 @@ async fn test_query_without_auth() {
 
     // Try to execute a query without authenticating first
     let result = client.execute("SELECT 1".to_string(), None).await;
-    assert!(
-        result.is_err(),
-        "Query without authentication should fail"
-    );
+    assert!(result.is_err(), "Query without authentication should fail");
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("unauthenticated") || err.contains("Authentication required") || err.contains("UNAUTHENTICATED"),
+        err.contains("unauthenticated")
+            || err.contains("Authentication required")
+            || err.contains("UNAUTHENTICATED"),
         "Error should indicate missing auth, got: {}",
         err
     );
@@ -693,8 +695,5 @@ async fn test_fabricated_token_rejected() {
     client.set_token("token-00000000-0000-0000-0000-000000000000".to_string());
 
     let result = client.execute("SELECT 1".to_string(), None).await;
-    assert!(
-        result.is_err(),
-        "Fabricated token should be rejected"
-    );
+    assert!(result.is_err(), "Fabricated token should be rejected");
 }

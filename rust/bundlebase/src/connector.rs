@@ -42,12 +42,12 @@ use std::sync::Arc;
 
 // Re-export connector types from common
 pub use bundlebase_common::connector::{
-    ArgSpec, AttachedFileInfo, Connector, ConnectorSignature, SourceFormat,
-    DiscoveredLocation, FetchAction, FetchResults, FetchedBlock, MaterializedData,
-    SourceData, format_fetch_summary,
+    format_fetch_summary, ArgSpec, AttachedFileInfo, Connector, ConnectorSignature,
+    DiscoveredLocation, FetchAction, FetchResults, FetchedBlock, MaterializedData, SourceData,
+    SourceFormat,
 };
+pub use bundlebase_common::save_as::{ResolvedSaveAs, SaveAs};
 pub use bundlebase_data::attach_format::AttachFormat;
-pub use bundlebase_common::save_as::{SaveAs, ResolvedSaveAs};
 
 /// Validate arguments against a connector signature.
 ///
@@ -112,7 +112,10 @@ impl ConnectorRegistry {
     ///
     /// For `Ipc`, returns a new `IpcConnector` with its own subprocess handle.
     /// For `Internal`, returns a new `FfiConnector`.
-    pub fn create_instance(&self, runtime_type: crate::udf::RuntimeType) -> Option<Arc<dyn Connector>> {
+    pub fn create_instance(
+        &self,
+        runtime_type: crate::udf::RuntimeType,
+    ) -> Option<Arc<dyn Connector>> {
         match runtime_type {
             crate::udf::RuntimeType::External => Some(Arc::new(IpcConnector::new())),
             crate::udf::RuntimeType::Internal => Some(Arc::new(FfiConnector::new())),
@@ -177,7 +180,11 @@ impl ConnectorRegistry {
     }
 
     /// Rename connector entries matching the given IDs to a new name.
-    pub fn rename_entries(&mut self, ids: &[crate::data::ObjectId], new_name: &crate::NamespacedName) {
+    pub fn rename_entries(
+        &mut self,
+        ids: &[crate::data::ObjectId],
+        new_name: &crate::NamespacedName,
+    ) {
         for entry in &mut self.entries {
             if ids.contains(&entry.id) {
                 entry.name = new_name.clone();
@@ -360,7 +367,10 @@ mod tests {
         assert_eq!(SourceFormat::from_extension("tsv"), SourceFormat::Tsv);
         assert_eq!(SourceFormat::from_extension("json"), SourceFormat::Json);
         assert_eq!(SourceFormat::from_extension("jsonl"), SourceFormat::JsonL);
-        assert_eq!(SourceFormat::from_extension("parquet"), SourceFormat::Parquet);
+        assert_eq!(
+            SourceFormat::from_extension("parquet"),
+            SourceFormat::Parquet
+        );
         assert_eq!(SourceFormat::from_extension("xlsx"), SourceFormat::Xlsx);
         assert_eq!(SourceFormat::from_extension("xls"), SourceFormat::Xls);
         assert_eq!(SourceFormat::from_extension("ods"), SourceFormat::Ods);
@@ -381,10 +391,22 @@ mod tests {
     #[test]
     fn test_to_attach_format() {
         use bundlebase_data::attach_format::AttachFormat;
-        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Csv), Some(AttachFormat::Csv));
-        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Tsv), Some(AttachFormat::Tsv));
-        assert_eq!(AttachFormat::from_source_format(&SourceFormat::JsonL), Some(AttachFormat::JsonL));
-        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Parquet), Some(AttachFormat::Parquet));
+        assert_eq!(
+            AttachFormat::from_source_format(&SourceFormat::Csv),
+            Some(AttachFormat::Csv)
+        );
+        assert_eq!(
+            AttachFormat::from_source_format(&SourceFormat::Tsv),
+            Some(AttachFormat::Tsv)
+        );
+        assert_eq!(
+            AttachFormat::from_source_format(&SourceFormat::JsonL),
+            Some(AttachFormat::JsonL)
+        );
+        assert_eq!(
+            AttachFormat::from_source_format(&SourceFormat::Parquet),
+            Some(AttachFormat::Parquet)
+        );
         assert_eq!(AttachFormat::from_source_format(&SourceFormat::Json), None);
         assert_eq!(AttachFormat::from_source_format(&SourceFormat::Xlsx), None);
         assert_eq!(AttachFormat::from_source_format(&SourceFormat::Xls), None);
@@ -414,39 +436,78 @@ mod tests {
     fn test_save_as_resolve_copy_non_attachable_errors() {
         let result = SaveAs::Copy.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
-        assert!(result.err().expect("err").to_string().contains("not valid for format"));
+        assert!(result
+            .err()
+            .expect("err")
+            .to_string()
+            .contains("not valid for format"));
     }
 
     #[test]
     fn test_save_as_resolve_parquet_always_works() {
-        assert_eq!(SaveAs::Parquet.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Parquet.resolve(&SourceFormat::Xlsx, true).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(
+            SaveAs::Parquet
+                .resolve(&SourceFormat::Csv, false)
+                .expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
+        assert_eq!(
+            SaveAs::Parquet
+                .resolve(&SourceFormat::Xlsx, true)
+                .expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
     }
 
     #[test]
     fn test_save_as_resolve_ref_attachable() {
-        assert_eq!(SaveAs::Ref.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
+        assert_eq!(
+            SaveAs::Ref.resolve(&SourceFormat::Csv, false).expect("ok"),
+            ResolvedSaveAs::Ref
+        );
     }
 
     #[test]
     fn test_save_as_resolve_ref_must_copy_errors() {
         let result = SaveAs::Ref.resolve(&SourceFormat::Csv, true);
         assert!(result.is_err());
-        assert!(result.err().expect("err").to_string().contains("requires data to be copied"));
+        assert!(result
+            .err()
+            .expect("err")
+            .to_string()
+            .contains("requires data to be copied"));
     }
 
     #[test]
     fn test_save_as_resolve_ref_non_attachable_errors() {
         let result = SaveAs::Ref.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
-        assert!(result.err().expect("err").to_string().contains("not valid for format"));
+        assert!(result
+            .err()
+            .expect("err")
+            .to_string()
+            .contains("not valid for format"));
     }
 
     #[test]
     fn test_save_as_resolve_auto_always_parquet() {
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, true).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Xlsx, false).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Ods, true).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(
+            SaveAs::Auto.resolve(&SourceFormat::Csv, true).expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
+        assert_eq!(
+            SaveAs::Auto.resolve(&SourceFormat::Csv, false).expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
+        assert_eq!(
+            SaveAs::Auto
+                .resolve(&SourceFormat::Xlsx, false)
+                .expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
+        assert_eq!(
+            SaveAs::Auto.resolve(&SourceFormat::Ods, true).expect("ok"),
+            ResolvedSaveAs::Parquet
+        );
     }
 }

@@ -4,15 +4,15 @@
 //! and represents a single function binding for a name+platform pair.
 //! `resolve_function` picks the best entry for the current platform at runtime.
 
-use bundlebase_common::platform::Platform;
-use crate::runtime::UdfRuntime;
-use bundlebase_common::object_id::ObjectId;
 use crate::bridge::ipc_bridge::SubprocessCache;
 use crate::bridge::version_function::VersionFunction;
-use bundlebase_io::IOReadWriteDir;
-use bundlebase_common::namespaced_name::NamespacedName;
-use bundlebase_common::BundlebaseError;
+use crate::runtime::UdfRuntime;
 use arrow::datatypes::DataType;
+use bundlebase_common::namespaced_name::NamespacedName;
+use bundlebase_common::object_id::ObjectId;
+use bundlebase_common::platform::Platform;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteDir;
 use datafusion::logical_expr::ScalarUDF;
 use datafusion::prelude::SessionContext;
 use parking_lot::RwLock;
@@ -135,7 +135,8 @@ impl FunctionRegistry {
     /// Tries temporary entries first (reverse order, last wins), then persisted entries.
     /// Returns the first entry whose platform matches the current system.
     pub fn resolve(&self, name: &str) -> Result<FunctionEntry, BundlebaseError> {
-        let matching: Vec<&FunctionEntry> = self.entries.iter().filter(|e| e.name == name).collect();
+        let matching: Vec<&FunctionEntry> =
+            self.entries.iter().filter(|e| e.name == name).collect();
 
         if matching.is_empty() {
             return Err(format!("Function '{}' is not defined", name).into());
@@ -211,7 +212,8 @@ impl FunctionRegistry {
     /// If a persistent entry shadows a temporary one (same name), the name is NOT included.
     pub fn temporary_only_names(&self) -> Vec<String> {
         let mut temp_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut persistent_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut persistent_names: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         for entry in &self.entries {
             let name_str = entry.name.to_string();
@@ -222,10 +224,7 @@ impl FunctionRegistry {
             }
         }
 
-        temp_names
-            .difference(&persistent_names)
-            .cloned()
-            .collect()
+        temp_names.difference(&persistent_names).cloned().collect()
     }
 
     /// Resolve all overloads for a name and register them as a composite
@@ -233,10 +232,7 @@ impl FunctionRegistry {
     ///
     /// Uses the registry's `data_dir` to resolve bundle-relative entrypoint paths
     /// and `subprocess_cache` for IPC-based functions.
-    pub fn register_functions_for_name(
-        &self,
-        name: &str,
-    ) -> Result<(), BundlebaseError> {
+    pub fn register_functions_for_name(&self, name: &str) -> Result<(), BundlebaseError> {
         let overloads = self.resolve_all(name);
         if overloads.is_empty() {
             return Ok(());
@@ -258,13 +254,17 @@ impl FunctionRegistry {
         match kind {
             FunctionKind::Scalar => {
                 use crate::bridge::scalar::ScalarFunction;
-                let func = ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
+                let func =
+                    ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
                 self.ctx.register_udf(ScalarUDF::from(func));
             }
             FunctionKind::Aggregate => {
                 use crate::bridge::aggregate::AggregateFunction;
                 use datafusion::logical_expr::AggregateUDF;
-                let agg = AggregateFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
+                let agg = AggregateFunction::new_composite(
+                    overloads,
+                    Arc::clone(&self.subprocess_cache),
+                )?;
                 self.ctx.register_udaf(AggregateUDF::from(agg));
             }
             FunctionKind::TableValued => {
@@ -298,10 +298,7 @@ impl FunctionRegistry {
 
     /// Get NamespacedNames for all function entries.
     pub fn names(&self) -> Vec<NamespacedName> {
-        self.entries
-            .iter()
-            .map(|e| e.name.clone())
-            .collect()
+        self.entries.iter().map(|e| e.name.clone()).collect()
     }
 
     /// Resolve all function entries for a name, grouped by input type signature.
@@ -310,7 +307,8 @@ impl FunctionRegistry {
     /// (temporary entries shadow persistent, last wins within each tier).
     /// Returns one entry per distinct signature.
     pub fn resolve_all(&self, name: &str) -> Vec<FunctionEntry> {
-        let matching: Vec<&FunctionEntry> = self.entries.iter().filter(|e| e.name == name).collect();
+        let matching: Vec<&FunctionEntry> =
+            self.entries.iter().filter(|e| e.name == name).collect();
 
         if matching.is_empty() {
             return Vec::new();
@@ -384,17 +382,12 @@ impl FunctionRegistry {
     ///
     /// If `input_types` is `None`, removes all entries for the name (same as `remove_all`).
     /// If `input_types` is `Some(types)`, removes only entries matching that signature.
-    pub fn remove_by_signature(
-        &mut self,
-        name: &str,
-        input_types: Option<&[DataType]>,
-    ) {
+    pub fn remove_by_signature(&mut self, name: &str, input_types: Option<&[DataType]>) {
         match input_types {
             None => self.remove_all(name),
             Some(types) => {
-                self.entries.retain(|e| {
-                    !(e.name == name && e.input_types == types)
-                });
+                self.entries
+                    .retain(|e| !(e.name == name && e.input_types == types));
             }
         }
     }
@@ -409,7 +402,8 @@ impl FunctionRegistry {
 
     /// Look up a function name from a set of entry IDs.
     pub fn name_for_ids(&self, ids: &[ObjectId]) -> Option<String> {
-        self.entries.iter()
+        self.entries
+            .iter()
             .find(|e| ids.contains(&e.id))
             .map(|e| e.name.to_string())
     }
@@ -432,7 +426,8 @@ impl FunctionRegistry {
                     "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
                      All overloads of a function must be the same kind.",
                     name
-                ).into());
+                )
+                .into());
             }
         }
 
@@ -453,7 +448,11 @@ impl FunctionRegistry {
     }
 
     /// Rename function entries by ID, deregister old name, and register under new name.
-    pub fn rename_by_ids(&mut self, ids: &[ObjectId], new_name: &NamespacedName) -> Result<(), BundlebaseError> {
+    pub fn rename_by_ids(
+        &mut self,
+        ids: &[ObjectId],
+        new_name: &NamespacedName,
+    ) -> Result<(), BundlebaseError> {
         if let Some(old_name) = self.name_for_ids(ids) {
             self.deregister(&old_name);
         }
@@ -481,12 +480,16 @@ impl FunctionRegistry {
         new_name: &NamespacedName,
     ) -> Result<(), BundlebaseError> {
         // Validate old name has temporary entries
-        let has_temp = self.entries.iter().any(|e| e.temporary && e.name == old_name);
+        let has_temp = self
+            .entries
+            .iter()
+            .any(|e| e.temporary && e.name == old_name);
         if !has_temp {
             return Err(format!(
                 "No temporary function entries found for '{}'. Use IMPORT TEMP FUNCTION first.",
                 old_name
-            ).into());
+            )
+            .into());
         }
 
         // Check new name doesn't conflict
@@ -495,7 +498,8 @@ impl FunctionRegistry {
             return Err(format!(
                 "Function '{}' already exists. Drop it first or choose a different name.",
                 new_name_str
-            ).into());
+            )
+            .into());
         }
 
         self.deregister(old_name);
@@ -507,10 +511,12 @@ impl FunctionRegistry {
 /// Validate that all entries share the same FunctionKind (scalar or aggregate).
 ///
 /// Returns the consistent kind, or an error if entries mix scalar and aggregate.
-pub fn validate_kind_consistency(entries: &[FunctionEntry]) -> Result<FunctionKind, BundlebaseError> {
-    let first = entries.first().ok_or_else(|| {
-        BundlebaseError::from("No function entries provided for kind validation")
-    })?;
+pub fn validate_kind_consistency(
+    entries: &[FunctionEntry],
+) -> Result<FunctionKind, BundlebaseError> {
+    let first = entries
+        .first()
+        .ok_or_else(|| BundlebaseError::from("No function entries provided for kind validation"))?;
     let expected = first.kind;
     for entry in entries.iter().skip(1) {
         if entry.kind != expected {
@@ -518,7 +524,8 @@ pub fn validate_kind_consistency(entries: &[FunctionEntry]) -> Result<FunctionKi
                 "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
                  All overloads of a function must be the same kind.",
                 first.name
-            ).into());
+            )
+            .into());
         }
     }
     Ok(expected)
@@ -579,14 +586,20 @@ mod tests {
     fn test_parse_function_name_no_dot() {
         let result = parse_function_name("weather");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be in format 'namespace.name'"));
     }
 
     #[test]
     fn test_parse_function_name_multi_level() {
         let result = parse_function_name("acme.datasources.weather");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces are not supported"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Multi-level namespaces are not supported"));
     }
 
     #[test]
@@ -688,7 +701,10 @@ mod tests {
 
         let result = reg.resolve("test.func");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No function entrypoint matches"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No function entrypoint matches"));
     }
 
     #[test]
@@ -730,10 +746,13 @@ mod tests {
         reg.add(make_entry("acme.func1", "a", false));
         reg.add(make_entry("other.func2", "b", false));
         let names = reg.names();
-        assert_eq!(names, vec![
-            NamespacedName::new("acme", "func1"),
-            NamespacedName::new("other", "func2"),
-        ]);
+        assert_eq!(
+            names,
+            vec![
+                NamespacedName::new("acme", "func1"),
+                NamespacedName::new("other", "func2"),
+            ]
+        );
     }
 
     // ==================== serde roundtrip tests ====================
@@ -791,10 +810,22 @@ mod tests {
 
     #[test]
     fn test_function_kind_from_str() {
-        assert_eq!("scalar".parse::<FunctionKind>().unwrap(), FunctionKind::Scalar);
-        assert_eq!("aggregate".parse::<FunctionKind>().unwrap(), FunctionKind::Aggregate);
-        assert_eq!("Scalar".parse::<FunctionKind>().unwrap(), FunctionKind::Scalar);
-        assert_eq!("AGGREGATE".parse::<FunctionKind>().unwrap(), FunctionKind::Aggregate);
+        assert_eq!(
+            "scalar".parse::<FunctionKind>().unwrap(),
+            FunctionKind::Scalar
+        );
+        assert_eq!(
+            "aggregate".parse::<FunctionKind>().unwrap(),
+            FunctionKind::Aggregate
+        );
+        assert_eq!(
+            "Scalar".parse::<FunctionKind>().unwrap(),
+            FunctionKind::Scalar
+        );
+        assert_eq!(
+            "AGGREGATE".parse::<FunctionKind>().unwrap(),
+            FunctionKind::Aggregate
+        );
         assert!("unknown".parse::<FunctionKind>().is_err());
     }
 
@@ -806,7 +837,12 @@ mod tests {
 
     // ==================== resolve_all tests ====================
 
-    fn make_entry_with_types(name: &str, input_types: Vec<DataType>, temporary: bool, entrypoint: &str) -> FunctionEntry {
+    fn make_entry_with_types(
+        name: &str,
+        input_types: Vec<DataType>,
+        temporary: bool,
+        entrypoint: &str,
+    ) -> FunctionEntry {
         let nn = parse_function_name(name).unwrap();
         FunctionEntry {
             id: ObjectId::generate(),
@@ -838,11 +874,24 @@ mod tests {
     #[test]
     fn test_resolve_all_two_overloads() {
         let mut reg = test_registry();
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
-        reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            false,
+            "int_logic",
+        ));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Utf8],
+            false,
+            "str_logic",
+        ));
         let resolved = reg.resolve_all("test.func");
         assert_eq!(resolved.len(), 2);
-        let entrypoints: Vec<String> = resolved.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        let entrypoints: Vec<String> = resolved
+            .iter()
+            .map(|e| e.from.to_entrypoint_string())
+            .collect();
         assert!(entrypoints.contains(&"int_logic".to_string()));
         assert!(entrypoints.contains(&"str_logic".to_string()));
     }
@@ -850,17 +899,38 @@ mod tests {
     #[test]
     fn test_resolve_all_temp_shadows_persistent_per_signature() {
         let mut reg = test_registry();
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "persisted_int"));
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], true, "temp_int"));
-        reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "persisted_str"));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            false,
+            "persisted_int",
+        ));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            true,
+            "temp_int",
+        ));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Utf8],
+            false,
+            "persisted_str",
+        ));
         let resolved = reg.resolve_all("test.func");
         assert_eq!(resolved.len(), 2);
         // The Int64 overload should be the temp one
-        let int_entry = resolved.iter().find(|e| e.input_types == vec![DataType::Int64]).unwrap();
+        let int_entry = resolved
+            .iter()
+            .find(|e| e.input_types == vec![DataType::Int64])
+            .unwrap();
         assert_eq!(int_entry.from.to_entrypoint_string(), "temp_int");
         assert!(int_entry.temporary);
         // The Utf8 overload should be the persistent one
-        let str_entry = resolved.iter().find(|e| e.input_types == vec![DataType::Utf8]).unwrap();
+        let str_entry = resolved
+            .iter()
+            .find(|e| e.input_types == vec![DataType::Utf8])
+            .unwrap();
         assert_eq!(str_entry.from.to_entrypoint_string(), "persisted_str");
     }
 
@@ -907,8 +977,18 @@ mod tests {
     #[test]
     fn test_remove_by_signature_specific() {
         let mut reg = test_registry();
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
-        reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            false,
+            "int_logic",
+        ));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Utf8],
+            false,
+            "str_logic",
+        ));
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));
         assert_eq!(reg.entries().len(), 1);
         assert_eq!(reg.entries()[0].from.to_entrypoint_string(), "str_logic");
@@ -917,8 +997,18 @@ mod tests {
     #[test]
     fn test_remove_by_signature_none_removes_all() {
         let mut reg = test_registry();
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
-        reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            false,
+            "int_logic",
+        ));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Utf8],
+            false,
+            "str_logic",
+        ));
         reg.remove_by_signature("test.func", None);
         assert!(reg.entries().is_empty());
     }
@@ -926,8 +1016,18 @@ mod tests {
     #[test]
     fn test_remove_by_signature_preserves_other_names() {
         let mut reg = test_registry();
-        reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "a"));
-        reg.add(make_entry_with_types("test.other", vec![DataType::Int64], false, "b"));
+        reg.add(make_entry_with_types(
+            "test.func",
+            vec![DataType::Int64],
+            false,
+            "a",
+        ));
+        reg.add(make_entry_with_types(
+            "test.other",
+            vec![DataType::Int64],
+            false,
+            "b",
+        ));
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));
         assert_eq!(reg.entries().len(), 1);
         assert_eq!(reg.entries()[0].name.name, "other");

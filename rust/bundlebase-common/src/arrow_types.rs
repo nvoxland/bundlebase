@@ -201,7 +201,10 @@ mod tests {
     fn test_parse_arrow_type_invalid() {
         let result = parse_arrow_type_name("NotAType");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unknown Arrow type name"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown Arrow type name"));
     }
 
     #[test]
@@ -212,10 +215,14 @@ mod tests {
         assert_eq!(parse_arrow_type_name("utf8").unwrap(), DataType::Utf8);
         assert_eq!(parse_arrow_type_name("BOOLEAN").unwrap(), DataType::Boolean);
         assert_eq!(parse_arrow_type_name("float32").unwrap(), DataType::Float32);
-        assert_eq!(parse_arrow_type_name("LARGEUTF8").unwrap(), DataType::LargeUtf8);
-        assert_eq!(parse_arrow_type_name("timestamp").unwrap(), DataType::Timestamp(
-            arrow::datatypes::TimeUnit::Microsecond, None,
-        ));
+        assert_eq!(
+            parse_arrow_type_name("LARGEUTF8").unwrap(),
+            DataType::LargeUtf8
+        );
+        assert_eq!(
+            parse_arrow_type_name("timestamp").unwrap(),
+            DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None,)
+        );
     }
 
     #[test]
@@ -238,7 +245,10 @@ mod tests {
         assert_eq!(parse_arrow_type_name("date").unwrap(), DataType::Date32);
         assert_eq!(parse_arrow_type_name("bytes").unwrap(), DataType::Binary);
         assert_eq!(parse_arrow_type_name("blob").unwrap(), DataType::Binary);
-        assert_eq!(parse_arrow_type_name("decimal").unwrap(), DataType::Decimal128(38, 10));
+        assert_eq!(
+            parse_arrow_type_name("decimal").unwrap(),
+            DataType::Decimal128(38, 10)
+        );
     }
 
     #[test]
@@ -286,5 +296,4 @@ mod tests {
         );
         assert_eq!(result, DataType::Map(Arc::new(expected_entries), false));
     }
-
 }

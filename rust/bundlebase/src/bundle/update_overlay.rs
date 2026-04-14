@@ -9,9 +9,9 @@
 //! Column naming uses ColumnId (not user-visible name) to survive renames.
 //! Row group metadata contains `block_ref` to identify which block the group belongs to.
 
+use crate::object_id::ColumnId;
 use arrow::array::{ArrayRef, BooleanArray};
 use bundlebase_common::{BundlebaseError, RowId};
-use crate::object_id::ColumnId;
 use bytes::Bytes;
 use datafusion::scalar::ScalarValue;
 use std::collections::HashMap;
@@ -32,9 +32,7 @@ pub struct UpdateOverlay {
 
 impl UpdateOverlay {
     /// Build an UpdateOverlay from the pending updates HashMap (used for in-session flushing).
-    pub fn from_pending(
-        updates: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
-    ) -> Self {
+    pub fn from_pending(updates: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>) -> Self {
         if updates.is_empty() {
             return Self {
                 row_numbers: Vec::new(),
@@ -61,7 +59,8 @@ impl UpdateOverlay {
             let mut is_set: Vec<bool> = Vec::with_capacity(rows.len());
 
             // Determine target type from first non-null value
-            let target_type = rows.iter()
+            let target_type = rows
+                .iter()
                 .find_map(|(_, u)| u.get(&col_id))
                 .map(|v| v.data_type())
                 .unwrap_or(arrow::datatypes::DataType::Null);
@@ -84,7 +83,10 @@ impl UpdateOverlay {
             columns.insert(col_id, (array, mask));
         }
 
-        Self { row_numbers, columns }
+        Self {
+            row_numbers,
+            columns,
+        }
     }
 
     /// Merge multiple overlays into one. Later overlays override earlier ones per-cell.
@@ -131,8 +133,13 @@ impl UpdateOverlay {
         let mut columns = HashMap::new();
         for col_id in all_col_ids {
             // Determine data type from first overlay that has this column
-            let data_type = overlays.iter()
-                .find_map(|ov| ov.columns.get(&col_id).map(|(arr, _)| arr.data_type().clone()))
+            let data_type = overlays
+                .iter()
+                .find_map(|ov| {
+                    ov.columns
+                        .get(&col_id)
+                        .map(|(arr, _)| arr.data_type().clone())
+                })
                 .unwrap_or(arrow::datatypes::DataType::Null);
 
             // Build source array data for MutableArrayData — one per overlay.
@@ -140,7 +147,8 @@ impl UpdateOverlay {
             let null_filler = arrow::array::new_null_array(&data_type, 1);
             let null_filler_data = null_filler.to_data();
 
-            let source_data: Vec<arrow::array::ArrayData> = overlays.iter()
+            let source_data: Vec<arrow::array::ArrayData> = overlays
+                .iter()
                 .map(|ov| match ov.columns.get(&col_id) {
                     Some((arr, _)) => arr.to_data(),
                     None => null_filler_data.clone(),
@@ -148,14 +156,13 @@ impl UpdateOverlay {
                 .collect();
             let source_refs: Vec<&arrow::array::ArrayData> = source_data.iter().collect();
 
-            let mut builder = arrow::array::MutableArrayData::new(
-                source_refs, true, n,
-            );
+            let mut builder = arrow::array::MutableArrayData::new(source_refs, true, n);
 
             let mut is_set_vec: Vec<bool> = Vec::with_capacity(n);
 
             for &row_num in &row_numbers {
-                if let Some(&(ov_idx, src_pos)) = winners.get(&row_num).and_then(|m| m.get(&col_id)) {
+                if let Some(&(ov_idx, src_pos)) = winners.get(&row_num).and_then(|m| m.get(&col_id))
+                {
                     builder.extend(ov_idx, src_pos, src_pos + 1);
                     is_set_vec.push(true);
                 } else {
@@ -169,7 +176,10 @@ impl UpdateOverlay {
             columns.insert(col_id, (array, mask));
         }
 
-        Self { row_numbers, columns }
+        Self {
+            row_numbers,
+            columns,
+        }
     }
 }
 
@@ -194,10 +204,13 @@ pub fn write_overlay_parquet(
     }
 
     // Group by block_ref
-    let mut by_block: std::collections::BTreeMap<u16, Vec<(&RowId, &HashMap<ColumnId, ScalarValue>)>> =
-        std::collections::BTreeMap::new();
+    let mut by_block: std::collections::BTreeMap<
+        u16,
+        Vec<(&RowId, &HashMap<ColumnId, ScalarValue>)>,
+    > = std::collections::BTreeMap::new();
     for (row_id, cell_updates) in pending {
-        by_block.entry(row_id.block_ref().as_u16())
+        by_block
+            .entry(row_id.block_ref().as_u16())
             .or_default()
             .push((row_id, cell_updates));
     }
@@ -221,7 +234,8 @@ pub fn write_overlay_parquet(
     // Build schema: _row_number + data columns + _updated_mask
     let mut fields = vec![Field::new(ROW_NUMBER_COL, DataType::UInt32, false)];
     for col_id in &all_col_ids {
-        let dt = column_types.get(col_id)
+        let dt = column_types
+            .get(col_id)
             .ok_or_else(|| BundlebaseError::from(format!("Missing type for column {}", col_id)))?;
         fields.push(Field::new(col_id.to_string(), dt.clone(), true));
     }
@@ -232,43 +246,55 @@ pub fn write_overlay_parquet(
     let mut buffer = Vec::new();
     {
         let props = parquet::file::properties::WriterProperties::builder().build();
-        let mut writer = ArrowWriter::try_new(&mut buffer, schema.clone(), Some(props))
-            .map_err(|e| BundlebaseError::from(format!("Failed to create parquet writer: {}", e)))?;
+        let mut writer =
+            ArrowWriter::try_new(&mut buffer, schema.clone(), Some(props)).map_err(|e| {
+                BundlebaseError::from(format!("Failed to create parquet writer: {}", e))
+            })?;
 
         for (block_ref, rows) in &by_block {
             let num_rows = rows.len();
 
             // Build _row_number array
-            let row_number_values: Vec<u32> = rows.iter().map(|(rid, _)| rid.row_number()).collect();
-            let row_number_array: ArrayRef = std::sync::Arc::new(UInt32Array::from(row_number_values));
+            let row_number_values: Vec<u32> =
+                rows.iter().map(|(rid, _)| rid.row_number()).collect();
+            let row_number_array: ArrayRef =
+                std::sync::Arc::new(UInt32Array::from(row_number_values));
 
             // Build data column arrays
             let mask_bytes_len = (all_col_ids.len() + 7) / 8;
             let mut data_arrays: Vec<ArrayRef> = Vec::new();
             for col_id in &all_col_ids {
                 let dt = &column_types[col_id];
-                let typed_null = ScalarValue::try_from(dt)
-                    .map_err(|e| BundlebaseError::from(format!("Cannot create null for type {:?}: {}", dt, e)))?;
-                let scalars: Vec<ScalarValue> = rows.iter().map(|(_, updates)| {
-                    match updates.get(col_id) {
+                let typed_null = ScalarValue::try_from(dt).map_err(|e| {
+                    BundlebaseError::from(format!("Cannot create null for type {:?}: {}", dt, e))
+                })?;
+                let scalars: Vec<ScalarValue> = rows
+                    .iter()
+                    .map(|(_, updates)| match updates.get(col_id) {
                         Some(val) if val.is_null() => Ok(typed_null.clone()),
-                        Some(val) if val.data_type() != *dt => {
-                            val.cast_to(dt)
-                                .map_err(|e| BundlebaseError::from(format!(
-                                    "Failed to cast column {} from {:?} to {:?}: {}",
-                                    col_id, val.data_type(), dt, e
-                                )))
-                        }
+                        Some(val) if val.data_type() != *dt => val.cast_to(dt).map_err(|e| {
+                            BundlebaseError::from(format!(
+                                "Failed to cast column {} from {:?} to {:?}: {}",
+                                col_id,
+                                val.data_type(),
+                                dt,
+                                e
+                            ))
+                        }),
                         Some(val) => Ok(val.clone()),
                         None => Ok(typed_null.clone()),
-                    }
-                }).collect::<Result<Vec<_>, _>>()?;
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let array = if scalars.is_empty() {
                     arrow::array::new_empty_array(dt)
                 } else {
-                    ScalarValue::iter_to_array(scalars.into_iter())
-                        .map_err(|e| BundlebaseError::from(format!("Failed to build array for column {}: {}", col_id, e)))?
+                    ScalarValue::iter_to_array(scalars.into_iter()).map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to build array for column {}: {}",
+                            col_id, e
+                        ))
+                    })?
                 };
                 data_arrays.push(array);
             }
@@ -284,17 +310,21 @@ pub fn write_overlay_parquet(
                 }
                 mask_values.push(mask);
             }
-            let mask_array: ArrayRef = std::sync::Arc::new(
-                BinaryArray::from(mask_values.iter().map(|v| v.as_slice()).collect::<Vec<&[u8]>>())
-            );
+            let mask_array: ArrayRef = std::sync::Arc::new(BinaryArray::from(
+                mask_values
+                    .iter()
+                    .map(|v| v.as_slice())
+                    .collect::<Vec<&[u8]>>(),
+            ));
 
             // Assemble columns
             let mut columns = vec![row_number_array];
             columns.extend(data_arrays);
             columns.push(mask_array);
 
-            let batch = RecordBatch::try_new(schema.clone(), columns)
-                .map_err(|e| BundlebaseError::from(format!("Failed to build overlay batch: {}", e)))?;
+            let batch = RecordBatch::try_new(schema.clone(), columns).map_err(|e| {
+                BundlebaseError::from(format!("Failed to build overlay batch: {}", e))
+            })?;
 
             // Write row group with block_ref metadata
             writer.append_key_value_metadata(parquet::file::metadata::KeyValue::new(
@@ -302,14 +332,17 @@ pub fn write_overlay_parquet(
                 block_ref.to_string(),
             ));
 
-            writer.write(&batch)
-                .map_err(|e| BundlebaseError::from(format!("Failed to write overlay parquet: {}", e)))?;
-            writer.flush()
+            writer.write(&batch).map_err(|e| {
+                BundlebaseError::from(format!("Failed to write overlay parquet: {}", e))
+            })?;
+            writer
+                .flush()
                 .map_err(|e| BundlebaseError::from(format!("Failed to flush row group: {}", e)))?;
         }
 
-        writer.close()
-            .map_err(|e| BundlebaseError::from(format!("Failed to close overlay parquet: {}", e)))?;
+        writer.close().map_err(|e| {
+            BundlebaseError::from(format!("Failed to close overlay parquet: {}", e))
+        })?;
     }
 
     Ok(Bytes::from(buffer))
@@ -334,7 +367,8 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
     let schema = builder.schema().clone();
 
     // Extract block_ref values from file-level key-value metadata
-    let block_refs: Vec<u16> = file_metadata.key_value_metadata()
+    let block_refs: Vec<u16> = file_metadata
+        .key_value_metadata()
         .map(|kvs| {
             kvs.iter()
                 .filter(|kv| kv.key == BLOCK_REF_KEY)
@@ -344,11 +378,15 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         .unwrap_or_default();
 
     // Identify data columns (not _row_number or _updated_mask)
-    let data_col_ids: Vec<(usize, ColumnId)> = schema.fields().iter().enumerate()
+    let data_col_ids: Vec<(usize, ColumnId)> = schema
+        .fields()
+        .iter()
+        .enumerate()
         .filter(|(_, f)| f.name() != ROW_NUMBER_COL && f.name() != MASK_COL)
         .map(|(i, f)| {
-            let col_id = ColumnId::try_from(f.name().as_str())
-                .map_err(|e| BundlebaseError::from(format!("Invalid ColumnId '{}': {}", f.name(), e)));
+            let col_id = ColumnId::try_from(f.name().as_str()).map_err(|e| {
+                BundlebaseError::from(format!("Invalid ColumnId '{}': {}", f.name(), e))
+            });
             (i, col_id)
         })
         .collect::<Vec<_>>()
@@ -356,19 +394,23 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         .map(|(i, r)| Ok((i, r?)))
         .collect::<Result<Vec<_>, BundlebaseError>>()?;
 
-    let row_number_idx = schema.index_of(ROW_NUMBER_COL)
+    let row_number_idx = schema
+        .index_of(ROW_NUMBER_COL)
         .map_err(|e| BundlebaseError::from(format!("Missing _row_number column: {}", e)))?;
-    let mask_idx = schema.index_of(MASK_COL)
+    let mask_idx = schema
+        .index_of(MASK_COL)
         .map_err(|e| BundlebaseError::from(format!("Missing _updated_mask column: {}", e)))?;
 
     let mut results = Vec::with_capacity(num_row_groups);
 
     // Read each row group separately
     for rg_idx in 0..num_row_groups {
-        let block_ref = block_refs.get(rg_idx).copied()
-            .ok_or_else(|| BundlebaseError::from(format!(
-                "Missing block_ref metadata for row group {}", rg_idx
-            )))?;
+        let block_ref = block_refs.get(rg_idx).copied().ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Missing block_ref metadata for row group {}",
+                rg_idx
+            ))
+        })?;
 
         let reader = ParquetRecordBatchReaderBuilder::try_new(parquet_bytes.clone())
             .map_err(|e| BundlebaseError::from(format!("Failed to open overlay parquet: {}", e)))?
@@ -381,15 +423,18 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         let mut all_columns: HashMap<ColumnId, (Vec<ArrayRef>, Vec<BooleanArray>)> = HashMap::new();
 
         for batch_result in reader {
-            let batch = batch_result
-                .map_err(|e| BundlebaseError::from(format!("Failed to read overlay batch: {}", e)))?;
+            let batch = batch_result.map_err(|e| {
+                BundlebaseError::from(format!("Failed to read overlay batch: {}", e))
+            })?;
 
-            let row_number_col = batch.column(row_number_idx)
+            let row_number_col = batch
+                .column(row_number_idx)
                 .as_any()
                 .downcast_ref::<UInt32Array>()
                 .ok_or_else(|| BundlebaseError::from("_row_number column is not UInt32"))?;
 
-            let mask_col = batch.column(mask_idx)
+            let mask_col = batch
+                .column(mask_idx)
                 .as_any()
                 .downcast_ref::<BinaryArray>()
                 .ok_or_else(|| BundlebaseError::from("_updated_mask column is not Binary"))?;
@@ -409,12 +454,15 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
                     let mask_bytes = mask_col.value(row);
                     let byte_idx = data_idx / 8;
                     let bit_idx = data_idx % 8;
-                    let set = byte_idx < mask_bytes.len() && (mask_bytes[byte_idx] & (1 << bit_idx)) != 0;
+                    let set =
+                        byte_idx < mask_bytes.len() && (mask_bytes[byte_idx] & (1 << bit_idx)) != 0;
                     is_set_vec.push(set);
                 }
                 let is_set = BooleanArray::from(is_set_vec);
 
-                let entry = all_columns.entry(*col_id).or_insert_with(|| (Vec::new(), Vec::new()));
+                let entry = all_columns
+                    .entry(*col_id)
+                    .or_insert_with(|| (Vec::new(), Vec::new()));
                 entry.0.push(values_array);
                 entry.1.push(is_set);
             }
@@ -424,28 +472,46 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         let mut columns: HashMap<ColumnId, (ArrayRef, BooleanArray)> = HashMap::new();
         for (col_id, (value_chunks, mask_chunks)) in all_columns {
             let values = if value_chunks.len() == 1 {
-                value_chunks.into_iter().next()
+                value_chunks
+                    .into_iter()
+                    .next()
                     .ok_or_else(|| BundlebaseError::from("Expected single value chunk"))?
             } else {
-                let refs: Vec<&dyn arrow::array::Array> = value_chunks.iter().map(|a| a.as_ref()).collect();
-                arrow::compute::concat(&refs)
-                    .map_err(|e| BundlebaseError::from(format!("Failed to concat overlay arrays: {}", e)))?
+                let refs: Vec<&dyn arrow::array::Array> =
+                    value_chunks.iter().map(|a| a.as_ref()).collect();
+                arrow::compute::concat(&refs).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to concat overlay arrays: {}", e))
+                })?
             };
             let mask = if mask_chunks.len() == 1 {
-                mask_chunks.into_iter().next()
+                mask_chunks
+                    .into_iter()
+                    .next()
                     .ok_or_else(|| BundlebaseError::from("Expected single mask chunk"))?
             } else {
-                let refs: Vec<&dyn arrow::array::Array> = mask_chunks.iter().map(|a| a as &dyn arrow::array::Array).collect();
-                let combined = arrow::compute::concat(&refs)
-                    .map_err(|e| BundlebaseError::from(format!("Failed to concat mask arrays: {}", e)))?;
-                combined.as_any().downcast_ref::<BooleanArray>()
+                let refs: Vec<&dyn arrow::array::Array> = mask_chunks
+                    .iter()
+                    .map(|a| a as &dyn arrow::array::Array)
+                    .collect();
+                let combined = arrow::compute::concat(&refs).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to concat mask arrays: {}", e))
+                })?;
+                combined
+                    .as_any()
+                    .downcast_ref::<BooleanArray>()
                     .ok_or_else(|| BundlebaseError::from("Failed to downcast concatenated mask"))?
                     .clone()
             };
             columns.insert(col_id, (values, mask));
         }
 
-        results.push((block_ref, UpdateOverlay { row_numbers: all_row_numbers, columns }));
+        results.push((
+            block_ref,
+            UpdateOverlay {
+                row_numbers: all_row_numbers,
+                columns,
+            },
+        ));
     }
 
     Ok(results)
@@ -495,7 +561,7 @@ mod tests {
 
         let mut pending = HashMap::new();
         let mut cell = HashMap::new();
-        cell.insert(col_id, ScalarValue::Utf8(None));  // SET TO NULL
+        cell.insert(col_id, ScalarValue::Utf8(None)); // SET TO NULL
         pending.insert(row_id, cell);
 
         let mut column_types = HashMap::new();
@@ -646,10 +712,13 @@ mod tests {
             row_numbers: vec![3],
             columns: {
                 let mut m = HashMap::new();
-                m.insert(col_a, (
-                    Arc::new(arrow::array::Int64Array::from(vec![10])) as ArrayRef,
-                    BooleanArray::from(vec![true]),
-                ));
+                m.insert(
+                    col_a,
+                    (
+                        Arc::new(arrow::array::Int64Array::from(vec![10])) as ArrayRef,
+                        BooleanArray::from(vec![true]),
+                    ),
+                );
                 m
             },
         };
@@ -657,10 +726,13 @@ mod tests {
             row_numbers: vec![3],
             columns: {
                 let mut m = HashMap::new();
-                m.insert(col_b, (
-                    Arc::new(arrow::array::StringArray::from(vec!["hello"])) as ArrayRef,
-                    BooleanArray::from(vec![true]),
-                ));
+                m.insert(
+                    col_b,
+                    (
+                        Arc::new(arrow::array::StringArray::from(vec!["hello"])) as ArrayRef,
+                        BooleanArray::from(vec![true]),
+                    ),
+                );
                 m
             },
         };
@@ -691,10 +763,13 @@ mod tests {
             row_numbers: vec![1, 3],
             columns: {
                 let mut m = HashMap::new();
-                m.insert(col_id, (
-                    Arc::new(arrow::array::Int64Array::from(vec![10, 30])) as ArrayRef,
-                    BooleanArray::from(vec![true, true]),
-                ));
+                m.insert(
+                    col_id,
+                    (
+                        Arc::new(arrow::array::Int64Array::from(vec![10, 30])) as ArrayRef,
+                        BooleanArray::from(vec![true, true]),
+                    ),
+                );
                 m
             },
         };
@@ -702,10 +777,13 @@ mod tests {
             row_numbers: vec![2, 4],
             columns: {
                 let mut m = HashMap::new();
-                m.insert(col_id, (
-                    Arc::new(arrow::array::Int64Array::from(vec![20, 40])) as ArrayRef,
-                    BooleanArray::from(vec![true, true]),
-                ));
+                m.insert(
+                    col_id,
+                    (
+                        Arc::new(arrow::array::Int64Array::from(vec![20, 40])) as ArrayRef,
+                        BooleanArray::from(vec![true, true]),
+                    ),
+                );
                 m
             },
         };
@@ -717,9 +795,21 @@ mod tests {
         for i in 0..4 {
             assert!(is_set.value(i));
         }
-        assert_eq!(ScalarValue::try_from_array(values, 0).expect("r"), ScalarValue::Int64(Some(10)));
-        assert_eq!(ScalarValue::try_from_array(values, 1).expect("r"), ScalarValue::Int64(Some(20)));
-        assert_eq!(ScalarValue::try_from_array(values, 2).expect("r"), ScalarValue::Int64(Some(30)));
-        assert_eq!(ScalarValue::try_from_array(values, 3).expect("r"), ScalarValue::Int64(Some(40)));
+        assert_eq!(
+            ScalarValue::try_from_array(values, 0).expect("r"),
+            ScalarValue::Int64(Some(10))
+        );
+        assert_eq!(
+            ScalarValue::try_from_array(values, 1).expect("r"),
+            ScalarValue::Int64(Some(20))
+        );
+        assert_eq!(
+            ScalarValue::try_from_array(values, 2).expect("r"),
+            ScalarValue::Int64(Some(30))
+        );
+        assert_eq!(
+            ScalarValue::try_from_array(values, 3).expect("r"),
+            ScalarValue::Int64(Some(40))
+        );
     }
 }

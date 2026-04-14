@@ -12,10 +12,7 @@
 //! we borrow a `&RawValue` (zero-copy slice into the input bytes), classify
 //! it by its first byte, and either copy the raw slice into the builder
 //! (numbers, bools, strings with no escapes) or fall back to `serde_json`
-//! for the slow cases (strings with escapes, nested containers). Nested
-//! containers still round-trip through `serde_json::Value` so that the
-//! stringified output matches the historical canonical form (sorted keys,
-//! no whitespace).
+//! for the slow cases (strings with escapes).
 
 use arrow::array::StringBuilder;
 use serde::de::{Deserializer as _, IgnoredAny, MapAccess, Visitor};
@@ -32,12 +29,8 @@ use std::fmt;
 /// - Fields in the schema but missing from the row are appended as empty.
 /// - If the row is not a valid JSON object, no builder is modified and the
 ///   function returns `false`.
-/// - `normalize_nested_json` controls how nested objects/arrays are stored:
-///   `false` (default) preserves the source bytes verbatim; `true`
-///   round-trips through `serde_json::Value` so that object keys come out
-///   sorted and whitespace is stripped. The normalized form is useful for
-///   equality / grouping on stringified containers across heterogeneous
-///   writers, at the cost of ~40% scan throughput.
+/// - Nested objects and arrays are kept as verbatim JSON text from the
+///   source row, preserving key order and whitespace.
 ///
 /// On success all builders have exactly one new value appended. On failure
 /// none do — the partial writes are staged in a scratch buffer first and
@@ -46,7 +39,6 @@ pub fn append_jsonl_row_to_builders(
     line: &[u8],
     name_to_idx: &HashMap<&str, usize>,
     builders: &mut [StringBuilder],
-    normalize_nested_json: bool,
 ) -> bool {
     let mut pending: Vec<(usize, &str)> = Vec::with_capacity(name_to_idx.len());
 
@@ -62,7 +54,7 @@ pub fn append_jsonl_row_to_builders(
     let ncols = builders.len();
     let mut seen = vec![false; ncols];
     for (idx, raw_text) in &pending {
-        append_raw_json_value(&mut builders[*idx], raw_text, normalize_nested_json);
+        append_raw_json_value(&mut builders[*idx], raw_text);
         seen[*idx] = true;
     }
     for (i, filled) in seen.iter().enumerate() {
@@ -112,12 +104,8 @@ where
 /// - `null` → empty string
 /// - `"..."` → unescaped string contents (zero-copy when no `\` present)
 /// - number / bool → raw text verbatim
-/// - object / array →
-///     - when `normalize_nested_json` is false: raw JSON text verbatim
-///       (source key order + whitespace preserved)
-///     - when true: re-serialized via `serde_json::Value` → canonical form
-///       (keys sorted, whitespace stripped)
-fn append_raw_json_value(b: &mut StringBuilder, raw: &str, normalize_nested_json: bool) {
+/// - object / array → raw JSON text verbatim (source key order + whitespace preserved)
+fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
     let bytes = raw.as_bytes();
     match bytes.first() {
         Some(b'"') => {
@@ -133,12 +121,6 @@ fn append_raw_json_value(b: &mut StringBuilder, raw: &str, normalize_nested_json
             }
         }
         Some(b'n') if raw == "null" => b.append_value(""),
-        Some(b'{') | Some(b'[') if normalize_nested_json => {
-            match serde_json::from_str::<serde_json::Value>(raw) {
-                Ok(v) => b.append_value(v.to_string()),
-                Err(_) => b.append_value(raw),
-            }
-        }
         _ => b.append_value(raw),
     }
 }
@@ -148,13 +130,17 @@ mod tests {
     use super::*;
     use arrow::array::Array;
 
-    fn build_with(line: &[u8], cols: &[&str], normalize: bool) -> Vec<String> {
+    fn build(line: &[u8], cols: &[&str]) -> Vec<String> {
         let name_to_idx: HashMap<&str, usize> =
             cols.iter().enumerate().map(|(i, &n)| (n, i)).collect();
         let mut builders: Vec<StringBuilder> =
             (0..cols.len()).map(|_| StringBuilder::new()).collect();
-        let ok = append_jsonl_row_to_builders(line, &name_to_idx, &mut builders, normalize);
-        assert!(ok, "parse failed for: {}", std::str::from_utf8(line).unwrap());
+        let ok = append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
+        assert!(
+            ok,
+            "parse failed for: {}",
+            std::str::from_utf8(line).unwrap()
+        );
         builders
             .iter_mut()
             .map(|b| {
@@ -163,10 +149,6 @@ mod tests {
                 a.value(0).to_string()
             })
             .collect()
-    }
-
-    fn build(line: &[u8], cols: &[&str]) -> Vec<String> {
-        build_with(line, cols, false)
     }
 
     #[test]
@@ -214,18 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn normalize_mode_sorts_keys_and_strips_whitespace() {
-        let row = br#"{"m":{"y": 2, "x": 1},"a":[1, 2, 3]}"#;
-        let out = build_with(row, &["m", "a"], true);
-        assert_eq!(out, vec![r#"{"x":1,"y":2}"#, "[1,2,3]"]);
-    }
-
-    #[test]
     fn malformed_row_is_skipped() {
         let row = br#"{not json"#;
         let name_to_idx: HashMap<&str, usize> = [("a", 0)].into_iter().collect();
         let mut builders = vec![StringBuilder::new()];
-        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders, false);
+        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders);
         assert!(!ok);
         assert_eq!(builders[0].finish().len(), 0);
     }
@@ -234,10 +209,9 @@ mod tests {
     fn partial_parse_error_rolls_back() {
         // Valid start, invalid value — no column should receive a write.
         let row = br#"{"a":"ok","b":not-a-value}"#;
-        let name_to_idx: HashMap<&str, usize> =
-            [("a", 0), ("b", 1)].into_iter().collect();
+        let name_to_idx: HashMap<&str, usize> = [("a", 0), ("b", 1)].into_iter().collect();
         let mut builders = vec![StringBuilder::new(), StringBuilder::new()];
-        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders, false);
+        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders);
         assert!(!ok);
         assert_eq!(builders[0].finish().len(), 0);
         assert_eq!(builders[1].finish().len(), 0);

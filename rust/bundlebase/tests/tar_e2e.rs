@@ -1,15 +1,16 @@
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::Bundle;
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_index::IndexType;
 use tempfile::TempDir;
-use bundlebase_command::BundleBuilderExt;
 
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
-
 
 /// Tests exporting a bundle to tar and reopening it
 #[tokio::test]
@@ -19,7 +20,9 @@ async fn test_export_and_reopen_tar() {
     let tar_path = temp_dir.path().join("test.tar");
 
     // Create bundle in memory
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
@@ -27,10 +30,7 @@ async fn test_export_and_reopen_tar() {
     bundle.commit("Initial data").await.unwrap();
 
     // Export to tar
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Verify tar file exists
     assert!(tar_path.exists(), "Tar file should be created");
@@ -55,22 +55,23 @@ async fn test_commit_to_tar() {
     let tar_path = temp_dir.path().join("appendable.tar");
 
     // Create and export
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Open tar and make changes
     let opened_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
-    let tar_builder = BundleBuilder::extend(opened_bundle.into(), None).await.unwrap();
+    let tar_builder = BundleBuilder::extend(opened_bundle.into(), None)
+        .await
+        .unwrap();
     tar_builder.filter("id > 100", vec![]).await.unwrap();
     tar_builder.commit("v2 - filtered").await.unwrap();
 
@@ -79,7 +80,11 @@ async fn test_commit_to_tar() {
         .await
         .unwrap();
     let reopened_history = reopened.history();
-    assert_eq!(reopened_history.len(), 2, "Should have 2 commits in history");
+    assert_eq!(
+        reopened_history.len(),
+        2,
+        "Should have 2 commits in history"
+    );
     assert_eq!(reopened_history[0].message, "v1");
     assert_eq!(reopened_history[1].message, "v2 - filtered");
 }
@@ -92,16 +97,15 @@ async fn test_multiple_commits_to_tar() {
     let tar_path = temp_dir.path().join("multi_commit.tar");
 
     // Create initial bundle and export
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Make multiple commits to the tar file
     for i in 2..=5 {
@@ -132,9 +136,14 @@ async fn test_tar_preserves_metadata() {
     let tar_path = temp_dir.path().join("metadata.tar");
 
     // Create bundle with metadata
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle.set_name("Test Bundle").await.unwrap();
-    bundle.set_description("A test bundle for tar export").await.unwrap();
+    bundle
+        .set_description("A test bundle for tar export")
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
@@ -142,17 +151,17 @@ async fn test_tar_preserves_metadata() {
     bundle.commit("Initial commit").await.unwrap();
 
     // Export to tar
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Open from tar and verify metadata
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     assert_eq!(tar_bundle.name(), Some("Test Bundle".to_string()));
-    assert_eq!(tar_bundle.description(), Some("A test bundle for tar export".to_string()));
+    assert_eq!(
+        tar_bundle.description(),
+        Some("A test bundle for tar export".to_string())
+    );
 }
 
 /// Tests creating an index in a tar bundle
@@ -163,23 +172,25 @@ async fn test_create_index_in_tar() {
     let tar_path = temp_dir.path().join("with_index.tar");
 
     // Create bundle and export
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Open tar and create index
     let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
-    builder.create_index(&["id"], IndexType::BTree, None).await.unwrap();
+    builder
+        .create_index(&["id"], IndexType::BTree, None)
+        .await
+        .unwrap();
     builder.commit("v2 - added index").await.unwrap();
 
     // Reopen and verify index exists
@@ -202,12 +213,17 @@ async fn test_tar_query_equivalence() {
     let tar_path = temp_dir.path().join("query_test.tar");
 
     // Create and query memory bundle
-    let mem_bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let mem_bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     mem_bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    mem_bundle.filter("SELECT * FROM bundle WHERE id > 100", vec![]).await.unwrap();
+    mem_bundle
+        .filter("SELECT * FROM bundle WHERE id > 100", vec![])
+        .await
+        .unwrap();
     mem_bundle.commit("filtered").await.unwrap();
 
     let mem_count = mem_bundle.bundle().num_rows().await.unwrap();
@@ -224,7 +240,10 @@ async fn test_tar_query_equivalence() {
     let tar_count = tar_bundle.num_rows().await.unwrap();
 
     // Verify same results
-    assert_eq!(mem_count, tar_count, "Tar bundle should return same query results as memory bundle");
+    assert_eq!(
+        mem_count, tar_count,
+        "Tar bundle should return same query results as memory bundle"
+    );
 }
 
 /// Tests exporting from a Bundle (read-only) instance
@@ -236,7 +255,9 @@ async fn test_export_from_bundle() {
     let tar_path = temp_dir.path().join("from_bundle.tar");
 
     // Create and commit a bundle
-    let builder = BundleBuilder::create(memory_url.as_str(), None).await.unwrap();
+    let builder = BundleBuilder::create(memory_url.as_str(), None)
+        .await
+        .unwrap();
     builder
         .attach(test_datafile("userdata.parquet"), None)
         .await
@@ -332,7 +353,9 @@ async fn test_tar_file_listing() {
     let tar_path = temp_dir.path().join("listing.tar");
 
     // Create bundle with data
-    let bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await
@@ -340,10 +363,7 @@ async fn test_tar_file_listing() {
     bundle.commit("v1").await.unwrap();
 
     // Export to tar
-    bundle
-        .export_tar(tar_path.to_str().unwrap())
-        .await
-        .unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
 
     // Open tar and list files
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)

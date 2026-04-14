@@ -100,7 +100,9 @@ impl BundleBuilderCommand for AttachCommand {
             .await?;
         let format = temp_reader.format();
 
-        let op = AttachBlockOp::setup(&pack_id, &self.path, format, None, None, None, builder).await?;
+        let op =
+            AttachBlockOp::setup(&pack_id, &self.path, format, None, None, None, builder, None)
+                .await?;
         builder.apply_operation(op.into()).await?;
 
         // Apply always-delete rules to the newly attached data

@@ -5,9 +5,9 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::ExplainOption;
 use std::sync::Arc;
@@ -150,9 +150,9 @@ impl BundleFacadeCommand for ExplainPlanCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_explain() {
@@ -258,10 +258,7 @@ mod parsing_tests {
                 assert!(c.analyze);
                 assert!(!c.verbose);
                 assert_eq!(c.format.as_deref(), Some("TREE"));
-                assert_eq!(
-                    c.sql.as_deref(),
-                    Some("SELECT * FROM bundle WHERE id > 10")
-                );
+                assert_eq!(c.sql.as_deref(), Some("SELECT * FROM bundle WHERE id > 10"));
             }
             _ => panic!("Expected ExplainPlan variant"),
         }
@@ -315,7 +312,10 @@ mod parsing_tests {
             sql: Some("SELECT * FROM bundle".to_string()),
         };
         let statement = cmd.to_statement();
-        assert_eq!(statement, "EXPLAIN ANALYZE FORMAT TREE SELECT * FROM bundle");
+        assert_eq!(
+            statement,
+            "EXPLAIN ANALYZE FORMAT TREE SELECT * FROM bundle"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
