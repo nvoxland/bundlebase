@@ -213,15 +213,6 @@ impl DataBlock {
         Ok(all_stats.into_iter().nth(idx))
     }
 
-    /// Touch the layout sidecar so that `GLOBAL_LAYOUT_CACHE` is populated for
-    /// this block. Called from `Bundle::open` at open time to pay the cold
-    /// read cost once, up front, instead of on the first filter query. The
-    /// returned value is discarded — we only care about the cache side effect.
-    pub async fn preload_layout(&self) -> Result<(), crate::BundlebaseError> {
-        let _ = self.reader.column_stats().await?;
-        Ok(())
-    }
-
     /// Check that the source file version still matches the version stored
     /// on this block at attach time. Returns `Err(Version mismatch …)` if
     /// the file has changed since the bundle was committed.
@@ -786,6 +777,68 @@ impl TableProvider for DataBlock {
                     }
                     return Ok(Arc::new(datafusion::catalog::memory::DataSourceExec::new(source)));
                 }
+            }
+        }
+
+        // Phase 2.6: Narrow-projection bypass. When the caller wants a strict
+        // subset of columns (common for filter / aggregation queries like
+        // `SELECT type, COUNT(*) FROM bundle WHERE type = 'user'`), bypass
+        // the block cache and push projection through to the reader. The
+        // cache-population path below collects the ENTIRE block (all
+        // columns), which is pure waste when only one column is needed.
+        //
+        // Tradeoff: this query's data isn't cached, so a subsequent query
+        // on the same block re-reads from disk. For narrow queries the
+        // re-read is cheap (projection is pushed all the way down into the
+        // CSV / JSONL row parser), and the warm wide-query case still hits
+        // the cache because SELECT * takes the Phase 3 path below.
+        //
+        // Skipped when overlays exist (they can change per-column data) or
+        // when the block is already cached (hit path below is fast enough).
+        if let Some(proj) = projection {
+            let current_schema = self.schema.read().clone();
+            let narrow = proj.len() < current_schema.fields().len();
+            if narrow && overlays.is_empty() && GLOBAL_BLOCK_CACHE.get(&self.cache_key()).is_none() {
+                log::debug!(
+                    "Block {} using narrow-projection bypass ({} of {} columns)",
+                    self.id,
+                    proj.len(),
+                    current_schema.fields().len()
+                );
+                record_operation(
+                    OperationCategory::Select,
+                    OperationOutcome::Success,
+                    "narrow_projection_bypass",
+                    &[KeyValue::new("block_id", self.id.to_string())],
+                );
+                let inner_source = self.reader
+                    .data_source(projection, &[], limit, None)
+                    .await?;
+                let projected_col_ids: Vec<ColumnId> = proj
+                    .iter()
+                    .filter_map(|&i| self.column_ids.get(i).copied())
+                    .collect();
+                let projected_schema = {
+                    let fields: Vec<_> = proj
+                        .iter()
+                        .filter_map(|&i| current_schema.fields().get(i).cloned())
+                        .collect();
+                    Arc::new(arrow_schema::Schema::new(fields))
+                };
+                let mut source: Arc<dyn datafusion::datasource::source::DataSource> = Arc::new(
+                    crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
+                        inner_source,
+                        projected_schema,
+                        projected_col_ids,
+                    ),
+                );
+                if !deleted.is_empty() {
+                    source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                        source,
+                        Arc::new(deleted),
+                    ));
+                }
+                return Ok(Arc::new(DataSourceExec::new(source)));
             }
         }
 
