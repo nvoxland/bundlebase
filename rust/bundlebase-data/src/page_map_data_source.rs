@@ -338,16 +338,15 @@ impl DataSource for PageMapDataSource {
                             ?
                     }
                     LineOrientedFormat::JsonLines => {
-                        // Same mixed-type handling as parse_bytes_to_batch:
-                        // stringify every JSON value (including nested
-                        // objects/arrays) instead of using Arrow's JSON
-                        // reader which refuses non-scalar values when the
-                        // schema declares Utf8.
-                        let col_names: Vec<String> = schema
+                        // Direct JSONL → StringBuilder extraction, no Value tree.
+                        // See crate::jsonl_row for rationale.
+                        let col_names: Vec<&str> = schema
                             .fields()
                             .iter()
-                            .map(|f| f.name().clone())
+                            .map(|f| f.name().as_str())
                             .collect();
+                        let name_to_idx: std::collections::HashMap<&str, usize> =
+                            col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
                         let mut builders: Vec<arrow::array::StringBuilder> =
                             (0..col_names.len())
                                 .map(|_| arrow::array::StringBuilder::new())
@@ -356,18 +355,11 @@ impl DataSource for PageMapDataSource {
                             if line.is_empty() {
                                 continue;
                             }
-                            let obj: serde_json::Map<String, serde_json::Value> =
-                                match serde_json::from_str(line) {
-                                    Ok(serde_json::Value::Object(m)) => m,
-                                    _ => continue,
-                                };
-                            for (i, name) in col_names.iter().enumerate() {
-                                let val = obj
-                                    .get(name)
-                                    .map(bundlebase_common::source_utils::json_value_to_string)
-                                    .unwrap_or_default();
-                                builders[i].append_value(&val);
-                            }
+                            crate::jsonl_row::append_jsonl_row_to_builders(
+                                line.as_bytes(),
+                                &name_to_idx,
+                                &mut builders,
+                            );
                         }
                         let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
                             .into_iter()
@@ -537,19 +529,19 @@ fn parse_bytes_to_batch(
                 ?
         }
         LineOrientedFormat::JsonLines => {
-            // Match JsonlDataReader::data_source: parse each line with
-            // serde_json and stringify every value (including nested
-            // objects/arrays) via json_value_to_string. Arrow's own
-            // JsonReaderBuilder errors out when a field expected to be
-            // Utf8 arrives as a JSON object/array (common in Claude
-            // transcripts where e.g. `message` is sometimes a string,
-            // sometimes a structured `{type, text, ...}` object).
+            // Direct JSONL → StringBuilder extraction, no Value tree.
+            // Arrow's own JsonReaderBuilder errors out when a field expected
+            // to be Utf8 arrives as a JSON object/array (common in Claude
+            // transcripts where e.g. `message` is sometimes a string, sometimes
+            // a structured `{type, text, ...}` object). See crate::jsonl_row.
             let _ = cursor;
-            let col_names: Vec<String> = schema
+            let col_names: Vec<&str> = schema
                 .fields()
                 .iter()
-                .map(|f| f.name().clone())
+                .map(|f| f.name().as_str())
                 .collect();
+            let name_to_idx: std::collections::HashMap<&str, usize> =
+                col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
             let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
                 .map(|_| arrow::array::StringBuilder::new())
                 .collect();
@@ -562,18 +554,11 @@ fn parse_bytes_to_batch(
                 if line.is_empty() {
                     continue;
                 }
-                let obj: serde_json::Map<String, serde_json::Value> =
-                    match serde_json::from_slice(line) {
-                        Ok(serde_json::Value::Object(m)) => m,
-                        _ => continue,
-                    };
-                for (i, name) in col_names.iter().enumerate() {
-                    let val = obj
-                        .get(name)
-                        .map(bundlebase_common::source_utils::json_value_to_string)
-                        .unwrap_or_default();
-                    builders[i].append_value(&val);
-                }
+                crate::jsonl_row::append_jsonl_row_to_builders(
+                    line,
+                    &name_to_idx,
+                    &mut builders,
+                );
             }
             let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
                 .into_iter()

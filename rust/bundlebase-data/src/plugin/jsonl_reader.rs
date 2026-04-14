@@ -208,7 +208,10 @@ impl DataReader for JsonlReader {
         let bytes = result.bytes().await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-        let col_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
+        let col_names: Vec<&str> =
+            schema.fields().iter().map(|f| f.name().as_str()).collect();
+        let name_to_idx: std::collections::HashMap<&str, usize> =
+            col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
         let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
             .map(|_| arrow::array::StringBuilder::new())
             .collect();
@@ -216,16 +219,7 @@ impl DataReader for JsonlReader {
         for line in bytes.split(|&b| b == b'\n') {
             let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
             if line.is_empty() { continue; }
-            let obj: serde_json::Map<String, serde_json::Value> = match serde_json::from_slice(line) {
-                Ok(serde_json::Value::Object(m)) => m,
-                _ => continue,
-            };
-            for (i, name) in col_names.iter().enumerate() {
-                let val = obj.get(name)
-                    .map(bundlebase_common::source_utils::json_value_to_string)
-                    .unwrap_or_default();
-                builders[i].append_value(&val);
-            }
+            crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
         }
 
         let arrays: Vec<Arc<dyn arrow::array::Array>> = builders

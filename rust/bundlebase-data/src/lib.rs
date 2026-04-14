@@ -2,6 +2,7 @@
 
 pub mod attach_format;
 pub mod column_stats_builder;
+mod jsonl_row;
 pub mod page_filter;
 pub mod plugin;
 pub mod reader_factory;
