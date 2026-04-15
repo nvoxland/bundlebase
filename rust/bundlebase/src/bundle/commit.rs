@@ -702,21 +702,21 @@ changes:
         let yaml = r#"author: test-user
 message: Attach data
 timestamp: '2024-01-01T00:00:00Z'
-    changes:
-    - id: 12345678-1234-1234-1234-123456789012
-      description: Attach block
-      operations:
-      - type: attachBlock
-        pack: '000000000000003b'
-        location: memory:///test_data/userdata.parquet
-        format: parquet
-        version: test-version
-        hash: 0000000000000000000000000000000000000000000000000000000000000000
-        id: '000000000000002a'
-        numRows: 100
-        bytes: 1000
-        schema: ab/cd0000000000.block.schema.yaml
-        columnIds: ab/cd0000000000.block.columns.yaml
+changes:
+- id: 12345678-1234-1234-1234-123456789012
+  description: Attach block
+  operations:
+  - type: attachBlock
+    pack: '000000000000003b'
+    location: memory:///test_data/userdata.parquet
+    format: parquet
+    version: test-version
+    hash: 0000000000000000000000000000000000000000000000000000000000000000
+    id: '000000000000002a'
+    numRows: 100
+    bytes: 1000
+    schema: ab/cd0000000000.block.schema.yaml
+    columnIds: ab/cd0000000000.block.columns.yaml
 "#;
         let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
@@ -738,21 +738,21 @@ timestamp: '2024-01-01T00:00:00Z'
         let yaml = r#"author: nvoxland
 message: First commit
 timestamp: 2025-11-26T16:20:18Z
-    changes:
-    - id: 12345678-1234-1234-1234-123456789012
-      description: Attach and transform data
-      operations:
-      - type: attachBlock
-        location: memory:///test_data/userdata.parquet
-        format: parquet
-        version: '2'
-        hash: 0000000000000000000000000000000000000000000000000000000000000000
-        id: '00000000000000cc'
-        pack: '00000000000000dd'
-        numRows: 1000
-        bytes: 113629
-        schema: ab/cd0000000000.block.schema.yaml
-        columnIds: ab/cd0000000000.block.columns.yaml
+changes:
+- id: 12345678-1234-1234-1234-123456789012
+  description: Attach and transform data
+  operations:
+  - type: attachBlock
+    location: memory:///test_data/userdata.parquet
+    format: parquet
+    version: '2'
+    hash: 0000000000000000000000000000000000000000000000000000000000000000
+    id: '00000000000000cc'
+    pack: '00000000000000dd'
+    numRows: 1000
+    bytes: 113629
+    schema: ab/cd0000000000.block.schema.yaml
+    columnIds: ab/cd0000000000.block.columns.yaml
   - type: dropColumn
     id: '0000000000000aa3'
     name: title
