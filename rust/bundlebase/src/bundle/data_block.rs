@@ -856,7 +856,11 @@ impl TableProvider for DataBlock {
         // when the block is already cached (hit path below is fast enough).
         if let Some(proj) = projection {
             let current_schema = self.schema.read().clone();
-            let narrow = proj.len() < current_schema.fields().len();
+            // A 0-column projection is a COUNT(*) — Phase 0 handles that when
+            // num_rows is known; when it isn't (e.g. after replace_block), the
+            // empty projection must fall through to the full Phase 3 path so
+            // the row count is read from the file.  Treat it as non-narrow.
+            let narrow = !proj.is_empty() && proj.len() < current_schema.fields().len();
             let first_bypass = self
                 .narrow_bypass_count
                 .load(std::sync::atomic::Ordering::Relaxed)

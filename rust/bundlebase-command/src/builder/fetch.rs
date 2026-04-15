@@ -644,6 +644,10 @@ async fn batch_small_ops(
         let write_result = write_merged_parquet(all_batches, data_dir.as_ref()).await?;
         let merged_location = data_dir.relative_path(write_result.file.as_ref())?;
         let merged_hash = write_result.hash;
+        // Read back the object-store version so DataBlock::validate_version()
+        // uses the same scheme (e_tag / sequential counter) that it will see
+        // at query time — not the content hash used to name the file.
+        let merged_version = write_result.file.version().await?;
 
         // Build a column_ids list that matches the *union* schema (one ID per
         // field in the merged parquet). The per-chunk ops may have shorter
@@ -701,6 +705,7 @@ async fn batch_small_ops(
         let merged_op = build_merged_op(
             first_op,
             &merged_location,
+            &merged_version,
             &merged_hash,
             AttachFormat::Parquet,
             &batch_sources,
@@ -770,6 +775,7 @@ fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> 
 fn build_merged_op(
     first_op: &AttachBlockOp,
     merged_location: &str,
+    merged_version: &str,
     merged_hash: &str,
     format: AttachFormat,
     batch_sources: &[BatchedSource],
@@ -795,7 +801,7 @@ fn build_merged_op(
         location: merged_location.to_string(),
         format,
         read_options: None,
-        version: merged_hash.to_string(),
+        version: merged_version.to_string(),
         hash: merged_hash.to_string(),
         source_info: merged_source_info,
         layout: None,
