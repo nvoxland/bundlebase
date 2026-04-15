@@ -64,7 +64,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 object_store = { version = "0.13", features = ["aws", "gcp", "azure"] }
 parquet = "58"
 libloading = "0.8"
-sha2 = { version = "0.10", features = ["asm-aarch64"] }
+sha2 = { version = "0.10" }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 serial_test = "3.3"
 rand = "0.9"

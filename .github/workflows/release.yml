@@ -123,6 +123,8 @@ jobs:
 
       - name: Build CLI binary
         if: matrix.python-version == '3.13'
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo build --release -p bundlebase-cli
 
       - name: Package CLI binary
@@ -178,6 +180,8 @@ jobs:
 
       - name: Build CLI binary
         if: matrix.python-version == '3.13'
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo build --release -p bundlebase-cli
 
       - name: Package CLI binary
@@ -232,6 +236,8 @@ jobs:
 
       - name: Build CLI binary
         if: matrix.python-version == '3.13'
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo build --release -p bundlebase-cli
 
       - name: Package CLI binary
