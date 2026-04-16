@@ -1,6 +1,6 @@
 //! Test utilities for the connector crate.
 
-use bundlebase_common::{BundlebaseError, ConfigProvider, ConfigKey, Scope};
+use bundlebase_common::{BundlebaseError, ConfigKey, ConfigProvider, Scope};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,21 +12,21 @@ pub struct TestConfigProvider {
 
 impl TestConfigProvider {
     pub fn new() -> Self {
-        Self { values: RwLock::new(HashMap::new()) }
+        Self {
+            values: RwLock::new(HashMap::new()),
+        }
     }
 
     /// Set a value for a scope+key pair.
     pub fn set(&self, scope: &str, key: &str, value: &str) {
-        self.values.write().insert((scope.to_string(), key.to_string()), value.to_string());
+        self.values
+            .write()
+            .insert((scope.to_string(), key.to_string()), value.to_string());
     }
 }
 
 impl ConfigProvider for TestConfigProvider {
-    fn get(
-        &self,
-        scope: &Scope,
-        key: &ConfigKey,
-    ) -> Result<Option<String>, BundlebaseError> {
+    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
         let values = self.values.read();
         if let Some(v) = values.get(&(scope.as_str().to_string(), key.key.to_string())) {
             return Ok(Some(v.clone()));

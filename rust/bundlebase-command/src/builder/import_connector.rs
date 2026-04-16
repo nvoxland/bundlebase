@@ -1,16 +1,17 @@
 //! ImportConnector command implementation.
 
 use crate::parser::extract_identifier;
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
+use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::ImportConnectorOp;
+use bundlebase::BundleBuilder;
+use bundlebase::BundleFacade;
+use bundlebase_connector::plugin::ffi::verify_shared_lib_connector;
+use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
 use bundlebase_udf::runtime::UdfRuntime;
-use bundlebase::bundle::operation::ImportConnectorOp;
-use bundlebase::BundleFacade;
-use bundlebase_common::BundlebaseError;
 use std::collections::HashMap;
-use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
 
 /// Command to define a named connector.
 ///
@@ -27,11 +28,7 @@ pub struct ImportConnectorCommand {
 }
 
 impl ImportConnectorCommand {
-    pub fn new(
-        name: impl Into<String>,
-        from: impl Into<String>,
-        platform: Platform,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, from: impl Into<String>, platform: Platform) -> Self {
         Self {
             name: name.into(),
             from: from.into(),
@@ -88,9 +85,8 @@ impl CommandParsing for ImportConnectorCommand {
             "IMPORT CONNECTOR missing connector name".into()
         })?;
 
-        let from = from.ok_or_else(|| -> BundlebaseError {
-            "IMPORT CONNECTOR missing FROM clause".into()
-        })?;
+        let from = from
+            .ok_or_else(|| -> BundlebaseError { "IMPORT CONNECTOR missing FROM clause".into() })?;
 
         let platform: Platform = match args.remove("platform") {
             Some(s) => s.parse()?,
@@ -103,7 +99,10 @@ impl CommandParsing for ImportConnectorCommand {
     fn to_statement(&self) -> String {
         let mut with_parts = Vec::new();
         if self.platform != Platform::any() {
-            with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
+            with_parts.push(format!(
+                "platform = {}",
+                escape_string(&self.platform.to_string())
+            ));
         }
 
         if with_parts.is_empty() {
@@ -131,20 +130,28 @@ impl BundleBuilderCommand for ImportConnectorCommand {
 
         // Persistent connectors cannot use runtimes that can't be bundled
         if !from.can_bundle() {
-            return Err(format!("'{}' runtime cannot be bundled — use import_temp_connector instead", from.runtime_name()).into());
+            return Err(format!(
+                "'{}' runtime cannot be bundled — use import_temp_connector instead",
+                from.runtime_name()
+            )
+            .into());
         }
 
         // Copy referenced file into the bundle's data directory
         let bundled_from = from.copy_into_bundle(&builder.data_dir()).await?;
 
         // Verify the bundled copy works from its new location
-        bundled_from.verify_bundled_connector(&builder.data_dir()).await?;
+        let resolved = bundled_from.resolve_path(&builder.data_dir());
+        if resolved.runtime_name() == "ffi" {
+            let path = resolved.file_path().ok_or_else(|| -> BundlebaseError {
+                "FFI connector verification requires a shared library path".into()
+            })?;
+            verify_shared_lib_connector(path)?;
+        } else {
+            resolved.verify_bundled_connector(&builder.data_dir()).await?;
+        }
 
-        let op = ImportConnectorOp::new(
-            self.name.clone(),
-            bundled_from,
-            self.platform.clone(),
-        );
+        let op = ImportConnectorOp::new(self.name.clone(), bundled_from, self.platform.clone());
         builder.apply_operation(op.into()).await?;
 
         Ok(format!("Loaded connector: {}", self.name))
@@ -154,10 +161,10 @@ impl BundleBuilderCommand for ImportConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
-    use bundlebase_common::Platform;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
+    use bundlebase_common::Platform;
 
     #[test]
     fn test_parse_import_connector() {
@@ -175,7 +182,8 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_connector_with_platform() {
-        let input = "IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so' WITH (platform = 'linux/amd64')";
+        let input =
+            "IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so' WITH (platform = 'linux/amd64')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::ImportConnector(c) => {
@@ -207,7 +215,10 @@ mod parsing_tests {
             Platform::any(),
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT CONNECTOR acme.weather FROM 'ffi::/usr/lib/weather.so'");
+        assert_eq!(
+            statement,
+            "IMPORT CONNECTOR acme.weather FROM 'ffi::/usr/lib/weather.so'"
+        );
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::ImportConnector(c) => {

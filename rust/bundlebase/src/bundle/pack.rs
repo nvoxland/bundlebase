@@ -1,11 +1,11 @@
 use super::data_block::DataBlock;
 
+use crate::bundle::sql::BASE_PACK_NAME;
 use crate::io::{BlockId, ObjectId};
 use datafusion::common::JoinType;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::bundle::sql::BASE_PACK_NAME;
 
 /// A pack holds blocks of data and optionally describes a join to the base pack.
 ///

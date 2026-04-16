@@ -11,11 +11,11 @@
 pub mod btree_index;
 mod external_sort;
 mod filter_analyzer;
-mod index_definition;
-mod index_trait;
-pub mod index_scan_exec;
 mod index_cache;
+mod index_definition;
+pub mod index_scan_exec;
 mod index_selector;
+mod index_trait;
 mod temp_dir;
 pub mod text_column_index;
 
@@ -25,9 +25,11 @@ pub(crate) mod test_utils;
 pub use btree_index::{BTreeIndex, IndexedValue};
 pub use external_sort::{ExternalSortConfig, ExternalSortWriter, DEFAULT_MEMORY_LIMIT_BYTES};
 pub use filter_analyzer::{FilterAnalyzer, IndexPredicate, IndexableFilter};
-pub use index_definition::{IndexDefinition, IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};
+pub use index_cache::GLOBAL_INDEX_CACHE;
+pub use index_definition::{
+    IndexDefinition, IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig,
+};
 pub use index_selector::IndexSelector;
 pub use index_trait::Index;
-pub use index_cache::GLOBAL_INDEX_CACHE;
 pub use temp_dir::TempDirManager;
 pub use text_column_index::{TextIndex, TextIndexBuilder};

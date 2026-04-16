@@ -24,9 +24,7 @@ pub use pest_parser::{
     BundlebaseParser, Rule,
 };
 
-use crate::{
-    parse_from_rule, BundleCommand, CommandParsing, FetchAllCommand, FetchCommand,
-};
+use crate::{parse_from_rule, BundleCommand, CommandParsing, FetchAllCommand, FetchCommand};
 use bundlebase_common::BundlebaseError;
 use pest::Parser;
 
@@ -98,17 +96,17 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
                     inner_stmt,
                 )?))
             } else {
-                Ok(BundleCommand::Fetch(FetchCommand::from_statement(inner_stmt)?))
+                Ok(BundleCommand::Fetch(FetchCommand::from_statement(
+                    inner_stmt,
+                )?))
             }
         }
 
         // All other rules use the centralized parse_from_rule() function
-        _ => {
-            match parse_from_rule(rule, inner_stmt)? {
-                Some(cmd) => Ok(cmd),
-                None => Err("Unexpected statement type".into()),
-            }
-        }
+        _ => match parse_from_rule(rule, inner_stmt)? {
+            Some(cmd) => Ok(cmd),
+            None => Err("Unexpected statement type".into()),
+        },
     }
 }
 
@@ -127,7 +125,11 @@ mod tests {
     #[test]
     fn test_parse_create_view() {
         let cmd = parse_command("CREATE VIEW adults AS SELECT * FROM bundle WHERE age > 21");
-        assert!(cmd.is_ok(), "CREATE VIEW should parse successfully: {:?}", cmd.err());
+        assert!(
+            cmd.is_ok(),
+            "CREATE VIEW should parse successfully: {:?}",
+            cmd.err()
+        );
         let cmd = cmd.unwrap();
         assert!(matches!(cmd, BundleCommand::CreateView(_)));
     }

@@ -61,9 +61,12 @@ impl Operation for UpdateDataOp {
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         let data_dir = bundle.data_dir();
-        let overlay_file = data_dir.file(&self.overlay)
+        let overlay_file = data_dir
+            .file(&self.overlay)
             .map_err(|e| DataFusionError::External(e))?;
-        let bytes = overlay_file.read_bytes().await
+        let bytes = overlay_file
+            .read_bytes()
+            .await
             .map_err(|e| DataFusionError::External(e))?;
 
         let bytes = match bytes {

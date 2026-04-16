@@ -1,11 +1,13 @@
 //! Test utilities for the IO crate.
 
-use crate::{writable_dir_with_store, get_memory_store, IOReadWriteDir, ConfigProvider, BundlebaseError};
+use crate::{
+    get_memory_store, writable_dir_with_store, BundlebaseError, ConfigProvider, IOReadWriteDir,
+};
 use std::sync::Arc;
 use url::Url;
 
-use std::collections::HashMap;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 
 /// A configurable ConfigProvider for tests.
 /// Supports both empty configs and configs with pre-set key/value pairs.
@@ -15,12 +17,16 @@ pub struct TestConfigProvider {
 
 impl TestConfigProvider {
     pub fn new() -> Self {
-        Self { values: RwLock::new(HashMap::new()) }
+        Self {
+            values: RwLock::new(HashMap::new()),
+        }
     }
 
     /// Set a value for a scope+key pair.
     pub fn set(&self, scope: &str, key: &str, value: &str) {
-        self.values.write().insert((scope.to_string(), key.to_string()), value.to_string());
+        self.values
+            .write()
+            .insert((scope.to_string(), key.to_string()), value.to_string());
     }
 }
 
@@ -70,13 +76,20 @@ pub fn random_memory_url() -> Url {
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     let url = random_memory_url();
     let store = get_memory_store();
-    writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), test_config())
-        .expect("memory dir creation should not fail")
+    writable_dir_with_store(
+        &url,
+        store,
+        &object_store::path::Path::from(url.path()),
+        test_config(),
+    )
+    .expect("memory dir creation should not fail")
 }
 
 /// Create a random memory file for testing.
 pub fn random_memory_file(path: &str) -> Box<dyn crate::IOReadWriteFile> {
-    random_memory_dir().writable_file(path).expect("writable file creation should not fail")
+    random_memory_dir()
+        .writable_file(path)
+        .expect("writable file creation should not fail")
 }
 
 /// Create a concrete ObjectStoreDir for tests that need the specific type.

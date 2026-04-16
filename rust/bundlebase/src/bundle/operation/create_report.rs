@@ -28,9 +28,10 @@ impl CreateReportOp {
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let data_dir = builder.bundle().data_dir();
-        let byte_stream = stream::once(async move {
-            Ok::<Bytes, std::io::Error>(Bytes::from(content.into_bytes()))
-        });
+        let byte_stream =
+            stream::once(
+                async move { Ok::<Bytes, std::io::Error>(Bytes::from(content.into_bytes())) },
+            );
         let address = bundlebase_common::ContentAddress::new(
             bundlebase_common::ContentCategory::Report,
             bundlebase_common::ContentFormat::Md,
@@ -49,14 +50,14 @@ impl CreateReportOp {
     }
 
     /// Read the markdown content from the bundle's data directory.
-    async fn read_content(&self, data_dir: &Arc<dyn crate::io::IOReadWriteDir>) -> Result<String, BundlebaseError> {
+    async fn read_content(
+        &self,
+        data_dir: &Arc<dyn crate::io::IOReadWriteDir>,
+    ) -> Result<String, BundlebaseError> {
         let file = data_dir.file(&self.path)?;
-        file.read_str()
-            .await?
-            .ok_or_else(|| BundlebaseError::from(format!(
-                "Report content file not found: {}",
-                self.path
-            )))
+        file.read_str().await?.ok_or_else(|| {
+            BundlebaseError::from(format!("Report content file not found: {}", self.path))
+        })
     }
 }
 
@@ -99,7 +100,10 @@ mod tests {
             description: "desc".into(),
             path: "ab/cdef01234567.report.md".into(),
         };
-        assert_eq!(op.describe(), "CREATE REPORT: Monthly Sales (monthly-sales)");
+        assert_eq!(
+            op.describe(),
+            "CREATE REPORT: Monthly Sales (monthly-sales)"
+        );
     }
 
     #[test]

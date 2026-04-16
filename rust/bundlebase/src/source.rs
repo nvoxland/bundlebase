@@ -43,22 +43,24 @@ impl std::fmt::Display for SyncMode {
     }
 }
 
+pub use crate::connector::plugin::ffi;
 #[cfg(feature = "connector-kaggle")]
 pub use crate::connector::plugin::kaggle::KaggleConnector;
-pub use crate::connector::plugin::ffi;
 #[cfg(feature = "connector-postgres")]
 pub use crate::connector::plugin::PostgresConnector;
 pub use crate::connector::plugin::RemoteDirConnector;
 #[cfg(feature = "connector-web-scrape")]
 pub use crate::connector::plugin::WebScrapeConnector;
 pub use crate::connector::{
-    format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
-    FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, Connector,
-    ConnectorRegistry, ConnectorSignature,
+    format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, Connector,
+    ConnectorRegistry, ConnectorSignature, DiscoveredLocation, FetchAction, FetchResults,
+    FetchedBlock, MaterializedData, SourceData,
 };
 pub use fetch::orchestrate_fetch;
 // Internal helpers used by bundlebase-command's builder. Public so
 // cross-crate callers can reach them, but not part of the documented API —
 // do not depend on these from outside the workspace.
 #[doc(hidden)]
-pub use fetch::{download_to_data_dir, read_parquet_batches, write_merged_jsonl, write_merged_parquet};
+pub use fetch::{
+    download_to_data_dir, read_parquet_batches, write_merged_jsonl, write_merged_parquet,
+};

@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -34,7 +34,9 @@ impl BundlePacksTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.packs)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.packs)".to_string(),
+            )
         })
     }
 

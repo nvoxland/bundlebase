@@ -1,12 +1,12 @@
 //! Drop always-update command implementation.
 
 use crate::builder::update::SetAssignment;
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
-use bundlebase::bundle::BundleFacade;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropAlwaysUpdateOp;
+use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to remove always-update rules.
 #[derive(Debug, Clone)]
@@ -62,7 +62,8 @@ impl CommandParsing for DropAlwaysUpdateCommand {
         }
 
         let rule_text = if !assignments.is_empty() {
-            let set_clause: String = assignments.iter()
+            let set_clause: String = assignments
+                .iter()
                 .map(|a| format!("{} = {}", a.column, a.expression))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -130,7 +131,10 @@ mod parsing_tests {
         let cmd = parse_command(input).expect("Failed to parse");
         match cmd {
             BundleCommand::DropAlwaysUpdate(c) => {
-                assert_eq!(c.rule_text, Some("SET salary = 0 WHERE salary < 0".to_string()));
+                assert_eq!(
+                    c.rule_text,
+                    Some("SET salary = 0 WHERE salary < 0".to_string())
+                );
             }
             _ => panic!("Expected DropAlwaysUpdate variant"),
         }

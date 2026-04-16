@@ -1,12 +1,12 @@
 //! RenameColumn command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::RenameColumnOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to rename a column.
 #[derive(Debug, Clone)]
@@ -69,24 +69,26 @@ impl BundleBuilderCommand for RenameColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let column_id = builder.column_id(&self.old_name)
-            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.old_name)))?;
+        let column_id = builder.column_id(&self.old_name).ok_or_else(|| {
+            BundlebaseError::from(format!("Column '{}' not found", self.old_name))
+        })?;
 
         builder
-            .apply_operation(
-                RenameColumnOp::setup(column_id, &self.new_name).into(),
-            )
+            .apply_operation(RenameColumnOp::setup(column_id, &self.new_name).into())
             .await?;
-        Ok(format!("Renamed column: {} to {}", self.old_name, self.new_name))
+        Ok(format!(
+            "Renamed column: {} to {}",
+            self.old_name, self.new_name
+        ))
     }
 }
 
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rename_column() {
@@ -160,7 +162,10 @@ mod parsing_tests {
     fn test_round_trip_quoted() {
         let cmd = RenameColumnCommand::new("column with spaces", "new.name");
         let statement = cmd.to_statement();
-        assert_eq!(statement, r#"RENAME COLUMN "column with spaces" TO "new.name""#);
+        assert_eq!(
+            statement,
+            r#"RENAME COLUMN "column with spaces" TO "new.name""#
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

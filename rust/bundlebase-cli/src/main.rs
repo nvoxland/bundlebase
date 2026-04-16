@@ -58,7 +58,7 @@ enum Subcommand {
     #[command(name = "serve")]
     Server(cmd::server_cmd::ServerArgs),
 
-    /// Install agent skills for coding agents
+    /// Install local integration for Claude Code and GitHub Copilot
     SetupAgent(cmd::setup_agent_cmd::SetupAgentArgs),
 
     /// Upgrade a bundle's format version to the current bundlebase version

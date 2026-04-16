@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -34,7 +34,9 @@ impl BundleFunctionsTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.functions)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.functions)".to_string(),
+            )
         })
     }
 
@@ -57,38 +59,62 @@ impl BundleFunctionsTable {
 
         // Sort by name then input types for consistent ordering
         entries.sort_by(|a, b| {
-            a.name.to_string().cmp(&b.name.to_string())
-                .then_with(|| {
-                    let a_types: Vec<String> = a.input_types.iter().map(|dt| dt.to_string()).collect();
-                    let b_types: Vec<String> = b.input_types.iter().map(|dt| dt.to_string()).collect();
-                    a_types.join(",").cmp(&b_types.join(","))
-                })
+            a.name.to_string().cmp(&b.name.to_string()).then_with(|| {
+                let a_types: Vec<String> = a.input_types.iter().map(|dt| dt.to_string()).collect();
+                let b_types: Vec<String> = b.input_types.iter().map(|dt| dt.to_string()).collect();
+                a_types.join(",").cmp(&b_types.join(","))
+            })
         });
 
         let ids: Vec<String> = entries.iter().map(|e| e.id.to_string()).collect();
         let names: Vec<String> = entries.iter().map(|e| e.name.to_string()).collect();
         let kinds: Vec<String> = entries.iter().map(|e| e.kind.to_string()).collect();
-        let input_types: Vec<String> = entries.iter().map(|e| {
-            let types: Vec<String> = e.input_types.iter().map(|dt| dt.to_string()).collect();
-            types.join(", ")
-        }).collect();
+        let input_types: Vec<String> = entries
+            .iter()
+            .map(|e| {
+                let types: Vec<String> = e.input_types.iter().map(|dt| dt.to_string()).collect();
+                types.join(", ")
+            })
+            .collect();
         let return_types: Vec<String> = entries.iter().map(|e| e.return_type.to_string()).collect();
-        let runtimes: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let entrypoints: Vec<String> = entries.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        let runtimes: Vec<String> = entries
+            .iter()
+            .map(|e| e.from.runtime_name().to_string())
+            .collect();
+        let entrypoints: Vec<String> = entries
+            .iter()
+            .map(|e| e.from.to_entrypoint_string())
+            .collect();
         let platforms: Vec<String> = entries.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = entries.iter().map(|e| e.temporary).collect();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(names.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(kinds.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(input_types.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(return_types.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(runtimes.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(entrypoints.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(platforms.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(
+                    ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    names.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    kinds.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    input_types.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    return_types.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    runtimes.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    entrypoints.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    platforms.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
                 Arc::new(BooleanArray::from(temporaries)),
             ],
         )?;

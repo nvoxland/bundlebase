@@ -1,27 +1,28 @@
 //! The `setup-agent` subcommand — install agent skills for coding agents.
 
+use bundlebase_cli::agent_skills::AgentTarget;
 use bundlebase_common::BundlebaseError;
-use clap::Args;
+use clap::{Args, ValueEnum};
 
-/// Install agent skills for coding agents (Claude Code, Cursor, Copilot, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SetupAgentScope {
+    Local,
+    Global,
+}
+
+/// Install local agent integration for Claude Code and GitHub Copilot.
 #[derive(Args, Debug)]
 pub struct SetupAgentArgs {
-    /// Scope: local (project-level) or global (user-level ~/.agents/skills/)
-    #[arg(long, default_value = "local")]
-    pub scope: String,
+    /// Scope: local (project-level) or global (Claude-only user-level files)
+    #[arg(long, value_enum, default_value_t = SetupAgentScope::Local)]
+    pub scope: SetupAgentScope,
+
+    /// Target agent: auto-detect from PATH by default, or explicitly choose claude or copilot
+    #[arg(long, value_enum)]
+    pub agent: Option<AgentTarget>,
 }
 
 pub fn run(args: SetupAgentArgs) -> Result<(), BundlebaseError> {
-    let global = match args.scope.as_str() {
-        "local" => false,
-        "global" => true,
-        other => {
-            eprintln!(
-                "Error: Invalid --scope value '{}'. Use 'local' or 'global'.",
-                other
-            );
-            std::process::exit(1);
-        }
-    };
-    bundlebase_cli::agent_skills::install(global)
+    let global = matches!(args.scope, SetupAgentScope::Global);
+    bundlebase_cli::agent_skills::install(global, args.agent)
 }

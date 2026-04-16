@@ -166,7 +166,9 @@ impl CommandParsing for CreateSourceCommand {
                     let value = inner_pair
                         .into_inner()
                         .find(|part| part.as_rule() == Rule::save_as_value)
-                        .ok_or_else(|| BundlebaseError::from("CREATE SOURCE missing SAVE AS value"))?;
+                        .ok_or_else(|| {
+                            BundlebaseError::from("CREATE SOURCE missing SAVE AS value")
+                        })?;
                     save_as = Some(value.as_str().to_lowercase());
                 }
                 Rule::save_as_value => {
@@ -176,7 +178,9 @@ impl CommandParsing for CreateSourceCommand {
                     let value = inner_pair
                         .into_inner()
                         .find(|part| part.as_rule() == Rule::min_batch_value)
-                        .ok_or_else(|| BundlebaseError::from("CREATE SOURCE missing MIN BATCH value"))?;
+                        .ok_or_else(|| {
+                            BundlebaseError::from("CREATE SOURCE missing MIN BATCH value")
+                        })?;
                     min_batch = Some(value.as_str().to_string());
                 }
                 Rule::min_batch_value => {
@@ -376,23 +380,23 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             data.hash.clone(),
                         )
                     };
-                        let op = AttachBlockOp::setup(
-                            &pack_id,
-                            &final_location,
-                            format,
-                            hash.as_deref(),
-                            Some(SourceInfo {
-                                id: source_id,
-                                batch_sources: vec![BatchedSource {
-                                    location: data.source_location,
-                                    version: data.version,
-                                }],
-                            }),
-                            None,
-                            builder,
-                            Some(&shared_ctx),
-                        )
-                        .await?;
+                    let op = AttachBlockOp::setup(
+                        &pack_id,
+                        &final_location,
+                        format,
+                        hash.as_deref(),
+                        Some(SourceInfo {
+                            id: source_id,
+                            batch_sources: vec![BatchedSource {
+                                location: data.source_location,
+                                version: data.version,
+                            }],
+                        }),
+                        None,
+                        builder,
+                        Some(&shared_ctx),
+                    )
+                    .await?;
                     let attach_location = op.location.clone();
                     prepared_ops.push((op, attach_location));
                 }
@@ -564,7 +568,9 @@ mod parsing_tests {
         args.insert("url".to_string(), "s3://bucket/".to_string());
         args.insert("min_batch".to_string(), "1048576".to_string());
         let cmd = CreateSourceCommand::new("remote_dir", args, None);
-        let err = cmd.resolved_min_batch_bytes().expect_err("should reject bytes");
+        let err = cmd
+            .resolved_min_batch_bytes()
+            .expect_err("should reject bytes");
         assert!(err.to_string().contains("MIN BATCH"));
     }
 
@@ -732,12 +738,16 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_min_batch_clause() {
-        let input = "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') MIN BATCH 15M";
+        let input =
+            "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') MIN BATCH 15M";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateSource(c) => {
                 assert_eq!(c.min_batch, Some("15M".to_string()));
-                assert_eq!(c.resolved_min_batch_bytes().unwrap(), Some(15 * 1024 * 1024));
+                assert_eq!(
+                    c.resolved_min_batch_bytes().unwrap(),
+                    Some(15 * 1024 * 1024)
+                );
             }
             _ => panic!("Expected CreateSource variant"),
         }

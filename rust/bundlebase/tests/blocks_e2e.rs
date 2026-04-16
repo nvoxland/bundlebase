@@ -1,11 +1,11 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::AnyOperation;
-use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile};
 use bundlebase::op_field;
-use bundlebase_common::BundlebaseError;
+use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile};
+use bundlebase::AnyOperation;
 use bundlebase::Operation;
 use bundlebase_command::BundleBuilderExt;
+use bundlebase_common::BundlebaseError;
 
 mod common;
 
@@ -13,19 +13,18 @@ fn init() {
     common::init_catalog();
 }
 
-
 #[tokio::test]
 async fn test_adding_blocks() -> Result<(), BundlebaseError> {
     init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     assert_vec_regexp(
-        vec![
-            "ATTACH: memory:///test_data/customers-0-100.csv",
-        ],
+        vec!["ATTACH: memory:///test_data/customers-0-100.csv"],
         bundle
             .status()
             .operations()

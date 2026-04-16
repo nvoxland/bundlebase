@@ -55,10 +55,13 @@ impl LayoutCache {
 
     pub fn get(&self, url: &Url) -> Option<Arc<PageMap>> {
         let result = self.cache.lock().get(url).cloned();
-        LAYOUT_CACHE_OPS.add(1, &[
-            KeyValue::new("cache_name", "layout_cache"),
-            KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
-        ]);
+        LAYOUT_CACHE_OPS.add(
+            1,
+            &[
+                KeyValue::new("cache_name", "layout_cache"),
+                KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
+            ],
+        );
         result
     }
 
@@ -67,11 +70,17 @@ impl LayoutCache {
         let already_present = cache.contains(&url);
         let evicting = cache.len() == cache.cap().get() && !already_present;
         if evicting {
-            LAYOUT_CACHE_OPS.add(1, &[
-                KeyValue::new("cache_name", "layout_cache"),
-                KeyValue::new("result", "eviction"),
-            ]);
-            let total_evictions = self.evictions.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            LAYOUT_CACHE_OPS.add(
+                1,
+                &[
+                    KeyValue::new("cache_name", "layout_cache"),
+                    KeyValue::new("result", "eviction"),
+                ],
+            );
+            let total_evictions = self
+                .evictions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
             if total_evictions == 1 || total_evictions.is_power_of_two() {
                 log::warn!(
                     "Layout cache thrashing: {} entries at capacity {}, {} total evictions so far. \
@@ -86,10 +95,13 @@ impl LayoutCache {
             // cached. Count it separately so we can see this specific kind
             // of wasted work — it means a `get()` check was skipped, not
             // that the cache is undersized.
-            LAYOUT_CACHE_OPS.add(1, &[
-                KeyValue::new("cache_name", "layout_cache"),
-                KeyValue::new("result", "replace"),
-            ]);
+            LAYOUT_CACHE_OPS.add(
+                1,
+                &[
+                    KeyValue::new("cache_name", "layout_cache"),
+                    KeyValue::new("result", "replace"),
+                ],
+            );
             let total_replaces = self
                 .replaces
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -170,7 +182,10 @@ lazy_static! {
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(10_000);
 
-        log::debug!("Initializing global layout cache with capacity: {}", capacity);
+        log::debug!(
+            "Initializing global layout cache with capacity: {}",
+            capacity
+        );
         LayoutCache::new(capacity)
     };
 }
@@ -185,8 +200,14 @@ mod tests {
             total_rows,
             file_size: 50000,
             pages: vec![
-                PageGroup { physical_start: 0, row_begin: 0 },
-                PageGroup { physical_start: 25000, row_begin: total_rows as u32 / 2 },
+                PageGroup {
+                    physical_start: 0,
+                    row_begin: 0,
+                },
+                PageGroup {
+                    physical_start: 25000,
+                    row_begin: total_rows as u32 / 2,
+                },
             ],
             column_stats: vec![],
         })

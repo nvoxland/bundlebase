@@ -7,10 +7,10 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase::BUNDLE_INFO_SCHEMA;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{Schema, SchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -35,9 +35,7 @@ macro_rules! show_table_command {
                 Rule::$rule
             }
 
-            fn from_statement(
-                _pair: pest::iterators::Pair<Rule>,
-            ) -> Result<Self, BundlebaseError> {
+            fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
                 Ok($name)
             }
 
@@ -68,12 +66,37 @@ show_table_command!(ShowIndexesCommand, show_indexes_stmt, "indexes", "INDEXES")
 show_table_command!(ShowPacksCommand, show_packs_stmt, "packs", "PACKS");
 show_table_command!(ShowBlocksCommand, show_blocks_stmt, "blocks", "BLOCKS");
 show_table_command!(ShowConfigCommand, show_config_stmt, "config", "CONFIG");
-show_table_command!(ShowCommandsCommand, show_commands_stmt, "commands", "COMMANDS");
-show_table_command!(ShowConnectorsCommand, show_connectors_stmt, "connectors", "CONNECTORS");
-show_table_command!(ShowFunctionsCommand, show_functions_stmt, "functions", "FUNCTIONS");
+show_table_command!(
+    ShowCommandsCommand,
+    show_commands_stmt,
+    "commands",
+    "COMMANDS"
+);
+show_table_command!(
+    ShowConnectorsCommand,
+    show_connectors_stmt,
+    "connectors",
+    "CONNECTORS"
+);
+show_table_command!(
+    ShowFunctionsCommand,
+    show_functions_stmt,
+    "functions",
+    "FUNCTIONS"
+);
 show_table_command!(ShowColumnsCommand, show_columns_stmt, "columns", "COLUMNS");
-show_table_command!(ShowAlwaysDeletesCommand, show_always_deletes_stmt, "always_deletes", "ALWAYS DELETES");
-show_table_command!(ShowAlwaysUpdatesCommand, show_always_updates_stmt, "always_updates", "ALWAYS UPDATES");
+show_table_command!(
+    ShowAlwaysDeletesCommand,
+    show_always_deletes_stmt,
+    "always_deletes",
+    "ALWAYS DELETES"
+);
+show_table_command!(
+    ShowAlwaysUpdatesCommand,
+    show_always_updates_stmt,
+    "always_updates",
+    "ALWAYS UPDATES"
+);
 
 /// SHOW REPORTS — custom command that excludes the content column.
 #[derive(Debug, Clone)]
@@ -94,9 +117,7 @@ impl CommandParsing for ShowReportsCommand {
         Rule::show_reports_stmt
     }
 
-    fn from_statement(
-        _pair: pest::iterators::Pair<Rule>,
-    ) -> Result<Self, BundlebaseError> {
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         Ok(ShowReportsCommand)
     }
 
@@ -185,7 +206,8 @@ mod tests {
             ("SHOW REPORTS", "ShowReports"),
         ];
         for (sql, expected_name) in cases {
-            let cmd = parse_command(sql).unwrap_or_else(|e| panic!("Failed to parse {}: {}", sql, e));
+            let cmd =
+                parse_command(sql).unwrap_or_else(|e| panic!("Failed to parse {}: {}", sql, e));
             let debug = format!("{:?}", cmd);
             assert!(
                 debug.starts_with(expected_name),

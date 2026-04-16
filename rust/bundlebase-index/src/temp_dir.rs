@@ -3,8 +3,8 @@
 //! Provides a unified interface for creating temporary directories that works
 //! with both local and remote storage backends.
 
-use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteDir;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -59,15 +59,15 @@ impl TempDirManager {
         prefix: &str,
     ) -> Result<Self, BundlebaseError> {
         // Create temp subdirectory within data_dir
-        let temp_subdir = data_dir.writable_subdir("temp").map_err(|e| {
-            BundlebaseError::from(format!("Failed to create temp subdir: {}", e))
-        })?;
+        let temp_subdir = data_dir
+            .writable_subdir("temp")
+            .map_err(|e| BundlebaseError::from(format!("Failed to create temp subdir: {}", e)))?;
 
         // Generate unique name with prefix and random suffix
         let unique_name = format!("{}_{:016x}", prefix, rand::random::<u64>());
-        let build_dir = temp_subdir.writable_subdir(&unique_name).map_err(|e| {
-            BundlebaseError::from(format!("Failed to create build dir: {}", e))
-        })?;
+        let build_dir = temp_subdir
+            .writable_subdir(&unique_name)
+            .map_err(|e| BundlebaseError::from(format!("Failed to create build dir: {}", e)))?;
 
         // Extract local path from file:// URL
         let url = build_dir.url();

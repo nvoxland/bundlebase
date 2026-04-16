@@ -1,6 +1,6 @@
-use std::sync::{Arc, Once};
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
+use std::sync::{Arc, Once};
 
 static INIT: Once = Once::new();
 
@@ -48,7 +48,11 @@ pub async fn latest_commit(
     match last_file {
         None => Ok(None),
         Some(file) => {
-            let io_file = readable_file_from_url(&file.url, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
+            let io_file = readable_file_from_url(
+                &file.url,
+                Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
+            )
+            .await?;
             let yaml = io_file.read_str().await?;
             Ok(yaml.map(|content| {
                 (

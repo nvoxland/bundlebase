@@ -106,7 +106,11 @@ mod tests {
     use std::sync::Arc;
 
     fn create_single_value_stream() -> SendableRecordBatchStream {
-        let schema = Arc::new(Schema::new(vec![Field::new("message", DataType::Utf8, false)]));
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "message",
+            DataType::Utf8,
+            false,
+        )]));
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![Arc::new(StringArray::from(vec!["OK"]))],

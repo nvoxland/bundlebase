@@ -7,12 +7,12 @@
 //! are skipped, so the column reverts to the type it had before that cast.
 
 use crate::parser::extract_identifier;
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AnyOperation, DropCastColumnOp};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 
 /// Command to drop (cancel) the most recent active cast on a column.
 #[derive(Debug, Clone)]
@@ -49,7 +49,8 @@ impl BundleBuilderCommand for DropCastColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let id = builder.column_id(&self.name)
+        let id = builder
+            .column_id(&self.name)
             .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.name)))?;
 
         // Validate that there is at least one active cast to drop by replaying the cast stack.
@@ -86,7 +87,7 @@ mod tests {
     use crate::parser::parse_command;
     use crate::BundleCommand;
     use arrow_schema::DataType;
-    use bundlebase::bundle::operation::{CastColumnOp, resolve_cast_ops};
+    use bundlebase::bundle::operation::{resolve_cast_ops, CastColumnOp};
     use bundlebase_common::object_id::ColumnId;
 
     #[test]
@@ -109,7 +110,9 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = DropCastColumnCommand { name: "value".to_string() };
+        let cmd = DropCastColumnCommand {
+            name: "value".to_string(),
+        };
         let stmt = cmd.to_statement();
         assert_eq!(stmt, r#"DROP CAST COLUMN "value""#);
         let parsed = parse_command(&stmt).unwrap();
@@ -125,9 +128,10 @@ mod tests {
     #[test]
     fn test_resolve_single_cast_active() {
         let id = ColumnId::generate();
-        let ops = vec![
-            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)),
-        ];
+        let ops = vec![AnyOperation::CastColumn(CastColumnOp::setup(
+            id,
+            DataType::Int64,
+        ))];
         let active = resolve_cast_ops(&ops);
         assert_eq!(active, vec![true]);
     }
@@ -141,7 +145,11 @@ mod tests {
             AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),
         ];
         let active = resolve_cast_ops(&ops);
-        assert_eq!(active, vec![false, false], "cast and its drop should both be skipped");
+        assert_eq!(
+            active,
+            vec![false, false],
+            "cast and its drop should both be skipped"
+        );
     }
 
     /// Two casts then one drop: second cast is cancelled, first remains.
@@ -149,13 +157,16 @@ mod tests {
     fn test_resolve_two_casts_one_drop() {
         let id = ColumnId::generate();
         let ops = vec![
-            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)),   // idx 0
+            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)), // idx 0
             AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Float64)), // idx 1
-            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),            // idx 2
+            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),          // idx 2
         ];
         let active = resolve_cast_ops(&ops);
-        assert_eq!(active, vec![true, false, false],
-            "only first cast survives; second cast and drop are cancelled");
+        assert_eq!(
+            active,
+            vec![true, false, false],
+            "only first cast survives; second cast and drop are cancelled"
+        );
     }
 
     /// Two casts then two drops: both casts cancelled, column reverts to original.
@@ -163,14 +174,17 @@ mod tests {
     fn test_resolve_two_casts_two_drops() {
         let id = ColumnId::generate();
         let ops = vec![
-            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)),   // idx 0
+            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)), // idx 0
             AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Float64)), // idx 1
-            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),            // idx 2
-            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),            // idx 3
+            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),          // idx 2
+            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),          // idx 3
         ];
         let active = resolve_cast_ops(&ops);
-        assert_eq!(active, vec![false, false, false, false],
-            "all casts and drops cancelled; column has no active cast");
+        assert_eq!(
+            active,
+            vec![false, false, false, false],
+            "all casts and drops cancelled; column has no active cast"
+        );
     }
 
     /// Cast, drop, cast: first pair cancels, second cast remains.
@@ -178,13 +192,16 @@ mod tests {
     fn test_resolve_cast_drop_cast() {
         let id = ColumnId::generate();
         let ops = vec![
-            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)),   // idx 0
-            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),            // idx 1
+            AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64)), // idx 0
+            AnyOperation::DropCastColumn(DropCastColumnOp::setup(id)),          // idx 1
             AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Float64)), // idx 2
         ];
         let active = resolve_cast_ops(&ops);
-        assert_eq!(active, vec![false, false, true],
-            "first cast and its drop cancel; second cast is the active one");
+        assert_eq!(
+            active,
+            vec![false, false, true],
+            "first cast and its drop cancel; second cast is the active one"
+        );
     }
 
     /// Active cast depth validation: no casts → 0, one cast → 1, cast+drop → 0.
@@ -195,7 +212,10 @@ mod tests {
         let no_casts: Vec<AnyOperation> = vec![];
         assert_eq!(active_cast_depth(&no_casts, id), 0);
 
-        let one_cast = vec![AnyOperation::CastColumn(CastColumnOp::setup(id, DataType::Int64))];
+        let one_cast = vec![AnyOperation::CastColumn(CastColumnOp::setup(
+            id,
+            DataType::Int64,
+        ))];
         assert_eq!(active_cast_depth(&one_cast, id), 1);
 
         let cast_and_drop = vec![

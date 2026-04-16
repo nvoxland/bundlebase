@@ -76,7 +76,11 @@ impl RenameConnectorOp {
 impl Operation for RenameConnectorOp {
     fn describe(&self) -> String {
         let id_strs: Vec<String> = self.ids.iter().map(|id| id.to_string()).collect();
-        format!("RENAME CONNECTOR: {} to '{}'", id_strs.join(", "), self.new_name)
+        format!(
+            "RENAME CONNECTOR: {} to '{}'",
+            id_strs.join(", "),
+            self.new_name
+        )
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {

@@ -4,10 +4,10 @@ use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;
+use datafusion::common::Column;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
-use datafusion::logical_expr::{Expr, expr::Cast};
-use datafusion::common::Column;
+use datafusion::logical_expr::{expr::Cast, Expr};
 use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -21,17 +21,15 @@ pub struct CastColumnOp {
 
 impl CastColumnOp {
     pub fn setup(id: ColumnId, new_type: DataType) -> Self {
-        Self {
-            id,
-            new_type,
-        }
+        Self { id, new_type }
     }
 }
 
 impl Operation for CastColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        bundle.column_name(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
+        bundle.column_name(&self.id).ok_or_else(|| {
+            BundlebaseError::from(format!("Column with ID '{}' not found", self.id))
+        })?;
 
         Ok(())
     }
@@ -63,29 +61,30 @@ impl Operation for CastColumnOp {
             }
         }
 
-        let display_name = bundle_schema.column_name(&self.id).unwrap_or_else(|| self.id.to_string());
+        let display_name = bundle_schema
+            .column_name(&self.id)
+            .unwrap_or_else(|| self.id.to_string());
         let new_type_str = format!("{}", self.new_type);
 
-        df.select(select_exprs)
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("Cast error") || msg.contains("Cannot cast") || msg.contains("invalid digit") {
-                    format!(
-                        "{}. Run 'PROFILE COLUMN \"{}\" FOR CAST TO {}' to see non-castable values.",
-                        msg, display_name, new_type_str
-                    ).into()
-                } else {
-                    Box::new(e) as BundlebaseError
-                }
-            })
+        df.select(select_exprs).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("Cast error")
+                || msg.contains("Cannot cast")
+                || msg.contains("invalid digit")
+            {
+                format!(
+                    "{}. Run 'PROFILE COLUMN \"{}\" FOR CAST TO {}' to see non-castable values.",
+                    msg, display_name, new_type_str
+                )
+                .into()
+            } else {
+                Box::new(e) as BundlebaseError
+            }
+        })
     }
 
     fn describe(&self) -> String {
-        format!(
-            "CAST COLUMN: {} to {}",
-            self.id,
-            self.new_type,
-        )
+        format!("CAST COLUMN: {} to {}", self.id, self.new_type,)
     }
 }
 

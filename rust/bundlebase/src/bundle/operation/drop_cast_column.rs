@@ -1,5 +1,5 @@
-use crate::bundle::operation::Operation;
 use crate::bundle::bundle_schema::BundleSchema;
+use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
@@ -32,8 +32,9 @@ impl DropCastColumnOp {
 
 impl Operation for DropCastColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        bundle.column_name(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
+        bundle.column_name(&self.id).ok_or_else(|| {
+            BundlebaseError::from(format!("Column with ID '{}' not found", self.id))
+        })?;
         Ok(())
     }
 

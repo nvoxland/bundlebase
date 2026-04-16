@@ -40,7 +40,10 @@ impl UpdateVersionOp {
 
 impl Operation for UpdateVersionOp {
     fn describe(&self) -> String {
-        format!("UPDATE VERSION: block {} -> {}", self.block, self.new_version)
+        format!(
+            "UPDATE VERSION: block {} -> {}",
+            self.block, self.new_version
+        )
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -94,7 +97,6 @@ impl Operation for UpdateVersionOp {
     fn allowed_on_view(&self) -> bool {
         false
     }
-
 }
 
 #[cfg(test)]
@@ -112,12 +114,17 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let block_id: BlockId = "00000000000000a5".try_into().expect("Failed to create BlockId");
+        let block_id: BlockId = "00000000000000a5"
+            .try_into()
+            .expect("Failed to create BlockId");
         let op = UpdateVersionOp::setup(block_id, "etag:abc123".to_string());
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("block: 00000000000000a5"));
-        assert!(serialized.contains("newVersion: 'etag:abc123'") || serialized.contains("newVersion: etag:abc123"));
+        assert!(
+            serialized.contains("newVersion: 'etag:abc123'")
+                || serialized.contains("newVersion: etag:abc123")
+        );
     }
 
     #[test]

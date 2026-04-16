@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;

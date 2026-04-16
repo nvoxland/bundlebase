@@ -1,10 +1,10 @@
 //! ImportConnector operation — registers a named connector definition.
 
-use crate::bundle::operation::Operation;
 use crate::bundle::connector_entry::{parse_connector_name, ConnectorEntry};
+use crate::bundle::operation::Operation;
+use crate::data::ObjectId;
 use crate::platform::Platform;
 use crate::udf::UdfRuntime;
-use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
 use datafusion::error::DataFusionError;
@@ -29,7 +29,12 @@ pub struct ImportConnectorOp {
 
 impl ImportConnectorOp {
     pub fn new(name: String, from: UdfRuntime, platform: Platform) -> Self {
-        Self { id: ObjectId::generate(), name, from, platform }
+        Self {
+            id: ObjectId::generate(),
+            name,
+            from,
+            platform,
+        }
     }
 }
 
@@ -37,7 +42,9 @@ impl Operation for ImportConnectorOp {
     fn describe(&self) -> String {
         format!(
             "IMPORT CONNECTOR {} (runtime={}, platform={})",
-            self.name, self.from.runtime_name(), self.platform
+            self.name,
+            self.from.runtime_name(),
+            self.platform
         )
     }
 
@@ -51,20 +58,28 @@ impl Operation for ImportConnectorOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        let namespaced = self.name.parse::<NamespacedName>()
+        let namespaced = self
+            .name
+            .parse::<NamespacedName>()
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         // Warn if overwriting an existing definition
         if bundle.connector_registry().read().has_entry(&self.name) {
-            tracing::warn!("Overwriting existing connector definition for '{}'", self.name);
+            tracing::warn!(
+                "Overwriting existing connector definition for '{}'",
+                self.name
+            );
         }
 
-        bundle.connector_registry().write().add_entry(ConnectorEntry {
-            id: self.id,
-            name: namespaced,
-            from: self.from.clone(),
-            platform: self.platform.clone(),
-            temporary: false,
-        });
+        bundle
+            .connector_registry()
+            .write()
+            .add_entry(ConnectorEntry {
+                id: self.id,
+                name: namespaced,
+                from: self.from.clone(),
+                platform: self.platform.clone(),
+                temporary: false,
+            });
         Ok(())
     }
 }
@@ -109,7 +124,9 @@ mod tests {
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be in format 'namespace.name'"));
     }
-
 }

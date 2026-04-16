@@ -1,9 +1,9 @@
 //! Shared IPC helper functions used by multiple runtime implementations.
 
 use crate::bridge::ipc_bridge::{self, SubprocessCache};
-use bundlebase_common::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
@@ -30,14 +30,13 @@ pub(crate) fn invoke_ipc_scalar_impl(
     // For IPC, we need to extract the actual function name from the display name (namespace.name -> name)
     let func_name = name.rsplit('.').next().unwrap_or(name);
 
-    let result =
-        ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, func_name, &arrays)
-            .map_err(|e| {
-                datafusion::common::DataFusionError::Execution(format!(
-                    "IPC function '{}' ({}) failed: {}",
-                    name, entrypoint, e
-                ))
-            })?;
+    let result = ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, func_name, &arrays)
+        .map_err(|e| {
+            datafusion::common::DataFusionError::Execution(format!(
+                "IPC function '{}' ({}) failed: {}",
+                name, entrypoint, e
+            ))
+        })?;
 
     Ok(ColumnarValue::Array(result))
 }

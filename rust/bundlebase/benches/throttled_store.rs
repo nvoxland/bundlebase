@@ -172,7 +172,8 @@ impl bundlebase_io::IOFactory for ThrottleIOFactory {
         &self,
         url: &url::Url,
         config: Arc<dyn bundlebase_io::ConfigProvider>,
-    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteDir>>, bundlebase_common::BundlebaseError> {
+    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteDir>>, bundlebase_common::BundlebaseError>
+    {
         self.delegate.create_writable_lister(url, config).await
     }
 
@@ -180,7 +181,8 @@ impl bundlebase_io::IOFactory for ThrottleIOFactory {
         &self,
         url: &url::Url,
         config: Arc<dyn bundlebase_io::ConfigProvider>,
-    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteFile>>, bundlebase_common::BundlebaseError> {
+    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteFile>>, bundlebase_common::BundlebaseError>
+    {
         self.delegate.create_writer(url, config).await
     }
 }

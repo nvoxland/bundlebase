@@ -25,11 +25,7 @@ async fn query_collect(facade: &dyn BundleFacade, sql: &str) -> Vec<arrow::array
 /// Helper: run a COUNT query and return the count
 async fn query_count(facade: &dyn BundleFacade, sql: &str) -> i64 {
     let batches = query_collect(facade, sql).await;
-    assert!(
-        !batches.is_empty(),
-        "query `{}` returned no batches",
-        sql
-    );
+    assert!(!batches.is_empty(), "query `{}` returned no batches", sql);
     let col = batches[0]
         .column(0)
         .as_any()

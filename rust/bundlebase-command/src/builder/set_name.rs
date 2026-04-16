@@ -1,11 +1,11 @@
 //! SetName command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
-use bundlebase::bundle::operation::SetNameOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::SetNameOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to set the bundle's name.
 #[derive(Debug, Clone)]
@@ -59,9 +59,9 @@ impl BundleBuilderCommand for SetNameCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_set_name() {

@@ -193,9 +193,11 @@ Runtimes for functions/connectors: `python` (temp/session-only), `ipc`, `ffi`, `
 ### CLI
 
 ```bash
-# Setup AI assistant integration (configures MCP + installs agent skills)
-bundlebase setup-agent              # project-level
-bundlebase setup-agent --scope global  # user-level
+# Setup AI assistant integration
+bundlebase setup-agent                     # auto-detect Claude/Copilot from PATH
+bundlebase setup-agent --agent claude      # Claude Code config + skills
+bundlebase setup-agent --agent copilot     # GitHub Copilot workspace MCP config
+bundlebase setup-agent --scope global      # Claude-only user-level install
 
 # Interactive REPL
 bundlebase repl --bundle ./my-bundle

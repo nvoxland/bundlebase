@@ -19,7 +19,11 @@ pub struct CreateIndexOp {
 }
 
 impl CreateIndexOp {
-    pub async fn setup(column_ids: Vec<ColumnId>, index_type: IndexType, name: String) -> Result<Self, BundlebaseError> {
+    pub async fn setup(
+        column_ids: Vec<ColumnId>,
+        index_type: IndexType,
+        name: String,
+    ) -> Result<Self, BundlebaseError> {
         // For btree indexes, validate exactly one column
         if index_type.is_btree() && column_ids.len() != 1 {
             return Err("BTree indexes must have exactly one column".into());
@@ -39,7 +43,10 @@ impl Operation for CreateIndexOp {
         match &self.index_type {
             IndexType::BTree => format!("CREATE INDEX on column IDs: {:?}", self.column_ids),
             IndexType::Inverted { tokenizer } => {
-                format!("CREATE TEXT INDEX '{}' on column IDs: {:?} (tokenizer: {:?})", self.name, self.column_ids, tokenizer)
+                format!(
+                    "CREATE TEXT INDEX '{}' on column IDs: {:?} (tokenizer: {:?})",
+                    self.name, self.column_ids, tokenizer
+                )
             }
         }
     }
@@ -48,9 +55,14 @@ impl Operation for CreateIndexOp {
         let schema = bundle.schema().await?;
 
         // Resolve column names from IDs
-        let columns: Vec<String> = self.column_ids.iter()
-            .map(|id| bundle.column_name(id)
-                .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", id))))
+        let columns: Vec<String> = self
+            .column_ids
+            .iter()
+            .map(|id| {
+                bundle.column_name(id).ok_or_else(|| {
+                    BundlebaseError::from(format!("Column with ID '{}' not found", id))
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         if self.index_type.is_inverted() {
@@ -67,7 +79,8 @@ impl Operation for CreateIndexOp {
                         return Err(format!(
                             "Text index requires a string column, but '{}' has type {:?}",
                             col, other
-                        ).into());
+                        )
+                        .into());
                     }
                 }
             }
@@ -77,7 +90,8 @@ impl Operation for CreateIndexOp {
                 return Err(format!(
                     "Text index name '{}' conflicts with an existing data column",
                     self.name
-                ).into());
+                )
+                .into());
             }
 
             // Check if a text index with this name already exists
@@ -103,15 +117,12 @@ impl Operation for CreateIndexOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        bundle
-            .indexes
-            .write()
-            .push(Arc::new(IndexDefinition::new(
-                &self.id,
-                self.name.clone(),
-                self.index_type.clone(),
-                self.column_ids.clone(),
-            )));
+        bundle.indexes.write().push(Arc::new(IndexDefinition::new(
+            &self.id,
+            self.name.clone(),
+            self.index_type.clone(),
+            self.column_ids.clone(),
+        )));
 
         Ok(())
     }

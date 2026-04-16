@@ -1,10 +1,10 @@
 //! Verification result types for bundle data integrity checks.
 
 use crate::BundlebaseError;
-use bundlebase_common::command_response::{CommandResponse, OutputShape, single_batch_stream};
-use bundlebase_common::impl_dyn_command_response;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
+use bundlebase_common::impl_dyn_command_response;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -109,18 +109,26 @@ impl CommandResponse for VerificationResults {
         let files = &self.files;
 
         let location: ArrayRef = Arc::new(StringArray::from(
-            files.iter().map(|r| r.location.as_str()).collect::<Vec<_>>(),
+            files
+                .iter()
+                .map(|r| r.location.as_str())
+                .collect::<Vec<_>>(),
         ));
         let file_type: ArrayRef = Arc::new(StringArray::from(
-            files.iter().map(|r| r.file_type.as_str()).collect::<Vec<_>>(),
+            files
+                .iter()
+                .map(|r| r.file_type.as_str())
+                .collect::<Vec<_>>(),
         ));
         let expected_hash: ArrayRef = Arc::new(StringArray::from(
-            files.iter()
+            files
+                .iter()
                 .map(|r| r.expected_hash.as_deref())
                 .collect::<Vec<_>>(),
         ));
         let actual_hash: ArrayRef = Arc::new(StringArray::from(
-            files.iter()
+            files
+                .iter()
                 .map(|r| r.actual_hash.as_deref())
                 .collect::<Vec<_>>(),
         ));

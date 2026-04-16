@@ -112,9 +112,9 @@ impl CsvExportWriter {
 impl ExportWriter for CsvExportWriter {
     fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), BundlebaseError> {
         self.row_count += batch.num_rows();
-        self.writer.write(batch).map_err(|e| {
-            BundlebaseError::from(format!("Failed to write CSV batch: {}", e))
-        })
+        self.writer
+            .write(batch)
+            .map_err(|e| BundlebaseError::from(format!("Failed to write CSV batch: {}", e)))
     }
 
     fn finish(self: Box<Self>) -> Result<usize, BundlebaseError> {
@@ -148,9 +148,9 @@ impl JsonLinesExportWriter {
 impl ExportWriter for JsonLinesExportWriter {
     fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), BundlebaseError> {
         self.row_count += batch.num_rows();
-        self.writer.write(batch).map_err(|e| {
-            BundlebaseError::from(format!("Failed to write JSON Lines batch: {}", e))
-        })
+        self.writer
+            .write(batch)
+            .map_err(|e| BundlebaseError::from(format!("Failed to write JSON Lines batch: {}", e)))
     }
 
     fn finish(mut self: Box<Self>) -> Result<usize, BundlebaseError> {
@@ -189,15 +189,30 @@ mod tests {
 
     #[test]
     fn test_format_from_csv_extension() {
-        assert_eq!(ExportFormat::from_path("output.csv").unwrap(), ExportFormat::Csv);
-        assert_eq!(ExportFormat::from_path("output.CSV").unwrap(), ExportFormat::Csv);
-        assert_eq!(ExportFormat::from_path("/tmp/data.csv").unwrap(), ExportFormat::Csv);
+        assert_eq!(
+            ExportFormat::from_path("output.csv").unwrap(),
+            ExportFormat::Csv
+        );
+        assert_eq!(
+            ExportFormat::from_path("output.CSV").unwrap(),
+            ExportFormat::Csv
+        );
+        assert_eq!(
+            ExportFormat::from_path("/tmp/data.csv").unwrap(),
+            ExportFormat::Csv
+        );
     }
 
     #[test]
     fn test_format_from_jsonl_extension() {
-        assert_eq!(ExportFormat::from_path("output.jsonl").unwrap(), ExportFormat::JsonLines);
-        assert_eq!(ExportFormat::from_path("output.JSONL").unwrap(), ExportFormat::JsonLines);
+        assert_eq!(
+            ExportFormat::from_path("output.jsonl").unwrap(),
+            ExportFormat::JsonLines
+        );
+        assert_eq!(
+            ExportFormat::from_path("output.JSONL").unwrap(),
+            ExportFormat::JsonLines
+        );
     }
 
     #[test]

@@ -1,11 +1,11 @@
 //! DetachBlock command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
-use bundlebase::bundle::operation::DetachBlockOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::DetachBlockOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to detach a data block from the bundle by its location.
 #[derive(Debug, Clone)]
@@ -37,9 +37,8 @@ impl CommandParsing for DetachBlockCommand {
             }
         }
 
-        let location = location.ok_or_else(|| -> BundlebaseError {
-            "DETACH statement missing location".into()
-        })?;
+        let location = location
+            .ok_or_else(|| -> BundlebaseError { "DETACH statement missing location".into() })?;
 
         Ok(DetachBlockCommand::new(location))
     }
@@ -62,9 +61,9 @@ impl BundleBuilderCommand for DetachBlockCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_detach() {

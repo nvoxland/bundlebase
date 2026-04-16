@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -34,7 +34,9 @@ impl BundleIndexesTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.indexes)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.indexes)".to_string(),
+            )
         })
     }
 
@@ -55,12 +57,16 @@ impl BundleIndexesTable {
 
         let ids: Vec<String> = indexes.iter().map(|idx| idx.id().to_string()).collect();
         let names: Vec<&str> = indexes.iter().map(|idx| idx.name()).collect();
-        let columns: Vec<String> = indexes.iter().map(|idx| {
-            idx.column_ids().iter()
-                .filter_map(|id| col_names.get(id).cloned())
-                .collect::<Vec<_>>()
-                .join(", ")
-        }).collect();
+        let columns: Vec<String> = indexes
+            .iter()
+            .map(|idx| {
+                idx.column_ids()
+                    .iter()
+                    .filter_map(|id| col_names.get(id).cloned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .collect();
         let columns: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         let types: Vec<&str> = indexes
             .iter()
@@ -91,10 +97,7 @@ impl BundleIndexesTable {
                 Arc::new(StringArray::from(columns)),
                 Arc::new(StringArray::from(types)),
                 Arc::new(StringArray::from(
-                    tokenizers
-                        .iter()
-                        .map(|t| t.as_deref())
-                        .collect::<Vec<_>>(),
+                    tokenizers.iter().map(|t| t.as_deref()).collect::<Vec<_>>(),
                 )),
             ],
         )?;

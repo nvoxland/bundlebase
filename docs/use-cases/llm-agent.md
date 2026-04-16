@@ -15,12 +15,12 @@ Run this once in your project:
 bundlebase setup-agent
 ```
 
-This configures your AI assistant (Claude Code, Cursor, Copilot, or any MCP-compatible assistant) to use Bundlebase automatically — installs the agent skills and wires up the MCP connection. No manual server management.
+This auto-detects Claude Code and Copilot from your `PATH` and installs the local config it can manage automatically. For Copilot, that now includes both the MCP workspace config and a Bundlebase section in `AGENTS.md`. Use `--agent claude` or `--agent copilot` to target one explicitly.
 
-Use `--scope global` to configure it once for all your projects instead:
+For Claude Code, use `--scope global` to configure it once for all your projects instead:
 
 ```bash
-bundlebase setup-agent --scope global
+bundlebase setup-agent --agent claude --scope global
 ```
 
 After setup, your assistant has these tools available whenever it works with a bundle:

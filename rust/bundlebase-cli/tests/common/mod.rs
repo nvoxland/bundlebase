@@ -5,7 +5,9 @@
 /// Ensure the catalog schema provider hook is installed for tests.
 pub fn init_catalog() {
     static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
 }
 
 use arrow_flight::flight_service_server::FlightServiceServer;
@@ -48,7 +50,10 @@ impl FlightTestServer {
         let builder = BundleBuilder::create(&bundle_path, None)
             .await
             .expect("Failed to create test bundle");
-        builder.commit("Initial commit").await.expect("Failed to commit");
+        builder
+            .commit("Initial commit")
+            .await
+            .expect("Failed to commit");
 
         Self::start_with_bundle_path(&bundle_path).await
     }
@@ -133,19 +138,18 @@ impl FlightTestServer {
         let builder = BundleBuilder::create(&bundle_path, None)
             .await
             .expect("Failed to create test bundle");
-        builder.commit("Initial commit").await.expect("Failed to commit");
+        builder
+            .commit("Initial commit")
+            .await
+            .expect("Failed to commit");
 
         let port = get_available_port();
         let addr: SocketAddr = format!("127.0.0.1:{}", port)
             .parse()
             .expect("Invalid address");
 
-        let flight_service = FlightService::new(
-            bundle_path,
-            None,
-            false,
-            BundlebaseAuthenticator::default(),
-        );
+        let flight_service =
+            FlightService::new(bundle_path, None, false, BundlebaseAuthenticator::default());
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 

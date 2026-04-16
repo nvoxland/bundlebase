@@ -8,7 +8,6 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-
 /// Progress tracker that feeds updates to OpenTelemetry spans
 ///
 /// Creates a new span for each progress operation and updates it with progress events.

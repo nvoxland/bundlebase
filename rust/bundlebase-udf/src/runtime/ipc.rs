@@ -2,13 +2,13 @@
 
 use crate::bridge::ipc_bridge::SubprocessCache;
 use crate::bridge::manifest::Manifest;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::entrypoint::{UdfEntrypoint, RuntimeType, validate_file_reachable};
-use super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
+use super::entrypoint::{validate_file_reachable, RuntimeType, UdfEntrypoint};
+use super::ipc_utils::{create_ipc_accumulator, invoke_ipc_scalar_impl};
 
 /// IPC runtime: holds a path to an executable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +97,13 @@ impl UdfEntrypoint for IpcRuntime {
         return_type: &DataType,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<Box<dyn Accumulator>> {
-        create_ipc_accumulator(name, &self.path, function_name, return_type, subprocess_cache)
+        create_ipc_accumulator(
+            name,
+            &self.path,
+            function_name,
+            return_type,
+            subprocess_cache,
+        )
     }
 
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {
@@ -140,7 +146,9 @@ pub(super) fn load_ipc_manifest(exec_path: &str) -> Result<Manifest, BundlebaseE
     let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to parse manifest JSON from '{}': {}. Output: {}",
-            exec_path, e, json_str.trim()
+            exec_path,
+            e,
+            json_str.trim()
         ))
     })?;
 

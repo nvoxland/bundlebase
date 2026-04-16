@@ -64,9 +64,12 @@ impl Operation for DeleteOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Load tombstone file and distribute deleted row numbers to DataBlocks
         let data_dir = bundle.data_dir();
-        let tomb_file = data_dir.file(&self.tombstone)
+        let tomb_file = data_dir
+            .file(&self.tombstone)
             .map_err(|e| DataFusionError::External(e))?;
-        let bytes = tomb_file.read_bytes().await
+        let bytes = tomb_file
+            .read_bytes()
+            .await
             .map_err(|e| DataFusionError::External(e))?;
 
         let bytes = match bytes {
@@ -77,13 +80,16 @@ impl Operation for DeleteOp {
             }
         };
 
-        let row_ids = tombstone::deserialize_rowids(&bytes)
-            .map_err(|e| DataFusionError::External(e))?;
+        let row_ids =
+            tombstone::deserialize_rowids(&bytes).map_err(|e| DataFusionError::External(e))?;
 
         // Group RowIds by block_ref -> row numbers
         let mut by_block: HashMap<u16, Vec<u32>> = HashMap::new();
         for rid in &row_ids {
-            by_block.entry(rid.block_ref().as_u16()).or_default().push(rid.row_number());
+            by_block
+                .entry(rid.block_ref().as_u16())
+                .or_default()
+                .push(rid.row_number());
         }
 
         // Distribute to the corresponding DataBlocks in the base pack
@@ -141,8 +147,7 @@ mod tests {
         assert!(yaml.contains("where"));
         assert!(yaml.contains("salary < 0"));
 
-        let deserialized: DeleteOp =
-            serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
+        let deserialized: DeleteOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
         assert_eq!(deserialized.tombstone, "abc123def456.tomb");
         assert_eq!(deserialized.where_clause, "salary < 0");
     }

@@ -1,18 +1,16 @@
 //! FFI (shared library) runtime implementation.
 
+use crate::bridge::ffi_bridge::{invoke_lib_scalar, load_lib_manifest, LibAccumulator};
 use crate::bridge::ipc_bridge::SubprocessCache;
-use crate::bridge::ffi_bridge::{
-    invoke_lib_scalar, load_lib_manifest, LibAccumulator,
-};
 use crate::bridge::manifest::Manifest;
-use bundlebase_common::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
-use super::entrypoint::{UdfEntrypoint, RuntimeType, validate_file_reachable};
+use super::entrypoint::{validate_file_reachable, RuntimeType, UdfEntrypoint};
 
 /// FFI runtime: holds a path to a shared library and an optional symbol name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,13 +34,15 @@ impl FfiRuntime {
                 return Err(format!(
                     "Invalid FFI entrypoint '{}'. Path before ':' cannot be empty.",
                     entrypoint
-                ).into());
+                )
+                .into());
             }
             if symbol.is_empty() {
                 return Err(format!(
                     "Invalid FFI entrypoint '{}'. Symbol after ':' cannot be empty.",
                     entrypoint
-                ).into());
+                )
+                .into());
             }
 
             Ok(Self {

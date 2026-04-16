@@ -1,12 +1,12 @@
 //! DropConnector command implementation.
 
 use crate::parser::extract_string_content;
-use crate::{CommandParsing, Rule};
-use bundlebase_common::Platform;
-use bundlebase::bundle::operation::DropConnectorOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::DropConnectorOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
+use bundlebase_common::Platform;
 
 /// Command to drop a connector definition and all its entries, or drop the connector for a specific platform.
 ///
@@ -51,9 +51,8 @@ impl CommandParsing for DropConnectorCommand {
             }
         }
 
-        let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP CONNECTOR missing connector name".into()
-        })?;
+        let name = name
+            .ok_or_else(|| -> BundlebaseError { "DROP CONNECTOR missing connector name".into() })?;
 
         Ok(DropConnectorCommand::new(name, platform))
     }
@@ -79,10 +78,7 @@ impl BundleBuilderCommand for DropConnectorCommand {
         builder.apply_operation(op.into()).await?;
 
         match &self.platform {
-            Some(p) => Ok(format!(
-                "Dropped connector {} on platform {}",
-                self.name, p
-            )),
+            Some(p) => Ok(format!("Dropped connector {} on platform {}", self.name, p)),
             None => Ok(format!("Dropped connector {}", self.name)),
         }
     }
@@ -91,10 +87,10 @@ impl BundleBuilderCommand for DropConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
-    use bundlebase_common::Platform;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
+    use bundlebase_common::Platform;
 
     #[test]
     fn test_parse_drop_connector() {

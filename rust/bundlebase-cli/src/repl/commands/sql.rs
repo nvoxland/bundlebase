@@ -1,9 +1,9 @@
 //! SQL command - executes SQL statements and bundlebase commands.
 
-use bundlebase_command::{BundleFacadeCommandExt, OutputShape};
-use bundlebase_command::parser::is_command_statement;
-use bundlebase_common::BundlebaseError;
 use bundlebase::BundleFacade;
+use bundlebase_command::parser::is_command_statement;
+use bundlebase_command::{BundleFacadeCommandExt, OutputShape};
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 

@@ -1,12 +1,12 @@
 //! CreateIndex command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::CreateIndexOp;
-use bundlebase_index::IndexType;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
+use bundlebase_common::BundlebaseError;
+use bundlebase_index::IndexType;
 
 /// Command to create an index on one or more columns.
 #[derive(Debug, Clone)]
@@ -59,8 +59,12 @@ impl CommandParsing for CreateIndexCommand {
             "CREATE INDEX statement missing index type (BTREE or TEXT)".into()
         })?;
 
-        let index_type: IndexType = index_type_str.parse()
-            .map_err(|e: bundlebase_index::ParseIndexTypeError| BundlebaseError::from(e.to_string()))?;
+        let index_type: IndexType =
+            index_type_str
+                .parse()
+                .map_err(|e: bundlebase_index::ParseIndexTypeError| {
+                    BundlebaseError::from(e.to_string())
+                })?;
 
         Ok(CreateIndexCommand::new(vec![column], index_type, None))
     }
@@ -73,15 +77,22 @@ impl CommandParsing for CreateIndexCommand {
     fn to_statement(&self) -> String {
         match &self.index_type {
             IndexType::BTree => {
-                let quoted_cols: Vec<String> = self.columns.iter().map(|c| quote_identifier(c)).collect();
+                let quoted_cols: Vec<String> =
+                    self.columns.iter().map(|c| quote_identifier(c)).collect();
                 format!("CREATE BTREE INDEX ON {}", quoted_cols.join(", "))
             }
             IndexType::Inverted { tokenizer } => {
                 let cols = self.columns.join(", ");
                 if let Some(name) = self.name.as_deref() {
-                    format!("CREATE TEXT INDEX '{}' ON [{}] (tokenizer: {:?})", name, cols, tokenizer)
+                    format!(
+                        "CREATE TEXT INDEX '{}' ON [{}] (tokenizer: {:?})",
+                        name, cols, tokenizer
+                    )
                 } else {
-                    format!("CREATE TEXT INDEX ON [{}] (tokenizer: {:?})", cols, tokenizer)
+                    format!(
+                        "CREATE TEXT INDEX ON [{}] (tokenizer: {:?})",
+                        cols, tokenizer
+                    )
                 }
             }
         }
@@ -92,7 +103,11 @@ impl BundleBuilderCommand for CreateIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let CreateIndexCommand { columns, index_type, name } = *self;
+        let CreateIndexCommand {
+            columns,
+            index_type,
+            name,
+        } = *self;
 
         let cols_display = columns.join(", ");
 
@@ -104,16 +119,15 @@ impl BundleBuilderCommand for CreateIndexCommand {
 
         let mut column_ids = Vec::with_capacity(columns.len());
         for real_name in &columns {
-            let id = builder.column_id(real_name)
-                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", real_name)))?;
+            let id = builder.column_id(real_name).ok_or_else(|| {
+                BundlebaseError::from(format!("Column '{}' not found", real_name))
+            })?;
             column_ids.push(id);
         }
 
         let op = CreateIndexOp::setup(column_ids, index_type, resolved_name).await?;
 
-        builder
-            .apply_operation(op.into())
-            .await?;
+        builder.apply_operation(op.into()).await?;
 
         builder.reindex_internal().await?;
 
@@ -124,9 +138,9 @@ impl BundleBuilderCommand for CreateIndexCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_create_btree_index() {

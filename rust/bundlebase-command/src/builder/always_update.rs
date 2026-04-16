@@ -3,13 +3,13 @@
 //! Registers a persistent update rule AND immediately updates matching rows.
 
 use crate::builder::update::SetAssignment;
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::bundle_schema;
-use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::operation::{AlwaysUpdateOp, FilterOp};
+use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 use tracing::debug;
 
 /// Command to register an always-update rule.
@@ -29,7 +29,8 @@ impl AlwaysUpdateCommand {
 
     /// Returns the SET clause as a string for storage.
     pub fn set_clause_text(&self) -> String {
-        self.assignments.iter()
+        self.assignments
+            .iter()
             .map(|a| format!("{} = {}", a.column, a.expression))
             .collect::<Vec<_>>()
             .join(", ")
@@ -88,7 +89,11 @@ impl CommandParsing for AlwaysUpdateCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("ALWAYS UPDATE bundle SET {} WHERE {}", self.set_clause_text(), self.where_clause)
+        format!(
+            "ALWAYS UPDATE bundle SET {} WHERE {}",
+            self.set_clause_text(),
+            self.where_clause
+        )
     }
 }
 
@@ -100,43 +105,70 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
         let bundle_schema = builder.bundle_schema();
         let where_clause = bundle_schema.translate_sql(&self.where_clause);
 
-        let columns: Vec<String> = self.assignments.iter().map(|a| {
-            bundle_schema.translate_sql(&a.column)
-        }).collect();
-        let expressions: Vec<String> = self.assignments.iter().map(|a| {
-            bundle_schema.translate_sql(&a.expression)
-        }).collect();
+        let columns: Vec<String> = self
+            .assignments
+            .iter()
+            .map(|a| bundle_schema.translate_sql(&a.column))
+            .collect();
+        let expressions: Vec<String> = self
+            .assignments
+            .iter()
+            .map(|a| bundle_schema.translate_sql(&a.expression))
+            .collect();
 
         // Build set clause with internal name names
-        let set_clause: String = columns.iter().zip(expressions.iter())
+        let set_clause: String = columns
+            .iter()
+            .zip(expressions.iter())
             .map(|(c, e)| format!("{} = {}", c, e))
             .collect::<Vec<_>>()
             .join(", ");
 
         // 1. Immediately update matching rows (same as regular UPDATE)
-        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &where_clause).await?;
+        let updated_count = builder
+            .evaluate_update_cols(&columns, &expressions, &where_clause)
+            .await?;
         debug!("[ALWAYS UPDATE] Updated {} existing rows", updated_count);
 
         if updated_count > 0 {
             builder.flush_pending_updates_to_blocks();
 
-            let select_cols: Vec<String> = bundle_schema.keys().map(|col_id| {
-                let internal_name = bundle_schema.internal_name(col_id).expect("column ID from schema keys");
-                let quoted = format!("\"{}\"", internal_name);
-                if let Some(col_expr) = columns.iter().zip(expressions.iter()).find(|(c, _)| c.as_str() == internal_name) {
-                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, col_expr.1, quoted, quoted)
-                } else {
-                    quoted
-                }
-            }).collect();
+            let select_cols: Vec<String> = bundle_schema
+                .keys()
+                .map(|col_id| {
+                    let internal_name = bundle_schema
+                        .internal_name(col_id)
+                        .expect("column ID from schema keys");
+                    let quoted = format!("\"{}\"", internal_name);
+                    if let Some(col_expr) = columns
+                        .iter()
+                        .zip(expressions.iter())
+                        .find(|(c, _)| c.as_str() == internal_name)
+                    {
+                        format!(
+                            "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
+                            where_clause, col_expr.1, quoted, quoted
+                        )
+                    } else {
+                        quoted
+                    }
+                })
+                .collect();
             let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
-            builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
+            builder
+                .apply_operation(FilterOp::new(&filter_query, vec![]).into())
+                .await?;
         }
 
         // 2. Register the persistent always-update rule (stored with internal name names)
-        builder.apply_operation(AlwaysUpdateOp::new(&set_clause, &where_clause).into()).await?;
+        builder
+            .apply_operation(AlwaysUpdateOp::new(&set_clause, &where_clause).into())
+            .await?;
 
-        Ok(format!("Always-update rule added (updated {} existing rows)", updated_count))
+        Ok(format!(
+            "Always-update rule added (updated {} existing rows)",
+            updated_count
+        ))
     }
 }
 
@@ -195,11 +227,17 @@ mod parsing_tests {
     #[test]
     fn test_parse_always_update_roundtrip() {
         let cmd = AlwaysUpdateCommand::new(
-            vec![SetAssignment { column: "salary".to_string(), expression: "0".to_string() }],
+            vec![SetAssignment {
+                column: "salary".to_string(),
+                expression: "0".to_string(),
+            }],
             "salary < 0",
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "ALWAYS UPDATE bundle SET salary = 0 WHERE salary < 0");
+        assert_eq!(
+            statement,
+            "ALWAYS UPDATE bundle SET salary = 0 WHERE salary < 0"
+        );
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {

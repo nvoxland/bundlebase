@@ -1,12 +1,12 @@
 //! DropColumn command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropColumnOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to drop a column from the bundle.
 #[derive(Debug, Clone)]
@@ -51,13 +51,12 @@ impl BundleBuilderCommand for DropColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let column_id = builder.column_id(&self.name)
+        let column_id = builder
+            .column_id(&self.name)
             .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.name)))?;
 
         builder
-            .apply_operation(
-                DropColumnOp::setup(column_id).into(),
-            )
+            .apply_operation(DropColumnOp::setup(column_id).into())
             .await?;
 
         Ok(format!("Dropped column: {}", self.name))
@@ -67,9 +66,9 @@ impl BundleBuilderCommand for DropColumnCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_column() {

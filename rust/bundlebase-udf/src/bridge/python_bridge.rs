@@ -3,10 +3,10 @@
 //! The core crate defines the trait; `bundlebase-python` implements it
 //! via PyO3 and registers it at module init time.
 
-use arrow::array::ArrayRef;
-use datafusion::scalar::ScalarValue;
 use crate::bridge::manifest::ManifestEntry;
+use arrow::array::ArrayRef;
 use bundlebase_common::BundlebaseError;
+use datafusion::scalar::ScalarValue;
 use std::sync::{Arc, OnceLock};
 
 /// Trait that the Python bindings implement to invoke functions.
@@ -71,8 +71,9 @@ pub fn register_python_function_bridge(bridge: Arc<dyn PythonFunctionBridge>) {
 }
 
 /// Get the registered Python function bridge.
-pub fn get_python_function_bridge() -> Result<&'static Arc<dyn PythonFunctionBridge>, BundlebaseError> {
-    PYTHON_FUNCTION_BRIDGE
-        .get()
-        .ok_or_else(|| "Python function bridge not initialized. Are you running from Python?".into())
+pub fn get_python_function_bridge(
+) -> Result<&'static Arc<dyn PythonFunctionBridge>, BundlebaseError> {
+    PYTHON_FUNCTION_BRIDGE.get().ok_or_else(|| {
+        "Python function bridge not initialized. Are you running from Python?".into()
+    })
 }

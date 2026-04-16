@@ -53,8 +53,7 @@ impl CommandParsing for GenerateReportCommand {
             }
         }
 
-        let id =
-            id.ok_or_else(|| -> BundlebaseError { "GENERATE REPORT missing id".into() })?;
+        let id = id.ok_or_else(|| -> BundlebaseError { "GENERATE REPORT missing id".into() })?;
         Ok(GenerateReportCommand::new(id))
     }
 
@@ -83,10 +82,7 @@ impl FacadeBundleResolver {
 
 #[async_trait::async_trait]
 impl BundleResolver for FacadeBundleResolver {
-    async fn resolve(
-        &self,
-        bundle_ref: &str,
-    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+    async fn resolve(&self, bundle_ref: &str) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
         if bundle_ref == "." || bundle_ref == "bundle" {
             return Ok(self.facade.clone());
         }
@@ -101,10 +97,7 @@ impl BundleResolver for FacadeBundleResolver {
 
         // Open bundle by path
         let bundle = Bundle::open(bundle_ref, None).await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to open bundle '{}': {}",
-                bundle_ref, e
-            ))
+            BundlebaseError::from(format!("Failed to open bundle '{}': {}", bundle_ref, e))
         })?;
 
         let arc_bundle: Arc<dyn BundleFacade> = bundle;
@@ -131,7 +124,11 @@ impl BundleFacadeCommand for GenerateReportCommand {
             let list = if available.is_empty() {
                 "none".to_string()
             } else {
-                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                available
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             BundlebaseError::from(format!(
                 "Report '{}' not found. Available reports: {}",
@@ -152,12 +149,8 @@ impl BundleFacadeCommand for GenerateReportCommand {
         let resolver = FacadeBundleResolver::new(bundle);
 
         // Generate PDF bytes
-        let pdf_bytes = bundlebase_report::generate_report_bytes(
-            &report.content,
-            &resolver,
-            true,
-        )
-        .await?;
+        let pdf_bytes =
+            bundlebase_report::generate_report_bytes(&report.content, &resolver, true).await?;
 
         // Build result RecordBatch
         let schema = Self::output_schema();
@@ -183,8 +176,10 @@ impl BundleFacadeCommand for GenerateReportCommand {
             .await
             .map_err(|e| BundlebaseError::from(format!("Failed to scan result: {}", e)))?;
 
-        let stream = datafusion::physical_plan::execute_stream(plan, state.task_ctx())
-            .map_err(|e| BundlebaseError::from(format!("Failed to execute result stream: {}", e)))?;
+        let stream =
+            datafusion::physical_plan::execute_stream(plan, state.task_ctx()).map_err(|e| {
+                BundlebaseError::from(format!("Failed to execute result stream: {}", e))
+            })?;
 
         Ok(stream)
     }

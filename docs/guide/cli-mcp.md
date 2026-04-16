@@ -70,7 +70,7 @@ See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 ### Claude Code
 
-Run `bundlebase setup-agent` to automatically install the MCP server config. Or add manually to `.mcp.json` in your project root:
+Run `bundlebase setup-agent --agent claude` to automatically install the Claude Code config. Or add manually to `.mcp.json` in your project root:
 
 ```json
 {
@@ -98,9 +98,9 @@ Add to your Cursor MCP configuration (`.cursor/mcp.json`):
 }
 ```
 
-### VS Code (Copilot)
+### GitHub Copilot
 
-Add to your VS Code MCP settings (`.vscode/mcp.json`):
+Run `bundlebase setup-agent --agent copilot` to automatically install the GitHub Copilot workspace config in `.vscode/mcp.json` and a Bundlebase guidance section in `AGENTS.md`. Or add the MCP server manually:
 
 ```json
 {

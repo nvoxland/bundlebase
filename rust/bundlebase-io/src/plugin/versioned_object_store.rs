@@ -4,8 +4,8 @@
 //! It validates the version on first data access and caches the result for subsequent calls.
 
 use super::object_store::ObjectStoreFile;
-use crate::{FileInfo, IOReadFile};
 use crate::BundlebaseError;
+use crate::{FileInfo, IOReadFile};
 use async_trait::async_trait;
 use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
@@ -124,8 +124,8 @@ impl IOReadFile for VersionedObjectStoreFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::IOReadWriteFile;
     use crate::test_utils::random_memory_dir_concrete;
+    use crate::IOReadWriteFile;
 
     #[tokio::test]
     async fn test_versioned_file_validates_on_first_access() {

@@ -5,8 +5,8 @@
 
 use super::{auto_commit_message, load_config};
 use bundlebase::{BundleBuilder, BundleFacade};
-use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::io::{IsTerminal, Read};
 use std::sync::Arc;
@@ -34,7 +34,6 @@ pub struct CreateArgs {
     pub config: Option<String>,
 }
 
-
 pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
     let state: Arc<dyn BundleFacade> = match BundleBuilder::create(&args.bundle, config).await {
@@ -60,13 +59,15 @@ pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
                 None
             } else {
                 let mut buf = String::new();
-                std::io::stdin()
-                    .read_to_string(&mut buf)
-                    .map_err(|e| {
-                        BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e))
-                    })?;
+                std::io::stdin().read_to_string(&mut buf).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e))
+                })?;
                 let trimmed = buf.trim().to_string();
-                if trimmed.is_empty() { None } else { Some(trimmed) }
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
             }
         }
     };

@@ -1,8 +1,8 @@
 //! The `repl` subcommand — interactive REPL mode.
 
 use super::{open_bundle, BundleArgs};
-use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 
 /// Interactive REPL mode

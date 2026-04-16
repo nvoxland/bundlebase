@@ -1,10 +1,10 @@
-use crate::DataContext;
-use crate::plugin::{CsvPlugin, JsonlPlugin, ParquetPlugin, TsvPlugin, ReaderPlugin};
-use crate::{BlockId, DataReader};
-use bundlebase_io::DataStorage;
-use bundlebase_common::BundlebaseError;
 use crate::attach_format::AttachFormat;
+use crate::plugin::{CsvPlugin, JsonlPlugin, ParquetPlugin, ReaderPlugin, TsvPlugin};
+use crate::DataContext;
+use crate::{BlockId, DataReader};
 use arrow_schema::SchemaRef;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::DataStorage;
 use datafusion::common::DataFusionError;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,9 +15,7 @@ pub struct DataReaderFactory {
 }
 
 impl DataReaderFactory {
-    pub fn new(
-        storage: Arc<DataStorage>,
-    ) -> Self {
+    pub fn new(storage: Arc<DataStorage>) -> Self {
         Self {
             storage: storage.clone(),
             plugins: vec![
@@ -33,10 +31,7 @@ impl DataReaderFactory {
         storage: Arc<DataStorage>,
         plugins: Vec<Arc<dyn ReaderPlugin>>,
     ) -> Self {
-        Self {
-            storage,
-            plugins,
-        }
+        Self { storage, plugins }
     }
 
     pub fn storage(&self) -> &Arc<DataStorage> {
@@ -65,7 +60,8 @@ impl DataReaderFactory {
         Err(DataFusionError::NotImplemented(format!(
             "No reader found for '{}'. Supported formats: .csv, .tsv, .jsonl, .parquet",
             source
-        )).into())
+        ))
+        .into())
     }
 
     /// Create a reader for a known format (used when re-reading existing blocks).
@@ -100,6 +96,10 @@ impl DataReaderFactory {
                 }
             }
         }
-        Err(DataFusionError::NotImplemented(format!("No reader found for {} (format: {})", source, format)).into())
+        Err(DataFusionError::NotImplemented(format!(
+            "No reader found for {} (format: {})",
+            source, format
+        ))
+        .into())
     }
 }

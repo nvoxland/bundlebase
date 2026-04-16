@@ -67,7 +67,11 @@ pub async fn run(args: ReportArgs) -> Result<(), BundlebaseError> {
             let list = if available.is_empty() {
                 "none".to_string()
             } else {
-                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                available
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             BundlebaseError::from(format!(
                 "Report '{}' not found in bundle. Available reports: {}",
@@ -81,13 +85,9 @@ pub async fn run(args: ReportArgs) -> Result<(), BundlebaseError> {
 
     let resolver = CliBundleResolver::new(bundle.clone());
 
-    let msg = bundlebase_report::generate_report(
-        &markdown,
-        &resolver,
-        &args.output,
-        !args.no_branding,
-    )
-    .await?;
+    let msg =
+        bundlebase_report::generate_report(&markdown, &resolver, &args.output, !args.no_branding)
+            .await?;
 
     println!("{}", msg);
     Ok(())
@@ -111,10 +111,7 @@ impl CliBundleResolver {
 
 #[async_trait::async_trait]
 impl bundlebase_report::BundleResolver for CliBundleResolver {
-    async fn resolve(
-        &self,
-        bundle_ref: &str,
-    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+    async fn resolve(&self, bundle_ref: &str) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
         // "." and "bundle" refer to the primary bundle
         if bundle_ref == "." || bundle_ref == "bundle" {
             return Ok(self.primary_bundle.clone());
@@ -137,10 +134,7 @@ impl bundlebase_report::BundleResolver for CliBundleResolver {
         // Open bundle in read-only mode
         info!("Opening bundle: {}", bundle_ref);
         let bundle = Bundle::open(bundle_ref, None).await.map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to open bundle '{}': {}",
-                bundle_ref, e
-            ))
+            BundlebaseError::from(format!("Failed to open bundle '{}': {}", bundle_ref, e))
         })?;
 
         // Cache for reuse

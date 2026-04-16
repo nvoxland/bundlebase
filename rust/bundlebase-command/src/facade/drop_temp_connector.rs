@@ -6,10 +6,10 @@
 use crate::parser::extract_string_content;
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase_common::Platform;
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase_common::Platform;
 use std::sync::Arc;
 
 /// Command to drop a session-only connector (not persisted).
@@ -117,9 +117,9 @@ impl BundleFacadeCommand for DropTempConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_temp_connector() {

@@ -4,9 +4,9 @@
 //! and represents a single connector entrypoint binding for a name+platform pair.
 //! `resolve_connector` picks the best entry for the current platform at runtime.
 
-use bundlebase_common::platform::Platform;
-use bundlebase_common::object_id::ObjectId;
 use bundlebase_common::namespaced_name::NamespacedName;
+use bundlebase_common::object_id::ObjectId;
+use bundlebase_common::platform::Platform;
 use bundlebase_common::BundlebaseError;
 
 use crate::runtime::UdfRuntime;
@@ -28,7 +28,10 @@ pub struct ConnectorEntry {
 ///
 /// Tries temporary entries first (reverse order, last wins), then persisted entries.
 /// Returns the first entry whose platform matches the current system.
-pub fn resolve_connector(entries: &[ConnectorEntry], name: &str) -> Result<ConnectorEntry, BundlebaseError> {
+pub fn resolve_connector(
+    entries: &[ConnectorEntry],
+    name: &str,
+) -> Result<ConnectorEntry, BundlebaseError> {
     let matching: Vec<&ConnectorEntry> = entries.iter().filter(|e| e.name == name).collect();
 
     if matching.is_empty() {
@@ -110,7 +113,10 @@ mod tests {
 
         let result = resolve_connector(&entries, "test.source");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No connector entrypoint matches"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No connector entrypoint matches"));
     }
 
     #[test]
@@ -156,14 +162,20 @@ mod tests {
     fn test_parse_connector_name_no_dot() {
         let result = parse_connector_name("weather");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be in format 'namespace.name'"));
     }
 
     #[test]
     fn test_parse_connector_name_multi_level_rejected() {
         let result = parse_connector_name("acme.datasources.weather");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Multi-level namespaces"));
     }
 
     #[test]

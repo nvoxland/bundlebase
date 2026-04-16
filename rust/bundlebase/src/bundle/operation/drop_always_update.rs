@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn test_describe_specific() {
         let op = DropAlwaysUpdateOp::drop_specific("SET salary = 0 WHERE salary < 0");
-        assert_eq!(op.describe(), "DROP ALWAYS UPDATE SET salary = 0 WHERE salary < 0");
+        assert_eq!(
+            op.describe(),
+            "DROP ALWAYS UPDATE SET salary = 0 WHERE salary < 0"
+        );
     }
 
     #[test]
@@ -101,6 +104,9 @@ mod tests {
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let deserialized: DropAlwaysUpdateOp =
             serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
-        assert_eq!(deserialized.rule_text, Some("SET x = 1 WHERE x > 5".to_string()));
+        assert_eq!(
+            deserialized.rule_text,
+            Some("SET x = 1 WHERE x > 5".to_string())
+        );
     }
 }

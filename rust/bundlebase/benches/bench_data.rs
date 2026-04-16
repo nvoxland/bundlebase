@@ -3,8 +3,8 @@
 //! Generates data files on first use and caches them to `benches/data/`.
 //! Returns file:// URLs that can be used directly with `attach()`.
 
-use arrow::array::RecordBatch;
 use crate::data_generator::{generate_batch, generate_lookup_batch, BenchmarkDataConfig};
+use arrow::array::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use std::path::{Path, PathBuf};
 use url::Url;

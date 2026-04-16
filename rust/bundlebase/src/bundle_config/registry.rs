@@ -1,5 +1,5 @@
-use std::sync::OnceLock;
 use super::{ConfigKey, ConfigScope};
+use std::sync::OnceLock;
 
 /// Central registry of all known config scopes and keys.
 pub struct ConfigRegistry {
@@ -9,7 +9,10 @@ pub struct ConfigRegistry {
 
 impl ConfigRegistry {
     fn new() -> Self {
-        Self { scopes: Vec::new(), keys: Vec::new() }
+        Self {
+            scopes: Vec::new(),
+            keys: Vec::new(),
+        }
     }
 
     pub fn register_scopes(&mut self, scopes: &[ConfigScope]) {

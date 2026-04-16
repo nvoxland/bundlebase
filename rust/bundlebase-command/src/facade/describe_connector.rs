@@ -5,13 +5,13 @@
 //! Works for both built-in connectors (plain name like `http`) and imported connectors
 //! (dotted name like `acme.weather`).
 
+use crate::parser::extract_identifier;
 use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use crate::parser::extract_identifier;
-use bundlebase::BundleFacade;
-use bundlebase_common::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -95,15 +95,19 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
         // Try built-in connector first (plain names like "http", "kaggle", etc.)
         if let Some(builtin) = reg.get(&self.name) {
             let sig = builtin.signature();
-            let args_desc: Vec<String> = sig.arg_specs.iter().map(|s| {
-                if s.required {
-                    format!("{} (required)", s.name)
-                } else if let Some(ref default) = s.default {
-                    format!("{} (optional, default: {})", s.name, default)
-                } else {
-                    format!("{} (optional)", s.name)
-                }
-            }).collect();
+            let args_desc: Vec<String> = sig
+                .arg_specs
+                .iter()
+                .map(|s| {
+                    if s.required {
+                        format!("{} (required)", s.name)
+                    } else if let Some(ref default) = s.default {
+                        format!("{} (optional, default: {})", s.name, default)
+                    } else {
+                        format!("{} (optional)", s.name)
+                    }
+                })
+                .collect();
             let args_str = if args_desc.is_empty() {
                 None
             } else {
@@ -137,12 +141,19 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
             return Err(format!(
                 "Connector '{}' not found. Use SHOW CONNECTORS to list available connectors.",
                 self.name
-            ).into());
+            )
+            .into());
         }
 
         let names: Vec<String> = matching.iter().map(|e| e.name.to_string()).collect();
-        let runtimes: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let entrypoints: Vec<String> = matching.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        let runtimes: Vec<String> = matching
+            .iter()
+            .map(|e| e.from.runtime_name().to_string())
+            .collect();
+        let entrypoints: Vec<String> = matching
+            .iter()
+            .map(|e| e.from.to_entrypoint_string())
+            .collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
         let args: Vec<Option<&str>> = matching.iter().map(|_| None).collect();
@@ -167,9 +178,9 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_describe_connector() {

@@ -83,7 +83,12 @@ impl DataSource for SchemaRenameDataSource {
             .iter()
             .zip(self.column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                Arc::new(
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_name(bundle_schema::generate_internal_name(col_id)),
+                )
             })
             .collect();
         let renamed_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
@@ -140,18 +145,23 @@ impl Stream for SchemaRenameStream {
                     .iter()
                     .zip(self.column_ids.iter())
                     .map(|(field, col_id)| {
-                        Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                        Arc::new(
+                            field
+                                .as_ref()
+                                .clone()
+                                .with_name(bundle_schema::generate_internal_name(col_id)),
+                        )
                     })
                     .collect();
                 let id_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
                     id_fields,
                     batch_schema.metadata().clone(),
                 ));
-                let renamed = arrow::record_batch::RecordBatch::try_new(
-                    id_schema,
-                    batch.columns().to_vec(),
-                )
-                .map_err(|e| datafusion::common::DataFusionError::ArrowError(Box::new(e), None));
+                let renamed =
+                    arrow::record_batch::RecordBatch::try_new(id_schema, batch.columns().to_vec())
+                        .map_err(|e| {
+                            datafusion::common::DataFusionError::ArrowError(Box::new(e), None)
+                        });
                 Poll::Ready(Some(renamed))
             }
             other => other,
@@ -168,7 +178,12 @@ impl RecordBatchStream for SchemaRenameStream {
             .iter()
             .zip(self.column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
+                Arc::new(
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_name(bundle_schema::generate_internal_name(col_id)),
+                )
             })
             .collect();
         Arc::new(arrow::datatypes::Schema::new_with_metadata(

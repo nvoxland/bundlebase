@@ -6,9 +6,9 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Command to rename runtime-only connector entries (not persisted).
@@ -105,9 +105,9 @@ impl BundleFacadeCommand for RenameTempConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rename_temp_connector() {

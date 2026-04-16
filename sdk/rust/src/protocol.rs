@@ -51,9 +51,8 @@ pub(crate) fn write_response(
         result: Some(result),
         error: None,
     };
-    let mut data = serde_json::to_vec(&resp).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::Other, e)
-    })?;
+    let mut data =
+        serde_json::to_vec(&resp).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     data.push(b'\n');
     w.write_all(&data)
 }
@@ -70,9 +69,8 @@ pub(crate) fn write_error(
         result: None,
         error: Some(JsonRpcError { code, message }),
     };
-    let mut data = serde_json::to_vec(&resp).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::Other, e)
-    })?;
+    let mut data =
+        serde_json::to_vec(&resp).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     data.push(b'\n');
     w.write_all(&data)
 }

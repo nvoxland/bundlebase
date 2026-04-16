@@ -1,9 +1,9 @@
 //! Undo command implementation.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to undo the last uncommitted change(s).
 #[derive(Debug, Clone)]
@@ -34,9 +34,10 @@ impl CommandParsing for UndoCommand {
         let mut count = 1usize;
         for inner in pair.into_inner() {
             if inner.as_rule() == Rule::undo_count {
-                count = inner.as_str().parse::<usize>().map_err(|e| {
-                    BundlebaseError::from(format!("Invalid UNDO count: {}", e))
-                })?;
+                count = inner
+                    .as_str()
+                    .parse::<usize>()
+                    .map_err(|e| BundlebaseError::from(format!("Invalid UNDO count: {}", e)))?;
                 if count == 0 {
                     return Err("UNDO count must be at least 1".into());
                 }
@@ -66,7 +67,8 @@ impl BundleBuilderCommand for UndoCommand {
                 if self.count == 1 { "" } else { "s" },
                 available,
                 if available == 1 { "" } else { "s" },
-            ).into());
+            )
+            .into());
         }
 
         if self.count == 1 {
@@ -84,9 +86,9 @@ impl BundleBuilderCommand for UndoCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_undo() {

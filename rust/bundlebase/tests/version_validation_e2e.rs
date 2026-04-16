@@ -5,9 +5,9 @@
 //! - Queries succeed when source files remain unchanged
 
 use bundlebase::bundle::BundleFacade;
-use bundlebase_command::BundleBuilderExt;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url};
 use bundlebase::Bundle;
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::BundlebaseError;
 use bundlebase_io::IOReadWriteFile;
 use bytes::Bytes;
@@ -18,7 +18,6 @@ mod common;
 fn init() {
     common::init_catalog();
 }
-
 
 /// Test that querying a bundle fails when the source CSV file has been modified.
 #[tokio::test]
@@ -137,9 +136,11 @@ async fn test_query_fails_when_source_parquet_changed() -> Result<(), Bundlebase
         let name_array = StringArray::from(names);
         let value_array = Int32Array::from(values);
 
-        let batch =
-            RecordBatch::try_new(schema.clone(), vec![Arc::new(name_array), Arc::new(value_array)])
-                .map_err(|e| BundlebaseError::from(e.to_string()))?;
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(name_array), Arc::new(value_array)],
+        )
+        .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
         let mut buffer = Vec::new();
         {
@@ -266,7 +267,9 @@ async fn test_narrow_projection_detects_version_change() -> Result<(), Bundlebas
     // Narrow projection — only one of three columns. This hits the Phase 2.6
     // bypass path in data_block.rs::scan().
     let result: Result<_, _> = async {
-        let stream = loaded.query("SELECT name FROM bundle", vec![], None).await?;
+        let stream = loaded
+            .query("SELECT name FROM bundle", vec![], None)
+            .await?;
         let _batches: Vec<_> = stream.try_collect().await?;
         Ok::<_, BundlebaseError>(())
     }
@@ -310,7 +313,9 @@ async fn test_narrow_projection_hot_block_promotion() -> Result<(), BundlebaseEr
     // Three narrow queries on the same block. First takes bypass, second
     // promotes to full cache population, third hits the cache.
     for i in 0..3 {
-        let stream = loaded.query("SELECT name FROM bundle", vec![], None).await?;
+        let stream = loaded
+            .query("SELECT name FROM bundle", vec![], None)
+            .await?;
         let batches: Vec<_> = stream.try_collect().await?;
         let total: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total, 3, "query {} returned wrong row count", i);

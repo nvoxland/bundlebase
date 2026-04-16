@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -34,7 +34,9 @@ impl BundleConnectorsTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.connectors)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.connectors)".to_string(),
+            )
         })
     }
 
@@ -50,29 +52,52 @@ impl BundleConnectorsTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let mut entries = self.facade()?.connector_registry().read().entries().to_vec();
+        let mut entries = self
+            .facade()?
+            .connector_registry()
+            .read()
+            .entries()
+            .to_vec();
 
         // Sort by name then platform for consistent ordering
         entries.sort_by(|a, b| {
-            a.name.to_string().cmp(&b.name.to_string())
+            a.name
+                .to_string()
+                .cmp(&b.name.to_string())
                 .then_with(|| a.platform.to_string().cmp(&b.platform.to_string()))
         });
 
         let ids: Vec<String> = entries.iter().map(|e| e.id.to_string()).collect();
         let names: Vec<String> = entries.iter().map(|e| e.name.to_string()).collect();
-        let runtimes: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let entrypoints: Vec<String> = entries.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        let runtimes: Vec<String> = entries
+            .iter()
+            .map(|e| e.from.runtime_name().to_string())
+            .collect();
+        let entrypoints: Vec<String> = entries
+            .iter()
+            .map(|e| e.from.to_entrypoint_string())
+            .collect();
         let platforms: Vec<String> = entries.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = entries.iter().map(|e| e.temporary).collect();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(names.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(runtimes.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(entrypoints.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(platforms.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(
+                    ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    names.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    runtimes.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    entrypoints.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    platforms.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
                 Arc::new(BooleanArray::from(temporaries)),
             ],
         )?;

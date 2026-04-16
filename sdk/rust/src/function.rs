@@ -70,10 +70,7 @@ pub trait DynAggregateFunction: Send + Sync {
         state_a: &mut Box<dyn std::any::Any + Send>,
         state_b: Box<dyn std::any::Any + Send>,
     ) -> Result<(), ArrowError>;
-    fn evaluate_dyn(
-        &self,
-        state: &Box<dyn std::any::Any + Send>,
-    ) -> Result<ArrayRef, ArrowError>;
+    fn evaluate_dyn(&self, state: &Box<dyn std::any::Any + Send>) -> Result<ArrayRef, ArrowError>;
 }
 
 /// Blanket impl to bridge typed AggregateFunction to DynAggregateFunction.
@@ -107,10 +104,7 @@ impl<T: AggregateFunction> DynAggregateFunction for T {
         self.merge(a, b)
     }
 
-    fn evaluate_dyn(
-        &self,
-        state: &Box<dyn std::any::Any + Send>,
-    ) -> Result<ArrayRef, ArrowError> {
+    fn evaluate_dyn(&self, state: &Box<dyn std::any::Any + Send>) -> Result<ArrayRef, ArrowError> {
         let s = state
             .downcast_ref::<T::State>()
             .ok_or_else(|| ArrowError::InvalidArgumentError("State type mismatch".to_string()))?;

@@ -1,6 +1,6 @@
 use crate::bundle::bundle_schema::BundleSchema;
-use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::operation::BatchedSource;
+use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
 use crate::connector::AttachFormat;

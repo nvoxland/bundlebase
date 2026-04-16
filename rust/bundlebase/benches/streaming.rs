@@ -23,35 +23,31 @@ fn bench_stream_rows(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            let mut stream = df
-                                .as_ref()
-                                .clone()
-                                .execute_stream()
-                                .await
-                                .expect("execute_stream failed");
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        let df = bundle.dataframe().await.expect("dataframe failed");
+                        let mut stream = df
+                            .as_ref()
+                            .clone()
+                            .execute_stream()
+                            .await
+                            .expect("execute_stream failed");
 
-                            let mut total_rows = 0usize;
-                            while let Some(batch_result) = stream.next().await {
-                                let batch = batch_result.expect("batch failed");
-                                total_rows += batch.num_rows();
-                            }
-                            total_rows
+                        let mut total_rows = 0usize;
+                        while let Some(batch_result) = stream.next().await {
+                            let batch = batch_result.expect("batch failed");
+                            total_rows += batch.num_rows();
                         }
-                    });
-                },
-            );
+                        total_rows
+                    }
+                });
+            });
         }
     }
     group.finish();
@@ -64,42 +60,35 @@ fn bench_stream_with_filter(c: &mut Criterion) {
     for format in ALL_FORMATS {
         for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &rows| {
-                    let bundle = rt
-                        .block_on(create_benchmark_bundle(rows, &format))
-                        .expect("bundle creation");
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &rows| {
+                let bundle = rt
+                    .block_on(create_benchmark_bundle(rows, &format))
+                    .expect("bundle creation");
 
-                    b.to_async(&rt).iter(|| {
-                        let bundle = bundle.clone();
-                        async move {
-                            bundle
-                                .filter(
-                                    "SELECT * FROM bundle WHERE filter_value < 50",
-                                    vec![],
-                                )
-                                .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            let mut stream = df
-                                .as_ref()
-                                .clone()
-                                .execute_stream()
-                                .await
-                                .expect("execute_stream failed");
+                b.to_async(&rt).iter(|| {
+                    let bundle = bundle.clone();
+                    async move {
+                        bundle
+                            .filter("SELECT * FROM bundle WHERE filter_value < 50", vec![])
+                            .await
+                            .expect("filter failed");
+                        let df = bundle.dataframe().await.expect("dataframe failed");
+                        let mut stream = df
+                            .as_ref()
+                            .clone()
+                            .execute_stream()
+                            .await
+                            .expect("execute_stream failed");
 
-                            let mut total_rows = 0usize;
-                            while let Some(batch_result) = stream.next().await {
-                                let batch = batch_result.expect("batch failed");
-                                total_rows += batch.num_rows();
-                            }
-                            total_rows
+                        let mut total_rows = 0usize;
+                        while let Some(batch_result) = stream.next().await {
+                            let batch = batch_result.expect("batch failed");
+                            total_rows += batch.num_rows();
                         }
-                    });
-                },
-            );
+                        total_rows
+                    }
+                });
+            });
         }
     }
     group.finish();

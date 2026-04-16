@@ -1,9 +1,9 @@
 mod block_table;
 
-use bundlebase::bundle::{BundleFacade, DataBlock};
-use bundlebase_common::object_id::BlockId;
 use async_trait::async_trait;
 use block_table::BlockTable;
+use bundlebase::bundle::{BundleFacade, DataBlock};
+use bundlebase_common::object_id::BlockId;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
 use std::any::Any;
@@ -62,7 +62,6 @@ impl BlockSchemaProvider {
     }
 }
 
-
 #[async_trait]
 impl SchemaProvider for BlockSchemaProvider {
     fn as_any(&self) -> &dyn Any {
@@ -70,7 +69,9 @@ impl SchemaProvider for BlockSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let Some(facade) = self.facade() else { return vec![] };
+        let Some(facade) = self.facade() else {
+            return vec![];
+        };
         let packs = facade.packs();
         let mut names = Vec::new();
 

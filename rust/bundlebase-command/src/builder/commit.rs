@@ -1,10 +1,10 @@
 //! Commit command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::extract_string_content;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to commit changes.
 ///
@@ -39,9 +39,8 @@ impl CommandParsing for CommitCommand {
             }
         }
 
-        let message = message.ok_or_else(|| -> BundlebaseError {
-            "COMMIT statement missing message".into()
-        })?;
+        let message = message
+            .ok_or_else(|| -> BundlebaseError { "COMMIT statement missing message".into() })?;
 
         Ok(CommitCommand::new(message))
     }
@@ -66,9 +65,9 @@ impl BundleBuilderCommand for CommitCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_commit() {

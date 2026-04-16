@@ -6,9 +6,9 @@
 
 use crate::response::OutputShape;
 use crate::{BundleCommand, BundleFacadeCommand, CommandParsing, CommandResponse, Rule};
+use arrow::datatypes::SchemaRef;
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::SchemaRef;
 
 /// Command to show syntax and usage for bundlebase commands.
 #[derive(Debug, Clone)]
@@ -183,9 +183,9 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_syntax_no_args() {

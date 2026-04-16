@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use rand::Rng;
-use xxhash_rust::xxh3::Xxh3;
 use std::fmt::Debug;
 use url::Url;
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::file_info::FileInfo;
 use crate::io_file::{IOReadFile, IOReadWriteFile};
@@ -86,11 +86,7 @@ pub trait IOReadDir: Send + Sync + Debug {
         if let Some(relative) = file_path.strip_prefix(&dir_path_normalized) {
             Ok(relative.to_string())
         } else {
-            Err(format!(
-                "File '{}' is not within directory '{}'",
-                file_url, dir_url
-            )
-            .into())
+            Err(format!("File '{}' is not within directory '{}'", file_url, dir_url).into())
         }
     }
 }
@@ -182,4 +178,3 @@ pub trait IOReadWriteDir: IOReadDir {
         Ok(WriteResult { file, hash })
     }
 }
-

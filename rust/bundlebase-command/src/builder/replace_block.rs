@@ -1,11 +1,11 @@
 //! ReplaceBlock command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
-use bundlebase::bundle::operation::ReplaceBlockOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::ReplaceBlockOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to replace a block's location in the bundle.
 #[derive(Debug, Clone)]
@@ -68,22 +68,32 @@ impl BundleBuilderCommand for ReplaceBlockCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let temp_reader = builder.bundle().reader_factory
-            .detect(&self.new_location, &bundlebase_data::BlockId::generate(), builder)
+        let temp_reader = builder
+            .bundle()
+            .reader_factory
+            .detect(
+                &self.new_location,
+                &bundlebase_data::BlockId::generate(),
+                builder,
+            )
             .await?;
         let format = temp_reader.format();
-        let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, format, builder).await?;
+        let op =
+            ReplaceBlockOp::setup(&self.old_location, &self.new_location, format, builder).await?;
         builder.apply_operation(op.into()).await?;
-        Ok(format!("Replaced {} with {}", self.old_location, self.new_location))
+        Ok(format!(
+            "Replaced {} with {}",
+            self.old_location, self.new_location
+        ))
     }
 }
 
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_replace() {
@@ -102,7 +112,10 @@ mod parsing_tests {
     fn test_round_trip() {
         let cmd = ReplaceBlockCommand::new("file:///old.csv", "file:///new.csv");
         let statement = cmd.to_statement();
-        assert_eq!(statement, "REPLACE 'file:///old.csv' WITH 'file:///new.csv'");
+        assert_eq!(
+            statement,
+            "REPLACE 'file:///old.csv' WITH 'file:///new.csv'"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

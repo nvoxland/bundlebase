@@ -16,7 +16,7 @@ use ::bundlebase::metrics::init_logging_metrics;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-use builder::{PyBundleBuilder, PyBundleStatus, PyChange, PyFetchedBlock, PyFetchResults};
+use builder::{PyBundleBuilder, PyBundleStatus, PyChange, PyFetchResults, PyFetchedBlock};
 use bundle::{PyBundle, PyFileVerificationResult, PyVerificationResults};
 use bundle_config::{config_from_python, PyBundleConfig};
 use commit::PyCommit;
@@ -130,14 +130,14 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     progress::register_module(m)?;
 
     // Register the Python native source bridge for in-process source loading
-    ::bundlebase::source::ffi::register_python_bridge(
-        std::sync::Arc::new(native_source::PyNativeBridge),
-    );
+    ::bundlebase::source::ffi::register_python_bridge(std::sync::Arc::new(
+        native_source::PyNativeBridge,
+    ));
 
     // Register the Python function bridge for in-process function invocation
-    ::bundlebase::function::python_bridge::register_python_function_bridge(
-        std::sync::Arc::new(python_function::PyFunctionBridge),
-    );
+    ::bundlebase::function::python_bridge::register_python_function_bridge(std::sync::Arc::new(
+        python_function::PyFunctionBridge,
+    ));
 
     Ok(())
 }

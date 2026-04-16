@@ -1,11 +1,11 @@
 //! DropJoin command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropJoinOp;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to drop a join.
 #[derive(Debug, Clone)]
@@ -35,9 +35,8 @@ impl CommandParsing for DropJoinCommand {
             }
         }
 
-        let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP JOIN statement missing join name".into()
-        })?;
+        let name = name
+            .ok_or_else(|| -> BundlebaseError { "DROP JOIN statement missing join name".into() })?;
 
         Ok(DropJoinCommand::new(name))
     }
@@ -60,9 +59,9 @@ impl BundleBuilderCommand for DropJoinCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_join() {

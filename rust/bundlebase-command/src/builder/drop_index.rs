@@ -1,13 +1,13 @@
 //! DropIndex command implementation.
 
-use bundlebase::bundle::bundle_schema;
 use crate::parser::{extract_identifier, quote_identifier};
-use crate::{CommandParsing, Rule};
-use bundlebase::BundleFacade;
-use bundlebase::bundle::operation::DropIndexOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::bundle_schema;
+use bundlebase::bundle::operation::DropIndexOp;
 use bundlebase::BundleBuilder;
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 
 /// Command to drop an index by name or column.
 #[derive(Debug, Clone)]
@@ -66,12 +66,15 @@ impl BundleBuilderCommand for DropIndexCommand {
             let index = index.or_else(|| {
                 let col_names = builder.bundle_schema();
                 // Find the ColumnId for the given column name
-                let target_col_id = col_names.iter()
+                let target_col_id = col_names
+                    .iter()
                     .find(|(_, name)| name.as_str() == self.identifier)
                     .map(|(id, _)| *id);
 
                 if let Some(col_id) = target_col_id {
-                    indexes.iter().find(|idx| idx.column_ids().contains(&col_id))
+                    indexes
+                        .iter()
+                        .find(|idx| idx.column_ids().contains(&col_id))
                 } else {
                     None
                 }
@@ -96,9 +99,9 @@ impl BundleBuilderCommand for DropIndexCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_index() {

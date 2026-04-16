@@ -1,6 +1,6 @@
 //! Help command - displays available commands and usage.
 
-use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
+use super::{ReplCommand, ReplCommandDef, ReplCommandResult};
 use bundlebase::BundleFacade;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -19,7 +19,10 @@ fn create(_args: &str) -> Result<ReplCommand, String> {
     Ok(ReplCommand::Help)
 }
 
-fn execute(_cmd: &ReplCommand, _bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'static, ReplCommandResult> {
+fn execute(
+    _cmd: &ReplCommand,
+    _bundle: &Arc<dyn BundleFacade>,
+) -> BoxFuture<'static, ReplCommandResult> {
     Box::pin(async {
         let response: Box<dyn bundlebase_command::CommandResponse> = Box::new(help_text());
         let (stream, shape) = super::response_to_stream(response)?;

@@ -20,23 +20,21 @@ impl DropViewOp {
     pub async fn setup(view_name: &str, builder: &BundleBuilder) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the name
         let views = builder.views_by_name();
-        let view_id = *views
-            .get(view_name)
-            .ok_or_else(|| {
-                let available_views: Vec<String> = views
-                    .iter()
-                    .map(|(name, id)| format!("{} ({})", name, id))
-                    .collect();
-                let available_list = if available_views.is_empty() {
-                    "none".to_string()
-                } else {
-                    available_views.join(", ")
-                };
-                BundlebaseError::from(format!(
-                    "View '{}' not found. Available views: {}",
-                    view_name, available_list
-                ))
-            })?;
+        let view_id = *views.get(view_name).ok_or_else(|| {
+            let available_views: Vec<String> = views
+                .iter()
+                .map(|(name, id)| format!("{} ({})", name, id))
+                .collect();
+            let available_list = if available_views.is_empty() {
+                "none".to_string()
+            } else {
+                available_views.join(", ")
+            };
+            BundlebaseError::from(format!(
+                "View '{}' not found. Available views: {}",
+                view_name, available_list
+            ))
+        })?;
 
         Ok(Self { id: view_id })
     }

@@ -27,8 +27,9 @@ impl Operation for DropColumnOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        bundle.column_name(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
+        bundle.column_name(&self.id).ok_or_else(|| {
+            BundlebaseError::from(format!("Column with ID '{}' not found", self.id))
+        })?;
         Ok(())
     }
 

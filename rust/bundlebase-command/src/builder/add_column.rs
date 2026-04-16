@@ -1,12 +1,12 @@
 //! AddColumn command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::AddColumnOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to add a computed column to a bundle.
 #[derive(Debug, Clone)]
@@ -59,7 +59,11 @@ impl CommandParsing for AddColumnCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("ADD COLUMN {} AS {}", quote_identifier(&self.name), self.expression)
+        format!(
+            "ADD COLUMN {} AS {}",
+            quote_identifier(&self.name),
+            self.expression
+        )
     }
 }
 
@@ -72,15 +76,10 @@ impl BundleBuilderCommand for AddColumnCommand {
         let translated_expression = bundle_schema.translate_sql(&self.expression);
 
         builder
-            .apply_operation(
-                AddColumnOp::setup(&self.name, &translated_expression).into(),
-            )
+            .apply_operation(AddColumnOp::setup(&self.name, &translated_expression).into())
             .await?;
 
-        Ok(format!(
-            "Added column {} AS {}",
-            self.name, self.expression
-        ))
+        Ok(format!("Added column {} AS {}", self.name, self.expression))
     }
 }
 

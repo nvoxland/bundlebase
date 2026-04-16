@@ -43,7 +43,8 @@ pub mod tables {
 /// This function is called by Bundle/BundleBuilder after creation to register
 /// DataFusion schema providers with the SessionContext's catalog. The bundlebase-catalog
 /// crate provides the implementation via `set_schema_provider_hook`.
-pub type SchemaProviderHook = fn(&SessionContext, Weak<dyn BundleFacade>) -> Result<(), BundlebaseError>;
+pub type SchemaProviderHook =
+    fn(&SessionContext, Weak<dyn BundleFacade>) -> Result<(), BundlebaseError>;
 
 static SCHEMA_PROVIDER_HOOK: OnceLock<SchemaProviderHook> = OnceLock::new();
 

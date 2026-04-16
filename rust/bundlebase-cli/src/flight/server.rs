@@ -41,12 +41,8 @@ pub async fn start(
         warn!("Flight server starting with default credentials (admin/password). Set custom credentials for production use.");
     }
 
-    let flight_service = BundlebaseFlightSqlService::new(
-        bundle_path.to_string(),
-        config,
-        read_only,
-        authenticator,
-    );
+    let flight_service =
+        BundlebaseFlightSqlService::new(bundle_path.to_string(), config, read_only, authenticator);
 
     Server::builder()
         .add_service(FlightServiceServer::new(flight_service))

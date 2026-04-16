@@ -56,18 +56,33 @@ mod tests {
     #[test]
     fn test_new_compound_path() {
         assert_eq!(validated_scope("s3/bucket").unwrap().as_str(), "s3/bucket");
-        assert_eq!(validated_scope("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
+        assert_eq!(
+            validated_scope("s3/bucket/path").unwrap().as_str(),
+            "s3/bucket/path"
+        );
         #[cfg(feature = "connector-kaggle")]
-        assert_eq!(validated_scope("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
+        assert_eq!(
+            validated_scope("kaggle/user/dataset").unwrap().as_str(),
+            "kaggle/user/dataset"
+        );
     }
 
     // ==================== URL handling ====================
 
     #[test]
     fn test_new_normalizes_url() {
-        assert_eq!(validated_scope("s3://bucket/path").unwrap().as_str(), "s3/bucket/path");
-        assert_eq!(validated_scope("s3://bucket").unwrap().as_str(), "s3/bucket");
-        assert_eq!(validated_scope("gs://my-bucket/data/").unwrap().as_str(), "gs/my-bucket/data");
+        assert_eq!(
+            validated_scope("s3://bucket/path").unwrap().as_str(),
+            "s3/bucket/path"
+        );
+        assert_eq!(
+            validated_scope("s3://bucket").unwrap().as_str(),
+            "s3/bucket"
+        );
+        assert_eq!(
+            validated_scope("gs://my-bucket/data/").unwrap().as_str(),
+            "gs/my-bucket/data"
+        );
     }
 
     #[test]
@@ -121,7 +136,10 @@ mod tests {
 
     #[test]
     fn test_display() {
-        assert_eq!(format!("{}", validated_scope("s3/abc").expect("valid scope")), "s3/abc");
+        assert_eq!(
+            format!("{}", validated_scope("s3/abc").expect("valid scope")),
+            "s3/abc"
+        );
     }
 
     // ==================== Serde ====================
@@ -146,8 +164,14 @@ mod tests {
 
     #[test]
     fn test_equality() {
-        assert_eq!(Scope::from_name("s3/b").unwrap(), Scope::from_name("s3/b").unwrap());
-        assert_ne!(Scope::from_name("s3/b").unwrap(), Scope::from_name("s3/c").unwrap());
+        assert_eq!(
+            Scope::from_name("s3/b").unwrap(),
+            Scope::from_name("s3/b").unwrap()
+        );
+        assert_ne!(
+            Scope::from_name("s3/b").unwrap(),
+            Scope::from_name("s3/c").unwrap()
+        );
     }
 
     #[test]

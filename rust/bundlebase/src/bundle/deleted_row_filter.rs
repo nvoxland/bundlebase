@@ -62,7 +62,11 @@ impl DataSource for DeletedRowFilterDataSource {
     }
 
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
-        write!(f, "DeletedRowFilterDataSource({} deleted)", self.deleted_rows.len())
+        write!(
+            f,
+            "DeletedRowFilterDataSource({} deleted)",
+            self.deleted_rows.len()
+        )
     }
 
     fn output_partitioning(&self) -> Partitioning {
@@ -122,7 +126,9 @@ impl Stream for DeletedRowFilterStream {
 
                     // Binary search to find deleted rows in [offset, offset + num_rows)
                     let start = self.deleted_rows.partition_point(|&r| r < offset);
-                    let end = self.deleted_rows.partition_point(|&r| r < offset + num_rows);
+                    let end = self
+                        .deleted_rows
+                        .partition_point(|&r| r < offset + num_rows);
 
                     if start == end {
                         // No deleted rows in this batch — pass through

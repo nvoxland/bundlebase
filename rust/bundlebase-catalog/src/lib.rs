@@ -11,8 +11,8 @@ pub use default::DefaultSchemaProvider;
 pub use packs::PackSchemaProvider;
 
 // Re-export constants from core for convenience
-pub use bundlebase::catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, BUNDLE_TABLE};
 pub use bundlebase::catalog::tables;
+pub use bundlebase::catalog::{BUNDLE_INFO_SCHEMA, BUNDLE_TABLE, CATALOG_NAME, DEFAULT_SCHEMA};
 
 use bundlebase::bundle::BundleFacade;
 use bundlebase_common::BundlebaseError;
@@ -40,19 +40,15 @@ pub fn register_schema_providers(
     ctx: &SessionContext,
     facade: Weak<dyn BundleFacade>,
 ) -> Result<(), BundlebaseError> {
-    let catalog = ctx.catalog(CATALOG_NAME).expect("Default catalog not found");
+    let catalog = ctx
+        .catalog(CATALOG_NAME)
+        .expect("Default catalog not found");
 
     // Register temp schema (doesn't need facade)
     catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
 
-    catalog.register_schema(
-        "blocks",
-        Arc::new(BlockSchemaProvider::new(facade.clone())),
-    )?;
-    catalog.register_schema(
-        "packs",
-        Arc::new(PackSchemaProvider::new(facade.clone())),
-    )?;
+    catalog.register_schema("blocks", Arc::new(BlockSchemaProvider::new(facade.clone())))?;
+    catalog.register_schema("packs", Arc::new(PackSchemaProvider::new(facade.clone())))?;
     catalog.register_schema(
         DEFAULT_SCHEMA,
         Arc::new(DefaultSchemaProvider::new(facade.clone())),
@@ -69,9 +65,7 @@ pub fn register_schema_providers(
 ///
 /// This is a convenience wrapper around `register_schema_providers` that
 /// extracts the SessionContext and creates the Weak reference automatically.
-pub fn register_catalog<T: BundleFacade + 'static>(
-    facade: &Arc<T>,
-) -> Result<(), BundlebaseError> {
+pub fn register_catalog<T: BundleFacade + 'static>(facade: &Arc<T>) -> Result<(), BundlebaseError> {
     let ctx = facade.ctx();
     let weak = Arc::downgrade(facade) as Weak<dyn BundleFacade>;
     register_schema_providers(&ctx, weak)
@@ -80,9 +74,7 @@ pub fn register_catalog<T: BundleFacade + 'static>(
 /// Register schema providers for a type-erased `Arc<dyn BundleFacade>`.
 ///
 /// This is a convenience wrapper for when you have a `dyn BundleFacade`.
-pub fn register_catalog_dyn(
-    facade: &Arc<dyn BundleFacade>,
-) -> Result<(), BundlebaseError> {
+pub fn register_catalog_dyn(facade: &Arc<dyn BundleFacade>) -> Result<(), BundlebaseError> {
     let ctx = facade.ctx();
     let weak = Arc::downgrade(facade);
     register_schema_providers(&ctx, weak)

@@ -14,8 +14,8 @@ pub use service::BundlebaseFlightSqlService;
 
 #[cfg(test)]
 mod tests {
-    use crate::auth::BundlebaseAuthenticator;
     use super::service::BundlebaseFlightSqlService;
+    use crate::auth::BundlebaseAuthenticator;
 
     #[tokio::test]
     async fn test_flight_sql_service_instantiation() {

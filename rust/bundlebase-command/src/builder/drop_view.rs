@@ -1,11 +1,11 @@
 //! DropView command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropViewOp;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to drop a view.
 #[derive(Debug, Clone)]
@@ -58,9 +58,9 @@ impl BundleBuilderCommand for DropViewCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_view() {

@@ -1,6 +1,6 @@
 //! Test utilities for the index crate.
 
-use bundlebase_common::{BundlebaseError, ConfigProvider, ConfigKey, Scope};
+use bundlebase_common::{BundlebaseError, ConfigKey, ConfigProvider, Scope};
 use bundlebase_io::IOReadWriteDir;
 use std::sync::Arc;
 use url::Url;
@@ -24,11 +24,19 @@ pub fn random_memory_url() -> Url {
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     let url = random_memory_url();
     let store = bundlebase_io::get_memory_store();
-    bundlebase_io::writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), test_config())
-        .expect("memory dir creation should not fail")
+    bundlebase_io::writable_dir_with_store(
+        &url,
+        store,
+        &object_store::path::Path::from(url.path()),
+        test_config(),
+    )
+    .expect("memory dir creation should not fail")
 }
 
 pub fn random_memory_dir_concrete() -> bundlebase_io::plugin::object_store::ObjectStoreDir {
-    bundlebase_io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), test_config())
-        .expect("memory dir creation should not fail")
+    bundlebase_io::plugin::object_store::ObjectStoreDir::from_url(
+        &random_memory_url(),
+        test_config(),
+    )
+    .expect("memory dir creation should not fail")
 }

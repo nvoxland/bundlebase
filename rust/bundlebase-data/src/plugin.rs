@@ -10,8 +10,8 @@ use async_trait::async_trait;
 pub use csv_reader::CsvPlugin;
 pub use jsonl_reader::JsonlPlugin;
 pub use parquet_reader::ParquetPlugin;
-pub use tsv_reader::TsvPlugin;
 use std::sync::Arc;
+pub use tsv_reader::TsvPlugin;
 
 use crate::DataContext;
 use bundlebase_common::object_id::BlockId;

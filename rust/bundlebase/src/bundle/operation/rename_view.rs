@@ -25,23 +25,21 @@ impl RenameViewOp {
         let bundle = builder.bundle();
         // Look up the view ID from the old name
         let views = bundle.views.read();
-        let view_id = *views
-            .get(old_name)
-            .ok_or_else(|| {
-                let available_views: Vec<String> = views
-                    .iter()
-                    .map(|(name, id)| format!("{} ({})", name, id))
-                    .collect();
-                let available_list = if available_views.is_empty() {
-                    "none".to_string()
-                } else {
-                    available_views.join(", ")
-                };
-                BundlebaseError::from(format!(
-                    "View '{}' not found. Available views: {}",
-                    old_name, available_list
-                ))
-            })?;
+        let view_id = *views.get(old_name).ok_or_else(|| {
+            let available_views: Vec<String> = views
+                .iter()
+                .map(|(name, id)| format!("{} ({})", name, id))
+                .collect();
+            let available_list = if available_views.is_empty() {
+                "none".to_string()
+            } else {
+                available_views.join(", ")
+            };
+            BundlebaseError::from(format!(
+                "View '{}' not found. Available views: {}",
+                old_name, available_list
+            ))
+        })?;
 
         Ok(Self {
             id: view_id,

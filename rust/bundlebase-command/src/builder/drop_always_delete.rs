@@ -1,11 +1,11 @@
 //! Drop always-delete command implementation.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
-use bundlebase::bundle::BundleFacade;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropAlwaysDeleteOp;
+use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to remove always-delete rules.
 #[derive(Debug, Clone)]

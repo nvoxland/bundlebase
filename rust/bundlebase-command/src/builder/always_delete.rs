@@ -2,12 +2,12 @@
 //!
 //! Registers a persistent delete rule AND immediately deletes matching rows.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AlwaysDeleteOp, FilterOp};
 use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 use tracing::debug;
 
 /// Command to register an always-delete rule.
@@ -65,22 +65,29 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
         // 1. Immediately delete matching rows (same as regular DELETE)
         let delete_rowids = builder.select_row_ids(&where_clause).await?;
         let deleted_count = delete_rowids.len();
-        debug!("[ALWAYS DELETE] Collected {} RowIds for WHERE {}", deleted_count, where_clause);
+        debug!(
+            "[ALWAYS DELETE] Collected {} RowIds for WHERE {}",
+            deleted_count, where_clause
+        );
 
         if !delete_rowids.is_empty() {
             builder.mark_deleted(delete_rowids, &where_clause);
 
-            let filter_query = format!(
-                "SELECT * FROM bundle WHERE NOT ({})",
-                where_clause
-            );
-            builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
+            let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", where_clause);
+            builder
+                .apply_operation(FilterOp::new(&filter_query, vec![]).into())
+                .await?;
         }
 
         // 2. Register the persistent always-delete rule (stored with internal name names)
-        builder.apply_operation(AlwaysDeleteOp::new(&where_clause).into()).await?;
+        builder
+            .apply_operation(AlwaysDeleteOp::new(&where_clause).into())
+            .await?;
 
-        Ok(format!("Always-delete rule added (deleted {} existing rows)", deleted_count))
+        Ok(format!(
+            "Always-delete rule added (deleted {} existing rows)",
+            deleted_count
+        ))
     }
 }
 

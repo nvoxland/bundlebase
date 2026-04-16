@@ -53,14 +53,13 @@ pub fn compile_to_pdf(typst_source: &str) -> Result<Vec<u8>, BundlebaseError> {
         tracing::warn!("Typst warning: {:?}", warning.message);
     }
 
-    let document = compiled.output.map_err(|e| {
-        BundlebaseError::from(format!("Typst compilation failed: {:?}", e))
-    })?;
+    let document = compiled
+        .output
+        .map_err(|e| BundlebaseError::from(format!("Typst compilation failed: {:?}", e)))?;
 
     let options = typst_pdf::PdfOptions::default();
-    let pdf_bytes = typst_pdf::pdf(&document, &options).map_err(|e| {
-        BundlebaseError::from(format!("PDF generation failed: {:?}", e))
-    })?;
+    let pdf_bytes = typst_pdf::pdf(&document, &options)
+        .map_err(|e| BundlebaseError::from(format!("PDF generation failed: {:?}", e)))?;
 
     Ok(pdf_bytes)
 }

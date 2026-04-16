@@ -14,7 +14,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AddColumnOp {
-
     pub id: ColumnId,
     pub name: String,
     pub expression: String,
@@ -37,11 +36,7 @@ impl Operation for AddColumnOp {
         // Check column doesn't already exist
         let bs = bundle.bundle_schema();
         if bs.column_id(&self.name).is_some() {
-            return Err(format!(
-                "Column '{}' already exists in the schema",
-                self.name
-            )
-            .into());
+            return Err(format!("Column '{}' already exists in the schema", self.name).into());
         }
 
         // Validate the expression by planning it against an empty DataFrame with internal name schema
@@ -56,10 +51,9 @@ impl Operation for AddColumnOp {
         let empty_batch = RecordBatch::new_empty(bundle.internal_schema().await?);
         ctx.register_batch("bundle", empty_batch)
             .map_err(|e| BundlebaseError::from(format!("Failed to validate expression: {}", e)))?;
-        ctx.state()
-            .create_logical_plan(&sql)
-            .await
-            .map_err(|e| BundlebaseError::from(format!("Invalid expression '{}': {}", self.expression, e)))?;
+        ctx.state().create_logical_plan(&sql).await.map_err(|e| {
+            BundlebaseError::from(format!("Invalid expression '{}': {}", self.expression, e))
+        })?;
 
         Ok(())
     }

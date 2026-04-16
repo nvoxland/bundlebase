@@ -1,17 +1,16 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use futures::TryStreamExt;
-use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
 fn init() {
     common::init_catalog();
 }
-
 
 #[tokio::test]
 async fn test_filter_basic() -> Result<(), BundlebaseError> {

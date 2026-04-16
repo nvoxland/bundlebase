@@ -1,8 +1,8 @@
+use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle_config::ConfigEntries;
 use bundlebase_common::command_response::CommandResponse;
-use arrow_schema::SchemaRef;
-use async_trait::async_trait;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -30,7 +30,9 @@ impl BundleConfigTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.config)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.config)".to_string(),
+            )
         })
     }
 }
@@ -57,8 +59,10 @@ impl TableProvider for BundleConfigTable {
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let entries = ConfigEntries::from(
-            self.facade()?.config().all_values()
-                .map_err(|e| datafusion::error::DataFusionError::External(e))?
+            self.facade()?
+                .config()
+                .all_values()
+                .map_err(|e| datafusion::error::DataFusionError::External(e))?,
         );
         let stream = Box::new(entries)
             .into_stream()

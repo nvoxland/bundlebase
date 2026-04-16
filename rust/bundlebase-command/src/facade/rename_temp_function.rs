@@ -6,9 +6,9 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Command to rename runtime-only function entries (not persisted).
@@ -66,12 +66,10 @@ impl CommandParsing for RenameTempFunctionCommand {
             }
         }
 
-        let old_name = old_name.ok_or_else(|| -> BundlebaseError {
-            "RENAME TEMP FUNCTION missing old name".into()
-        })?;
-        let new_name = new_name.ok_or_else(|| -> BundlebaseError {
-            "RENAME TEMP FUNCTION missing new name".into()
-        })?;
+        let old_name = old_name
+            .ok_or_else(|| -> BundlebaseError { "RENAME TEMP FUNCTION missing old name".into() })?;
+        let new_name = new_name
+            .ok_or_else(|| -> BundlebaseError { "RENAME TEMP FUNCTION missing new name".into() })?;
 
         Ok(RenameTempFunctionCommand::new(old_name, new_name))
     }
@@ -105,9 +103,9 @@ impl BundleFacadeCommand for RenameTempFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rename_temp_function() {

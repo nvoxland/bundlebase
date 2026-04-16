@@ -240,6 +240,10 @@ impl SharedLibHandle {
     }
 }
 
+pub fn verify_shared_lib_connector(path: &str) -> Result<(), BundlebaseError> {
+    SharedLibHandle::load(path).map(|_| ())
+}
+
 // ---------------------------------------------------------------------------
 // FfiConnector
 // ---------------------------------------------------------------------------

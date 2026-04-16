@@ -1,11 +1,11 @@
 //! RenameView command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::RenameViewOp;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to rename a view.
 #[derive(Debug, Clone)]
@@ -56,7 +56,11 @@ impl CommandParsing for RenameViewCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("RENAME VIEW {} TO {}", quote_identifier(&self.old_name), quote_identifier(&self.new_name))
+        format!(
+            "RENAME VIEW {} TO {}",
+            quote_identifier(&self.old_name),
+            quote_identifier(&self.new_name)
+        )
     }
 }
 
@@ -66,16 +70,19 @@ impl BundleBuilderCommand for RenameViewCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let op = RenameViewOp::setup(&self.old_name, &self.new_name, builder).await?;
         builder.apply_operation(op.into()).await?;
-        Ok(format!("Renamed view: {} to {}", self.old_name, self.new_name))
+        Ok(format!(
+            "Renamed view: {} to {}",
+            self.old_name, self.new_name
+        ))
     }
 }
 
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rename_view() {

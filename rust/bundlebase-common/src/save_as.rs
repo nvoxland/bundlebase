@@ -39,15 +39,26 @@ impl SaveAs {
             other => Err(format!(
                 "Invalid save_as value '{}'. Valid values: auto, copy, parquet, ref",
                 other
-            ).into()),
+            )
+            .into()),
         }
     }
 
     /// Resolve to a concrete strategy based on format and must_copy.
-    pub fn resolve(&self, format: &SourceFormat, must_copy: bool) -> Result<ResolvedSaveAs, BundlebaseError> {
+    pub fn resolve(
+        &self,
+        format: &SourceFormat,
+        must_copy: bool,
+    ) -> Result<ResolvedSaveAs, BundlebaseError> {
         match self {
             SaveAs::Copy => {
-                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
+                let is_attachable = matches!(
+                    format,
+                    SourceFormat::Csv
+                        | SourceFormat::Tsv
+                        | SourceFormat::JsonL
+                        | SourceFormat::Parquet
+                );
                 if is_attachable {
                     Ok(ResolvedSaveAs::Copy)
                 } else {
@@ -55,22 +66,31 @@ impl SaveAs {
                         "save_as='copy' is not valid for format '{}'. \
                          Use save_as='parquet' to convert.",
                         format
-                    ).into())
+                    )
+                    .into())
                 }
             }
             SaveAs::Parquet => Ok(ResolvedSaveAs::Parquet),
             SaveAs::Ref => {
                 if must_copy {
                     return Err("save_as='ref' is not supported for this source — \
-                        the connector requires data to be copied into the bundle.".into());
+                        the connector requires data to be copied into the bundle."
+                        .into());
                 }
-                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
+                let is_attachable = matches!(
+                    format,
+                    SourceFormat::Csv
+                        | SourceFormat::Tsv
+                        | SourceFormat::JsonL
+                        | SourceFormat::Parquet
+                );
                 if !is_attachable {
                     return Err(format!(
                         "save_as='ref' is not valid for format '{}'. \
                          Non-attachable formats must be converted. Use save_as='parquet'.",
                         format
-                    ).into());
+                    )
+                    .into());
                 }
                 Ok(ResolvedSaveAs::Ref)
             }

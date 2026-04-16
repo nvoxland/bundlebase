@@ -1,7 +1,7 @@
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{Location, Connector};
+use bundlebase_sdk::{Connector, Location};
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -1,14 +1,14 @@
 //! File IO traits for reading and writing files.
 
-use crate::BundlebaseError;
 use crate::progress::ProgressScope;
+use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use xxhash_rust::xxh3::Xxh3;
 use std::fmt::Debug;
 use url::Url;
+use xxhash_rust::xxh3::Xxh3;
 
 use crate::file_info::FileInfo;
 
@@ -124,4 +124,3 @@ pub trait IOReadWriteFile: IOReadFile {
     /// Returns Ok even if the file doesn't exist.
     async fn delete(&self) -> Result<(), BundlebaseError>;
 }
-

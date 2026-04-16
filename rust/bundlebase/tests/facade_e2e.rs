@@ -53,11 +53,7 @@ async fn test_builder_execute_explain_command() {
         .unwrap();
 
     // Execute EXPLAIN command via execute()
-    let mut stream = builder
-        .as_ref()
-        .execute("EXPLAIN", vec![])
-        .await
-        .unwrap();
+    let mut stream = builder.as_ref().execute("EXPLAIN", vec![]).await.unwrap();
 
     let mut batches = Vec::new();
     while let Some(batch_result) = stream.next().await {
@@ -80,15 +76,25 @@ async fn test_builder_execute_mutating_command_succeeds() {
     // BundleBuilder can execute mutating commands via execute()
     let result = builder
         .as_ref()
-        .execute(&format!("ATTACH '{}'", test_datafile("userdata.parquet")), vec![])
+        .execute(
+            &format!("ATTACH '{}'", test_datafile("userdata.parquet")),
+            vec![],
+        )
         .await;
 
     // Should succeed (attach the file)
-    assert!(result.is_ok(), "ATTACH should succeed on BundleBuilder: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "ATTACH should succeed on BundleBuilder: {:?}",
+        result.err()
+    );
 
     // Verify the attachment worked
     let schema = builder.schema().await.unwrap();
-    assert!(!schema.fields().is_empty(), "Schema should have fields after attach");
+    assert!(
+        !schema.fields().is_empty(),
+        "Schema should have fields after attach"
+    );
 }
 
 #[tokio::test]
@@ -110,11 +116,18 @@ async fn test_builder_execute_filter_command_succeeds() {
         .execute("FILTER WITH SELECT * FROM bundle WHERE id > 10", vec![])
         .await;
 
-    assert!(result.is_ok(), "FILTER should succeed on BundleBuilder: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "FILTER should succeed on BundleBuilder: {:?}",
+        result.err()
+    );
 
     // Verify the filter was applied (fewer rows)
     let filtered_rows = builder.num_rows().await.unwrap();
-    assert!(filtered_rows < initial_rows, "FILTER should reduce row count");
+    assert!(
+        filtered_rows < initial_rows,
+        "FILTER should reduce row count"
+    );
 }
 
 // ==================== Bundle (Read-Only) Tests ====================
@@ -172,11 +185,7 @@ async fn test_bundle_execute_explain_command() {
     let bundle = Bundle::open(&bundle_url, None).await.unwrap();
 
     // Execute EXPLAIN command via execute()
-    let mut stream = bundle
-        .as_ref()
-        .execute("EXPLAIN", vec![])
-        .await
-        .unwrap();
+    let mut stream = bundle.as_ref().execute("EXPLAIN", vec![]).await.unwrap();
 
     let mut batches = Vec::new();
     while let Some(batch_result) = stream.next().await {

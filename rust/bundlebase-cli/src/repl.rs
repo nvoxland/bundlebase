@@ -16,13 +16,13 @@ use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
+use json_formatter::format_stream_json;
 use reedline::{
     default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
     Reedline, Signal,
 };
 use std::sync::Arc;
 use stream_formatter::format_stream;
-use json_formatter::format_stream_json;
 use tracing::{error, info};
 
 /// Print the REPL header with bundle info.
@@ -96,7 +96,9 @@ pub async fn execute_single(
         match commands::execute(cmd, &bundle).await {
             Ok(Some((stream, shape))) => {
                 let output = match format {
-                    OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await?,
+                    OutputFormat::Json => {
+                        format_stream_json(stream, Some(shape), Some(1000)).await?
+                    }
                     OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await?,
                 };
                 if !output.is_empty() {
@@ -124,7 +126,10 @@ pub async fn execute_single(
     Ok(())
 }
 
-pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Result<(), BundlebaseError> {
+pub async fn start(
+    bundle: Arc<dyn BundleFacade>,
+    format: OutputFormat,
+) -> Result<(), BundlebaseError> {
     // Install progress tracker for REPL
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase_common::progress::set_tracker(tracker);
@@ -179,7 +184,10 @@ pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Resul
                 };
 
                 // Check for exit command
-                if cmds.iter().any(|cmd| matches!(cmd, Command::Repl(ReplCommand::Exit))) {
+                if cmds
+                    .iter()
+                    .any(|cmd| matches!(cmd, Command::Repl(ReplCommand::Exit)))
+                {
                     info!("Goodbye!");
                     break;
                 }
@@ -190,8 +198,12 @@ pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Resul
                     match commands::execute(cmd, &bundle).await {
                         Ok(Some((stream, shape))) => {
                             let result = match format {
-                                OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await,
-                                OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await,
+                                OutputFormat::Json => {
+                                    format_stream_json(stream, Some(shape), Some(1000)).await
+                                }
+                                OutputFormat::Table => {
+                                    format_stream(stream, Some(shape), Some(1000)).await
+                                }
                             };
                             match result {
                                 Ok(output) => {

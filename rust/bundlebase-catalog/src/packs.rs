@@ -2,9 +2,9 @@ mod pack_table;
 
 pub use pack_table::PackTable;
 
+use async_trait::async_trait;
 use bundlebase::bundle::{BundleFacade, Pack};
 use bundlebase_common::object_id::ObjectId;
-use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
 use std::any::Any;
@@ -49,7 +49,6 @@ impl PackSchemaProvider {
     }
 }
 
-
 #[async_trait]
 impl SchemaProvider for PackSchemaProvider {
     fn as_any(&self) -> &dyn Any {
@@ -57,12 +56,11 @@ impl SchemaProvider for PackSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let Some(facade) = self.facade() else { return vec![] };
+        let Some(facade) = self.facade() else {
+            return vec![];
+        };
         let packs = facade.packs();
-        packs
-            .keys()
-            .map(Pack::table_name)
-            .collect()
+        packs.keys().map(Pack::table_name).collect()
     }
 
     async fn table(&self, name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
@@ -70,7 +68,9 @@ impl SchemaProvider for PackSchemaProvider {
 
         match pack_id {
             Some(id) => {
-                let Some(facade) = self.facade() else { return Ok(None) };
+                let Some(facade) = self.facade() else {
+                    return Ok(None);
+                };
                 let packs = facade.packs();
                 if let Some(pack) = packs.get(&id) {
                     if pack.is_empty() {
@@ -89,7 +89,9 @@ impl SchemaProvider for PackSchemaProvider {
 
     fn table_exist(&self, name: &str) -> bool {
         if let Some(pack_id) = Self::parse_id(name) {
-            let Some(facade) = self.facade() else { return false };
+            let Some(facade) = self.facade() else {
+                return false;
+            };
             let packs = facade.packs();
             if let Some(pack) = packs.get(&pack_id) {
                 !pack.is_empty()

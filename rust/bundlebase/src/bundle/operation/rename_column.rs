@@ -27,17 +27,14 @@ impl RenameColumnOp {
 
 impl Operation for RenameColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        bundle.column_name(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
+        bundle.column_name(&self.id).ok_or_else(|| {
+            BundlebaseError::from(format!("Column with ID '{}' not found", self.id))
+        })?;
 
         // Check that the new name doesn't conflict with an existing column
         let bs = bundle.bundle_schema();
         if bs.column_id(&self.new_name).is_some() {
-            return Err(format!(
-                "Column '{}' already exists in the schema",
-                self.new_name
-            )
-            .into());
+            return Err(format!("Column '{}' already exists in the schema", self.new_name).into());
         }
 
         Ok(())

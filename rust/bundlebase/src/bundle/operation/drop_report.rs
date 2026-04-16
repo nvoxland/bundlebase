@@ -18,7 +18,11 @@ impl DropReportOp {
             let available_list = if available.is_empty() {
                 "none".to_string()
             } else {
-                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                available
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             };
             return Err(BundlebaseError::from(format!(
                 "Report '{}' not found. Available reports: {}",

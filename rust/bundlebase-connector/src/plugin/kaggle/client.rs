@@ -1,7 +1,7 @@
 //! HTTP client for the Kaggle REST API.
 
 use super::{dataset_scope, API_KEY_CFG, URL_CFG, USERNAME_CFG};
-use bundlebase_common::{ConfigProvider, BundlebaseError};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
 
 /// HTTP client for the Kaggle API that bundles credentials and base URL.
 ///
@@ -17,7 +17,10 @@ pub(super) struct KaggleClient {
 
 impl KaggleClient {
     /// Build a `KaggleClient` from bundle config values.
-    pub(super) fn from_config(config: &dyn ConfigProvider, dataset: &str) -> Result<Self, BundlebaseError> {
+    pub(super) fn from_config(
+        config: &dyn ConfigProvider,
+        dataset: &str,
+    ) -> Result<Self, BundlebaseError> {
         let scope = dataset_scope(dataset)?;
 
         let base_url = config.get_required(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
@@ -28,7 +31,11 @@ impl KaggleClient {
     }
 
     /// Explicit constructor (primarily for tests).
-    pub(super) fn new(base_url: &str, username: Option<String>, key: Option<String>) -> Result<Self, BundlebaseError> {
+    pub(super) fn new(
+        base_url: &str,
+        username: Option<String>,
+        key: Option<String>,
+    ) -> Result<Self, BundlebaseError> {
         use reqwest::header;
 
         let mut headers = header::HeaderMap::new();

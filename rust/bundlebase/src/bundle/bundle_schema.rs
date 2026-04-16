@@ -80,10 +80,8 @@ impl BundleSchema {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());
                     if let Some(schema) = &attach.schema_cache {
-                        for (field, id) in schema
-                            .fields()
-                            .iter()
-                            .zip(attach.column_ids_cache.iter())
+                        for (field, id) in
+                            schema.fields().iter().zip(attach.column_ids_cache.iter())
                         {
                             col_blocks.entry(*id).or_default().push(block_entry.clone());
                             if seen_physical.insert(*id) {
@@ -155,10 +153,8 @@ impl BundleSchema {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());
                     if let Some(schema) = &attach.schema_cache {
-                        for (field, id) in schema
-                            .fields()
-                            .iter()
-                            .zip(attach.column_ids_cache.iter())
+                        for (field, id) in
+                            schema.fields().iter().zip(attach.column_ids_cache.iter())
                         {
                             col_blocks.entry(*id).or_default().push(block_entry.clone());
                             if seen_physical.insert(*id) {

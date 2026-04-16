@@ -1,6 +1,6 @@
-use bundlebase::bundle::DataBlock;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use bundlebase::bundle::DataBlock;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::datasource::TableType;
 use datafusion::error::Result;

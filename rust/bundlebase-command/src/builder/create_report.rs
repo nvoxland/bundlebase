@@ -1,9 +1,9 @@
 use crate::parser::{extract_identifier, extract_string_content, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::CreateReportOp;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to create (or replace) a stored report.
 #[derive(Debug, Clone)]
@@ -62,8 +62,8 @@ impl CommandParsing for CreateReportCommand {
 
         let id = id.ok_or_else(|| BundlebaseError::from("CREATE REPORT missing id"))?;
         let name = name.ok_or_else(|| BundlebaseError::from("CREATE REPORT missing NAME"))?;
-        let description =
-            description.ok_or_else(|| BundlebaseError::from("CREATE REPORT missing DESCRIPTION"))?;
+        let description = description
+            .ok_or_else(|| BundlebaseError::from("CREATE REPORT missing DESCRIPTION"))?;
         let content =
             content.ok_or_else(|| BundlebaseError::from("CREATE REPORT missing CONTENT"))?;
 
@@ -91,7 +91,8 @@ impl BundleBuilderCommand for CreateReportCommand {
             self.description.clone(),
             self.content.clone(),
             builder,
-        ).await?;
+        )
+        .await?;
         builder.apply_operation(op.into()).await?;
         Ok(format!("Created report: {}", self.id))
     }

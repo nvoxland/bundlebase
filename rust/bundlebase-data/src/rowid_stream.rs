@@ -23,10 +23,7 @@ impl RowIdStreamAdapter {
     /// # Arguments
     /// * `inner` - The RecordBatchStream to wrap
     /// * `block_ref` - The ObjectIdAlias to embed in each RowId
-    pub fn new(
-        inner: SendableRecordBatchStream,
-        block_ref: ObjectIdAlias,
-    ) -> Self {
+    pub fn new(inner: SendableRecordBatchStream, block_ref: ObjectIdAlias) -> Self {
         Self {
             inner,
             block_ref,
@@ -48,9 +45,11 @@ impl futures::stream::Stream for RowIdStreamAdapter {
                     row_ids.push(RowId::new(self.block_ref, self.global_row_num));
                     self.global_row_num = match self.global_row_num.checked_add(1) {
                         Some(n) => n,
-                        None => return Poll::Ready(Some(Err(
-                            "Row count exceeds u32::MAX (~4 billion rows)".into()
-                        ))),
+                        None => {
+                            return Poll::Ready(Some(Err(
+                                "Row count exceeds u32::MAX (~4 billion rows)".into(),
+                            )))
+                        }
                     };
                 }
 

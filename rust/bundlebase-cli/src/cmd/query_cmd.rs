@@ -6,8 +6,8 @@
 
 use super::load_config;
 use bundlebase::Bundle;
-use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::io::Read;
 use tracing::info;
@@ -36,9 +36,9 @@ pub async fn run(args: QueryArgs) -> Result<(), BundlebaseError> {
         Some(s) => s,
         None => {
             let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .map_err(|e| BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e)))?;
+            std::io::stdin().read_to_string(&mut buf).map_err(|e| {
+                BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e))
+            })?;
             let trimmed = buf.trim().to_string();
             if trimmed.is_empty() {
                 eprintln!("Error: No SQL provided. Pass SQL as an argument or pipe it via stdin.");
@@ -54,7 +54,11 @@ pub async fn run(args: QueryArgs) -> Result<(), BundlebaseError> {
         Ok(s) => s,
         Err(e) => {
             let msg = e.to_string();
-            if msg.contains("init.yaml") || msg.contains("not found") || msg.contains("No such file") || msg.contains("does not exist") {
+            if msg.contains("init.yaml")
+                || msg.contains("not found")
+                || msg.contains("No such file")
+                || msg.contains("does not exist")
+            {
                 return Err(format!(
                     "No bundle found at '{}'. To create a new bundle, use 'bundlebase create'.\n\nUnderlying error: {}",
                     args.bundle, msg

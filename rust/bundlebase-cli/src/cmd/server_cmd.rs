@@ -24,7 +24,11 @@ pub async fn run(args: ServerArgs) -> Result<(), BundlebaseError> {
     info!(
         "Opening bundle at: {}{}",
         args.bundle.bundle,
-        if args.bundle.read_only { " (read-only)" } else { "" }
+        if args.bundle.read_only {
+            " (read-only)"
+        } else {
+            ""
+        }
     );
 
     let config = load_config(args.bundle.config.as_deref())?;
@@ -33,11 +37,5 @@ pub async fn run(args: ServerArgs) -> Result<(), BundlebaseError> {
         .parse()
         .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
 
-    bundlebase_cli::flight::start(
-        &args.bundle.bundle,
-        config,
-        args.bundle.read_only,
-        addr,
-    )
-    .await
+    bundlebase_cli::flight::start(&args.bundle.bundle, config, args.bundle.read_only, addr).await
 }

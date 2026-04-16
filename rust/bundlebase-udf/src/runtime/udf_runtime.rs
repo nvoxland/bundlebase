@@ -274,6 +274,9 @@ impl UdfRuntime {
         }
 
         let resolved = self.resolve_path(data_dir);
+        if resolved.runtime_type() == super::entrypoint::RuntimeType::Internal {
+            return resolved.validate_entrypoint();
+        }
         let call_string = resolved.build_call_string();
 
         super::ipc_utils::verify_ipc_handshake(&call_string).await
@@ -311,6 +314,40 @@ impl<'de> Deserialize<'de> for UdfRuntime {
 mod tests {
     use super::super::entrypoint::find_in_manifest;
     use super::*;
+    use bundlebase_common::{ConfigKey, Scope};
+    use bundlebase_io::{writable_dir_from_url, ConfigProvider};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use url::Url;
+
+    fn test_lib_path() -> String {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let test_lib_dir = format!("{}/../bundlebase/tests/test_lib_function", manifest_dir);
+
+        let status = std::process::Command::new("cargo")
+            .arg("build")
+            .current_dir(&test_lib_dir)
+            .status()
+            .expect("Failed to build test lib");
+        assert!(status.success(), "Test lib build failed");
+
+        #[cfg(target_os = "macos")]
+        let lib_name = "libtest_lib_function.dylib";
+        #[cfg(target_os = "linux")]
+        let lib_name = "libtest_lib_function.so";
+        #[cfg(target_os = "windows")]
+        let lib_name = "test_lib_function.dll";
+
+        format!("{}/target/debug/{}", test_lib_dir, lib_name)
+    }
+
+    struct EmptyConfig;
+
+    impl ConfigProvider for EmptyConfig {
+        fn get(&self, _scope: &Scope, _key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+            Ok(None)
+        }
+    }
 
     #[test]
     fn test_parse_from_ipc_relative() {
@@ -557,6 +594,20 @@ mod tests {
             "Expected 'not found' in error: {}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn test_verify_bundled_connector_ffi_does_not_use_ipc_spawn() {
+        let rt = UdfRuntime::parse_from(&format!("ffi::{}", test_lib_path())).unwrap();
+        let temp = tempdir().unwrap();
+        let url = Url::from_directory_path(temp.path()).unwrap();
+        let data_dir = writable_dir_from_url(&url, Arc::new(EmptyConfig))
+            .await
+            .expect("create temp data dir");
+
+        rt.verify_bundled_connector(&data_dir)
+            .await
+            .expect("ffi bundled connector should verify without IPC spawn");
     }
 
     #[test]

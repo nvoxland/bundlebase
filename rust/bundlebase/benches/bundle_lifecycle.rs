@@ -11,9 +11,9 @@ mod throttled_store;
 use bench_data::ALL_FORMATS;
 use bench_helpers::{create_runtime, fresh_dir};
 use bundlebase::BundleBuilder;
+use bundlebase_command::BundleBuilderExt;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_10K, SCALE_1K};
-use bundlebase_command::BundleBuilderExt;
 
 fn bench_create_bundle(c: &mut Criterion) {
     let rt = create_runtime();
@@ -24,7 +24,10 @@ fn bench_create_bundle(c: &mut Criterion) {
             let bundle = BundleBuilder::create(&url, None)
                 .await
                 .expect("bundle creation failed");
-            bundle.commit("Created bundle").await.expect("Commit failed");
+            bundle
+                .commit("Created bundle")
+                .await
+                .expect("Commit failed");
             drop(bundle);
         });
     });
@@ -41,28 +44,21 @@ fn bench_attach_data(c: &mut Criterion) {
             let data_url = bench_data::get_data_url(rows, &format);
 
             group.throughput(Throughput::Elements(rows as u64));
-            group.bench_with_input(
-                BenchmarkId::new(format.name(), rows),
-                &rows,
-                |b, &_rows| {
+            group.bench_with_input(BenchmarkId::new(format.name(), rows), &rows, |b, &_rows| {
+                let data_url = data_url.clone();
+                b.to_async(&rt).iter(|| {
                     let data_url = data_url.clone();
-                    b.to_async(&rt).iter(|| {
-                        let data_url = data_url.clone();
-                        async move {
-                            let url = fresh_dir("bundle");
-                            let bundle = BundleBuilder::create(&url, None)
-                                .await
-                                .expect("bundle creation failed");
-                            bundle
-                                .attach(&data_url, None)
-                                .await
-                                .expect("attach failed");
-                            bundle.commit("Attached file").await.expect("commit failed");
-                            drop(bundle);
-                        }
-                    });
-                },
-            );
+                    async move {
+                        let url = fresh_dir("bundle");
+                        let bundle = BundleBuilder::create(&url, None)
+                            .await
+                            .expect("bundle creation failed");
+                        bundle.attach(&data_url, None).await.expect("attach failed");
+                        bundle.commit("Attached file").await.expect("commit failed");
+                        drop(bundle);
+                    }
+                });
+            });
         }
     }
     group.finish();

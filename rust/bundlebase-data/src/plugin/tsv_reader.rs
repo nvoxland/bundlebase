@@ -2,15 +2,15 @@
 //!
 //! Reuses the CSV reader infrastructure with a tab delimiter.
 
-use crate::DataContext;
 use crate::plugin::csv_reader::{CsvFormatConfig, CsvReader};
 use crate::plugin::file_reader::FilePlugin;
 use crate::plugin::ReaderPlugin;
+use crate::DataContext;
 use crate::{BlockId, DataReader};
-use bundlebase_io::plugin::object_store::ObjectStoreFile;
-use bundlebase_common::BundlebaseError;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -61,6 +61,11 @@ impl ReaderPlugin for TsvPlugin {
                 bundle.config_provider(),
             )?),
         };
-        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout, crate::attach_format::AttachFormat::Tsv))))
+        Ok(Some(Arc::new(CsvReader::new(
+            reader,
+            block_id,
+            &layout,
+            crate::attach_format::AttachFormat::Tsv,
+        ))))
     }
 }

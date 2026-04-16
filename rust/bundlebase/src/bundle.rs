@@ -1024,10 +1024,8 @@ impl Bundle {
             if let AnyOperation::AttachBlock(attach) = op {
                 if &attach.pack == pack.id() {
                     if let Some(schema) = &attach.schema_cache {
-                        for (field, col_id) in schema
-                            .fields()
-                            .iter()
-                            .zip(attach.column_ids_cache.iter())
+                        for (field, col_id) in
+                            schema.fields().iter().zip(attach.column_ids_cache.iter())
                         {
                             combined_names
                                 .entry(*col_id)

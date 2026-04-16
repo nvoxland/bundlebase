@@ -83,19 +83,26 @@ pub fn create_mcp_tracker(peer: Peer<RoleServer>, token: ProgressToken) -> Arc<M
 
         while let Some(event) = rx.recv().await {
             let notification = match event {
-                ProgressEvent::Start { id, operation, total } => {
+                ProgressEvent::Start {
+                    id,
+                    operation,
+                    total,
+                } => {
                     ops.insert(id.0, (operation.clone(), total));
-                    let mut param = ProgressNotificationParam::new(token.clone(), 0.0)
-                        .with_message(&operation);
+                    let mut param =
+                        ProgressNotificationParam::new(token.clone(), 0.0).with_message(&operation);
                     if let Some(t) = total {
                         param = param.with_total(t as f64);
                     }
                     Notification::new(param)
                 }
-                ProgressEvent::Update { id, current, message } => {
+                ProgressEvent::Update {
+                    id,
+                    current,
+                    message,
+                } => {
                     let total = ops.get(&id.0).and_then(|(_, t)| *t);
-                    let mut param =
-                        ProgressNotificationParam::new(token.clone(), current as f64);
+                    let mut param = ProgressNotificationParam::new(token.clone(), current as f64);
                     if let Some(t) = total {
                         param = param.with_total(t as f64);
                     }
@@ -107,9 +114,10 @@ pub fn create_mcp_tracker(peer: Peer<RoleServer>, token: ProgressToken) -> Arc<M
                 ProgressEvent::Finish { id } => {
                     let (op, total) = ops.remove(&id.0).unwrap_or_default();
                     let progress = total.unwrap_or(1) as f64;
-                    let mut param =
-                        ProgressNotificationParam::new(token.clone(), progress);
-                    param = param.with_total(progress).with_message(format!("Done: {}", op));
+                    let mut param = ProgressNotificationParam::new(token.clone(), progress);
+                    param = param
+                        .with_total(progress)
+                        .with_message(format!("Done: {}", op));
                     Notification::new(param)
                 }
             };

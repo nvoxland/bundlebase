@@ -42,9 +42,8 @@ impl BenchmarkDataConfig {
 
 /// NATO phonetic alphabet vocabulary for generating synthetic text descriptions.
 const VOCAB: [&str; 20] = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
-    "quebec", "romeo", "sierra", "tango",
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
+    "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
 ];
 
 /// Standard row counts for benchmarks
@@ -81,9 +80,7 @@ pub fn generate_batch(config: &BenchmarkDataConfig) -> RecordBatch {
     let category_array = StringArray::from(category_values);
 
     // Generate random strings for text operations
-    let names: Vec<String> = (0..config.rows)
-        .map(|i| format!("item_{:08}", i))
-        .collect();
+    let names: Vec<String> = (0..config.rows).map(|i| format!("item_{:08}", i)).collect();
     let name_array = StringArray::from(names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
 
     // Generate secondary category for joins

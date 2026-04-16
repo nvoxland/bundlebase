@@ -1,6 +1,6 @@
-use bundlebase_common::VersionedBlockId;
 use crate::IndexDefinition;
 use bundlebase_common::ColumnId;
+use bundlebase_common::VersionedBlockId;
 use parking_lot::RwLock;
 use std::sync::Arc;
 

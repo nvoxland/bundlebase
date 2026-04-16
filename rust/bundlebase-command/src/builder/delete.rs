@@ -3,13 +3,13 @@
 //! Deletes rows matching a WHERE clause by collecting their RowIds
 //! and adding them to the bundle's in-memory deleted set.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::bundle_schema;
 use bundlebase::bundle::operation::FilterOp;
 use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 use tracing::debug;
 
 /// Command to delete rows matching a WHERE condition.
@@ -41,9 +41,8 @@ impl CommandParsing for DeleteCommand {
             }
         }
 
-        let where_clause = where_clause.ok_or_else(|| -> BundlebaseError {
-            "DELETE statement missing WHERE clause".into()
-        })?;
+        let where_clause = where_clause
+            .ok_or_else(|| -> BundlebaseError { "DELETE statement missing WHERE clause".into() })?;
 
         if where_clause.is_empty() {
             return Err("DELETE WHERE clause cannot be empty".into());
@@ -68,7 +67,10 @@ impl BundleBuilderCommand for DeleteCommand {
         // Collect RowIds matching the WHERE clause
         let delete_rowids = builder.select_row_ids(&where_clause).await?;
         let deleted_count = delete_rowids.len();
-        debug!("[DELETE] Collected {} RowIds for WHERE {}", deleted_count, where_clause);
+        debug!(
+            "[DELETE] Collected {} RowIds for WHERE {}",
+            deleted_count, where_clause
+        );
 
         if deleted_count == 0 {
             return Ok("Deleted 0 rows".to_string());
@@ -78,11 +80,10 @@ impl BundleBuilderCommand for DeleteCommand {
         builder.mark_deleted(delete_rowids, &where_clause);
 
         // Apply a negated filter to immediately exclude deleted rows from queries
-        let filter_query = format!(
-            "SELECT * FROM bundle WHERE NOT ({})",
-            where_clause
-        );
-        builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
+        let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", where_clause);
+        builder
+            .apply_operation(FilterOp::new(&filter_query, vec![]).into())
+            .await?;
 
         Ok(format!("Deleted {} rows", deleted_count))
     }
@@ -108,8 +109,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_delete_complex_where() {
-        let input =
-            "DELETE FROM bundle WHERE status = 'inactive' AND last_login < '2020-01-01'";
+        let input = "DELETE FROM bundle WHERE status = 'inactive' AND last_login < '2020-01-01'";
         let cmd = parse_command(input).expect("Failed to parse DELETE");
         match cmd {
             BundleCommand::Delete(c) => {

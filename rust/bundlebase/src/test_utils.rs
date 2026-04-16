@@ -25,11 +25,7 @@ static TEST_DATAFILE_RESPONSES: OnceLock<HashMap<String, String>> = OnceLock::ne
 /// Get or create the singleton test DataAdapterFactory
 pub fn test_adapter_factory() -> Arc<DataReaderFactory> {
     TEST_FACTORY
-        .get_or_init(|| {
-            Arc::new(DataReaderFactory::new(
-                Arc::new(DataStorage::new()),
-            ))
-        })
+        .get_or_init(|| Arc::new(DataReaderFactory::new(Arc::new(DataStorage::new()))))
         .clone()
 }
 
@@ -89,7 +85,13 @@ pub fn random_memory_url() -> Url {
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     let url = random_memory_url();
     let store = crate::io::get_memory_store();
-    writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), test_config()).unwrap()
+    writable_dir_with_store(
+        &url,
+        store,
+        &object_store::path::Path::from(url.path()),
+        test_config(),
+    )
+    .unwrap()
 }
 
 /// Create a random memory file for testing.

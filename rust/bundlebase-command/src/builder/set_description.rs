@@ -1,11 +1,11 @@
 //! SetDescription command implementation.
 
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
-use bundlebase::bundle::operation::SetDescriptionOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::SetDescriptionOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to set the bundle's description.
 #[derive(Debug, Clone)]
@@ -37,9 +37,8 @@ impl CommandParsing for SetDescriptionCommand {
             }
         }
 
-        let description = description.ok_or_else(|| -> BundlebaseError {
-            "SET DESCRIPTION missing description".into()
-        })?;
+        let description = description
+            .ok_or_else(|| -> BundlebaseError { "SET DESCRIPTION missing description".into() })?;
 
         Ok(SetDescriptionCommand::new(description))
     }
@@ -63,9 +62,9 @@ impl BundleBuilderCommand for SetDescriptionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_set_description() {

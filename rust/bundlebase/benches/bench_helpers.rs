@@ -10,11 +10,11 @@
 use super::bench_data;
 use super::bench_data::Format;
 use bundlebase::BundleBuilder;
+use bundlebase_command::BundleBuilderExt;
 use bundlebase_common::BundlebaseError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use bundlebase_command::BundleBuilderExt;
 
 /// Root directory for benchmark temp files, under the system temp directory.
 pub fn bench_tmp_dir() -> PathBuf {
@@ -27,7 +27,6 @@ pub fn fresh_dir(prefix: &str) -> String {
     std::fs::create_dir_all(&dir).expect("failed to create bench tmp dir");
     format!("throttle://{}/", dir.display())
 }
-
 
 /// Clean up all benchmark temp files before a run.
 pub fn clean_bench_tmp() {

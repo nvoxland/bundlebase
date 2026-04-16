@@ -4,16 +4,16 @@
 //! Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
 //! This is the right choice for `python:mod:Class` calls that cannot be bundled.
 
+use crate::parser::{escape_string, extract_string_content};
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use crate::parser::{escape_string, extract_string_content};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
-use bundlebase_udf::ConnectorEntry;
-use bundlebase_common::Platform;
-use bundlebase_udf::runtime::UdfRuntime;
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::NamespacedName;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase_common::Platform;
+use bundlebase_udf::runtime::UdfRuntime;
+use bundlebase_udf::ConnectorEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -33,11 +33,7 @@ pub struct ImportTempConnectorCommand {
 }
 
 impl ImportTempConnectorCommand {
-    pub fn new(
-        name: impl Into<String>,
-        from: impl Into<String>,
-        platform: Platform,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, from: impl Into<String>, platform: Platform) -> Self {
         Self {
             name: name.into(),
             from: from.into(),
@@ -123,7 +119,10 @@ impl CommandParsing for ImportTempConnectorCommand {
     fn to_statement(&self) -> String {
         let mut with_parts = Vec::new();
         if self.platform != Platform::any() {
-            with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
+            with_parts.push(format!(
+                "platform = {}",
+                escape_string(&self.platform.to_string())
+            ));
         }
 
         if with_parts.is_empty() {
@@ -161,7 +160,10 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
             temporary: true,
         };
         facade.connector_registry().write().add_entry(entry);
-        facade.function_registry().read().refresh_version_udf(facade.version());
+        facade
+            .function_registry()
+            .read()
+            .refresh_version_udf(facade.version());
         Ok(format!("Loaded temporary connector: {}", self.name))
     }
 }
@@ -169,9 +171,9 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_import_temp_connector() {
@@ -189,13 +191,13 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_temp_connector_roundtrip() {
-        let cmd = ImportTempConnectorCommand::new(
-            "acme.weather",
-            "python::mod:Class",
-            Platform::any(),
-        );
+        let cmd =
+            ImportTempConnectorCommand::new("acme.weather", "python::mod:Class", Platform::any());
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT TEMP CONNECTOR acme.weather FROM 'python::mod:Class'");
+        assert_eq!(
+            statement,
+            "IMPORT TEMP CONNECTOR acme.weather FROM 'python::mod:Class'"
+        );
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::ImportTempConnector(c) => {

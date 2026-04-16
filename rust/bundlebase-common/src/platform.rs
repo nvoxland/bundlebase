@@ -124,7 +124,10 @@ mod tests {
 
     #[test]
     fn test_platform_display() {
-        let p = Platform { os: "linux".to_string(), arch: "amd64".to_string() };
+        let p = Platform {
+            os: "linux".to_string(),
+            arch: "amd64".to_string(),
+        };
         assert_eq!(p.to_string(), "linux/amd64");
     }
 

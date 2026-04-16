@@ -5,9 +5,9 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 /// Command to drop runtime-only function entries (not persisted).
@@ -21,9 +21,7 @@ pub struct DropTempFunctionCommand {
 
 impl DropTempFunctionCommand {
     pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-        }
+        Self { name: name.into() }
     }
 
     /// Returns the Arrow schema for this command's output.
@@ -74,9 +72,7 @@ impl BundleFacadeCommand for DropTempFunctionCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        let count = facade
-            .drop_temp_function(&self.name, None)
-            .await?;
+        let count = facade.drop_temp_function(&self.name, None).await?;
 
         Ok(format!(
             "Dropped {} temporary function entries for {}",
@@ -88,9 +84,9 @@ impl BundleFacadeCommand for DropTempFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_temp_function() {

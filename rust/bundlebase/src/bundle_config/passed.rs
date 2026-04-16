@@ -90,8 +90,7 @@ mod tests {
         );
 
         let json = serde_json::to_string(&cfg).expect("serialize");
-        let deserialized: PassedBundleConfig =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: PassedBundleConfig = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(cfg, deserialized);
     }
 

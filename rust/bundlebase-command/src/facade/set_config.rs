@@ -6,10 +6,10 @@
 
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase::BundleFacade;
-use bundlebase::bundle_config::Scope;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase::bundle_config::Scope;
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use log::info;
 use std::sync::Arc;
 
@@ -30,11 +30,7 @@ pub struct SetConfigCommand {
 
 impl SetConfigCommand {
     /// Create a new SetConfigCommand.
-    pub fn new(
-        scope: Scope,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    pub fn new(scope: Scope, key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             key: key.into(),
             value: value.into(),
@@ -75,9 +71,7 @@ impl CommandParsing for SetConfigCommand {
                     }
                 }
                 Rule::quoted_string => {
-                    let s = crate::parser::extract_string_content(
-                        inner_pair.as_str(),
-                    )?;
+                    let s = crate::parser::extract_string_content(inner_pair.as_str())?;
                     if value.is_none() {
                         value = Some(s);
                     } else if scope.is_none() {
@@ -89,8 +83,7 @@ impl CommandParsing for SetConfigCommand {
             }
         }
 
-        let key =
-            key.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing key"))?;
+        let key = key.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing key"))?;
         let value =
             value.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing value"))?;
         let scope = match scope {
@@ -102,11 +95,7 @@ impl CommandParsing for SetConfigCommand {
             }
         };
 
-        Ok(SetConfigCommand {
-            key,
-            value,
-            scope,
-        })
+        Ok(SetConfigCommand { key, value, scope })
     }
 
     fn to_statement(&self) -> String {
@@ -126,11 +115,9 @@ impl BundleFacadeCommand for SetConfigCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        facade.set_config(
-            &self.scope,
-            &self.key,
-            &self.value,
-        ).await?;
+        facade
+            .set_config(&self.scope, &self.key, &self.value)
+            .await?;
 
         let is_secure = bundlebase::bundle_config::is_key_secure(&self.scope, &self.key);
         let display_value = if is_secure {
@@ -148,14 +135,17 @@ impl BundleFacadeCommand for SetConfigCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_set_config_without_for_fails() {
         let input = "SET CONFIG region = 'us-west-2'";
-        assert!(parse_command(input).is_err(), "SET CONFIG without FOR should fail");
+        assert!(
+            parse_command(input).is_err(),
+            "SET CONFIG without FOR should fail"
+        );
     }
 
     #[test]
@@ -180,7 +170,10 @@ mod parsing_tests {
             "http://localhost:9000",
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'");
+        assert_eq!(
+            statement,
+            "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'"
+        );
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::SetConfig(ref c) => {

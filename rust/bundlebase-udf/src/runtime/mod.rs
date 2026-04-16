@@ -1,11 +1,11 @@
+mod docker;
 mod entrypoint;
-pub mod ipc_utils;
-mod udf_runtime;
-mod python;
 mod ffi;
 mod ipc;
+pub mod ipc_utils;
 mod java;
-mod docker;
+mod python;
+mod udf_runtime;
 
 pub use entrypoint::RuntimeType;
 pub use udf_runtime::UdfRuntime;

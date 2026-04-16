@@ -67,8 +67,7 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
     let build_providers = || {
         // Initialize tracing (spans)
         let span_exporter = SpanExporter::default();
-        let span_processor =
-            BatchSpanProcessor::builder(span_exporter).build();
+        let span_processor = BatchSpanProcessor::builder(span_exporter).build();
 
         let tracer_provider = SdkTracerProvider::builder()
             .with_span_processor(span_processor)
@@ -103,7 +102,10 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
     // enter it while building the providers (so tokio::spawn attaches to it), then
     // move the runtime into a background thread to keep it alive for the process
     // lifetime so the periodic reader's timers can run.
-    match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => {
             // Enter the runtime so any tokio::spawn calls below attach to it
             let handle = rt.handle().clone();

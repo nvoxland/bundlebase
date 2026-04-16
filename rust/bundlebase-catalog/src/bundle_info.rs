@@ -1,6 +1,7 @@
 mod always_deletes_table;
 mod always_updates_table;
 mod blocks_table;
+mod columns_table;
 mod commands_table;
 mod config_table;
 mod connectors_table;
@@ -9,7 +10,6 @@ mod functions_table;
 mod history_table;
 mod indexes_table;
 mod packs_table;
-mod columns_table;
 mod reports_table;
 mod status_table;
 mod views_table;
@@ -17,10 +17,11 @@ mod views_table;
 use crate::tables;
 use bundlebase::bundle::BundleFacade;
 
-use async_trait::async_trait;
 use always_deletes_table::BundleAlwaysDeletesTable;
 use always_updates_table::BundleAlwaysUpdatesTable;
+use async_trait::async_trait;
 use blocks_table::BundleBlocksTable;
+use columns_table::BundleColumnsTable;
 use commands_table::CommandsTable;
 use config_table::BundleConfigTable;
 use connectors_table::BundleConnectorsTable;
@@ -30,11 +31,10 @@ use functions_table::BundleFunctionsTable;
 use history_table::BundleHistoryTable;
 use indexes_table::BundleIndexesTable;
 use packs_table::BundlePacksTable;
-use columns_table::BundleColumnsTable;
+use reports_table::BundleReportsTable;
 use status_table::BundleStatusTable;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use reports_table::BundleReportsTable;
 use views_table::BundleViewsTable;
 
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
@@ -58,19 +58,58 @@ impl BundleInfoSchemaProvider {
     /// Create a new BundleInfoSchemaProvider with the given BundleFacade.
     pub fn new(bundle: Weak<dyn BundleFacade>) -> Self {
         let mut tables: HashMap<&'static str, Arc<dyn TableProvider>> = HashMap::new();
-        tables.insert(tables::HISTORY, Arc::new(BundleHistoryTable::new(bundle.clone())));
-        tables.insert(tables::STATUS, Arc::new(BundleStatusTable::new(bundle.clone())));
-        tables.insert(tables::DETAILS, Arc::new(BundleDetailsTable::new(bundle.clone())));
-        tables.insert(tables::VIEWS, Arc::new(BundleViewsTable::new(bundle.clone())));
-        tables.insert(tables::INDEXES, Arc::new(BundleIndexesTable::new(bundle.clone())));
-        tables.insert(tables::PACKS, Arc::new(BundlePacksTable::new(bundle.clone())));
-        tables.insert(tables::CONFIG, Arc::new(BundleConfigTable::new(bundle.clone())));
-        tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle.clone())));
-        tables.insert(tables::CONNECTORS, Arc::new(BundleConnectorsTable::new(bundle.clone())));
-        tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle.clone())));
-        tables.insert(tables::COLUMNS, Arc::new(BundleColumnsTable::new(bundle.clone())));
-        tables.insert(tables::ALWAYS_DELETES, Arc::new(BundleAlwaysDeletesTable::new(bundle.clone())));
-        tables.insert(tables::ALWAYS_UPDATES, Arc::new(BundleAlwaysUpdatesTable::new(bundle.clone())));
+        tables.insert(
+            tables::HISTORY,
+            Arc::new(BundleHistoryTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::STATUS,
+            Arc::new(BundleStatusTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::DETAILS,
+            Arc::new(BundleDetailsTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::VIEWS,
+            Arc::new(BundleViewsTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::INDEXES,
+            Arc::new(BundleIndexesTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::PACKS,
+            Arc::new(BundlePacksTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::CONFIG,
+            Arc::new(BundleConfigTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::BLOCKS,
+            Arc::new(BundleBlocksTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::CONNECTORS,
+            Arc::new(BundleConnectorsTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::FUNCTIONS,
+            Arc::new(BundleFunctionsTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::COLUMNS,
+            Arc::new(BundleColumnsTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::ALWAYS_DELETES,
+            Arc::new(BundleAlwaysDeletesTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::ALWAYS_UPDATES,
+            Arc::new(BundleAlwaysUpdatesTable::new(bundle.clone())),
+        );
         tables.insert(tables::REPORTS, Arc::new(BundleReportsTable::new(bundle)));
         tables.insert(tables::COMMANDS, Arc::new(CommandsTable::new()));
         Self { tables }

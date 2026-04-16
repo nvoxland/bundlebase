@@ -1,7 +1,7 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -41,9 +41,11 @@ impl BundleAlwaysDeletesTable {
     }
 
     fn table_schema() -> SchemaRef {
-        Arc::new(Schema::new(vec![
-            Field::new("where_clause", DataType::Utf8, false),
-        ]))
+        Arc::new(Schema::new(vec![Field::new(
+            "where_clause",
+            DataType::Utf8,
+            false,
+        )]))
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
@@ -52,14 +54,17 @@ impl BundleAlwaysDeletesTable {
 
         // Translate internal column names back to user-visible names for display
         let bs = facade.bundle_schema();
-        let rules: Vec<String> = rules.iter().map(|r| {
-            let mut result = r.clone();
-            for (id, name) in bs.columns() {
-                let internal = bundlebase::bundle::bundle_schema::generate_internal_name(id);
-                result = result.replace(&internal, name);
-            }
-            result
-        }).collect();
+        let rules: Vec<String> = rules
+            .iter()
+            .map(|r| {
+                let mut result = r.clone();
+                for (id, name) in bs.columns() {
+                    let internal = bundlebase::bundle::bundle_schema::generate_internal_name(id);
+                    result = result.replace(&internal, name);
+                }
+                result
+            })
+            .collect();
         let clauses: Vec<&str> = rules.iter().map(|s| s.as_str()).collect();
 
         let batch = RecordBatch::try_new(

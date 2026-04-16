@@ -1,4 +1,4 @@
-use ::bundlebase::bundle_config::{PassedBundleConfig, Scope, validated_scope};
+use ::bundlebase::bundle_config::{validated_scope, PassedBundleConfig, Scope};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 

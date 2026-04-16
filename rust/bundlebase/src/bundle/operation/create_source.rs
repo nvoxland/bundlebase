@@ -61,11 +61,7 @@ pub struct CreateSourceOp {
     /// Optional batch size threshold in bytes. When set, small files fetched from
     /// this source are concatenated into batches until the total raw bytes exceeds
     /// this threshold, reducing per-file overhead. None = no batching.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "batchBytes"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "batchBytes")]
     pub min_batch_bytes: Option<usize>,
 
     /// Optional expected schema for this source.

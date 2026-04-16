@@ -1,11 +1,13 @@
-use bundlebase_data::DataContext;
-use bundlebase_data::plugin::ReaderPlugin;
-use bundlebase_data::{BlockId, DataReader};
 use crate::Bundle;
 use crate::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
+use bundlebase_data::attach_format::AttachFormat;
+use bundlebase_data::plugin::ReaderPlugin;
+use bundlebase_data::DataContext;
+use bundlebase_data::RowId;
+use bundlebase_data::{BlockId, DataReader};
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
@@ -18,8 +20,6 @@ use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use url::Url;
-use bundlebase_data::attach_format::AttachFormat;
-use bundlebase_data::RowId;
 
 pub struct BundlebasePlugin;
 
@@ -145,11 +145,12 @@ impl DataReader for BundlebaseDataReader {
             let mut exprs = Vec::with_capacity(proj.len());
             for &i in proj {
                 let field = input_schema.field(i);
-                let col_expr = datafusion::physical_expr::expressions::col(
-                    field.name(),
-                    &input_schema,
-                )?;
-                exprs.push((col_expr as Arc<dyn datafusion::physical_expr::PhysicalExpr>, field.name().clone()));
+                let col_expr =
+                    datafusion::physical_expr::expressions::col(field.name(), &input_schema)?;
+                exprs.push((
+                    col_expr as Arc<dyn datafusion::physical_expr::PhysicalExpr>,
+                    field.name().clone(),
+                ));
             }
             physical_plan = Arc::new(ProjectionExec::try_new(exprs, physical_plan)?);
         }

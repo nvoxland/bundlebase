@@ -114,7 +114,10 @@ impl Operation for RenameFunctionOp {
         let new_namespaced = NamespacedName::parse(&self.new_name, "Function")
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
-        bundle.function_registry().write().rename_by_ids(&self.ids, &new_namespaced)
+        bundle
+            .function_registry()
+            .write()
+            .rename_by_ids(&self.ids, &new_namespaced)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         Ok(())
     }
@@ -123,11 +126,11 @@ impl Operation for RenameFunctionOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::datatypes::DataType;
-    use crate::platform::Platform;
     use crate::bundle::function_entry::{FunctionEntry, FunctionKind};
+    use crate::platform::Platform;
     use crate::udf::UdfRuntime;
     use crate::NamespacedName;
+    use arrow::datatypes::DataType;
 
     #[test]
     fn test_describe() {

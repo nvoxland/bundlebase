@@ -7,12 +7,12 @@
 
 use crate::parser::extract_string_content;
 use crate::{BundleBuilderCommand, CommandParsing, Rule};
-use bundlebase::{AnyOperation, HollowContext, BundleBuilder, BundlebaseError};
-use bundlebase::bundle::BundleFacade;
-use bundlebase::bundle::operation::Operation;
-use bundlebase_data::ObjectId;
-use bundlebase_common::ColumnId;
 use arrow::datatypes::DataType;
+use bundlebase::bundle::operation::Operation;
+use bundlebase::bundle::BundleFacade;
+use bundlebase::{AnyOperation, BundleBuilder, BundlebaseError, HollowContext};
+use bundlebase_common::ColumnId;
+use bundlebase_data::ObjectId;
 use std::collections::HashMap;
 
 /// Command to export a hollow bundle.
@@ -37,7 +37,8 @@ impl CommandParsing for ExportHollowCommand {
                 path = Some(extract_string_content(inner.as_str())?);
             }
         }
-        let path = path.ok_or_else(|| BundlebaseError::from("EXPORT HOLLOW TO: missing target path"))?;
+        let path =
+            path.ok_or_else(|| BundlebaseError::from("EXPORT HOLLOW TO: missing target path"))?;
         Ok(ExportHollowCommand { path })
     }
 
@@ -55,7 +56,8 @@ impl BundleBuilderCommand for ExportHollowCommand {
 
         // Pass 1: Build HollowContext by scanning AttachBlock ops.
         // For each source, collect the most recent schema seen (column name, id, type).
-        let mut source_schemas: HashMap<ObjectId, Vec<(String, ColumnId, DataType)>> = HashMap::new();
+        let mut source_schemas: HashMap<ObjectId, Vec<(String, ColumnId, DataType)>> =
+            HashMap::new();
 
         for op in &all_ops {
             if let AnyOperation::AttachBlock(attach) = op {
@@ -98,14 +100,14 @@ impl BundleBuilderCommand for ExportHollowCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_export_hollow_basic() {
-        let cmd = parse_command("EXPORT HOLLOW TO 'path/hollow'")
-            .expect("Failed to parse EXPORT HOLLOW");
+        let cmd =
+            parse_command("EXPORT HOLLOW TO 'path/hollow'").expect("Failed to parse EXPORT HOLLOW");
         match cmd {
             BundleCommand::ExportHollow(ref c) => {
                 assert_eq!(c.path, "path/hollow");

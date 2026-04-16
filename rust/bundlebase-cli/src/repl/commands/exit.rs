@@ -1,6 +1,6 @@
 //! Exit command - exits the REPL.
 
-use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
+use super::{ReplCommand, ReplCommandDef, ReplCommandResult};
 use bundlebase::BundleFacade;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -19,6 +19,9 @@ fn create(_args: &str) -> Result<ReplCommand, String> {
     Ok(ReplCommand::Exit)
 }
 
-fn execute(_cmd: &ReplCommand, _bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'static, ReplCommandResult> {
+fn execute(
+    _cmd: &ReplCommand,
+    _bundle: &Arc<dyn BundleFacade>,
+) -> BoxFuture<'static, ReplCommandResult> {
     Box::pin(async { Ok(None) })
 }

@@ -52,8 +52,11 @@ impl CreateViewOp {
             .url()
             .to_string();
 
-        let view_builder =
-            BundleBuilder::extend(Arc::new(parent_builder.bundle().clone()), Some(&view_dir_path)).await?;
+        let view_builder = BundleBuilder::extend(
+            Arc::new(parent_builder.bundle().clone()),
+            Some(&view_dir_path),
+        )
+        .await?;
 
         // Note: We do NOT apply operations to the view bundle during setup.
         // Operations are stored in the commit file and will be applied when
@@ -103,7 +106,10 @@ impl CreateViewOp {
         let filename = format!("00001{}.yaml", hash_short);
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_dir.writable_file(&filename)?.write_stream(Box::pin(stream)).await?;
+        manifest_dir
+            .writable_file(&filename)?
+            .write_stream(Box::pin(stream))
+            .await?;
         debug!(
             "Wrote view commit: {} with {} operations",
             filename,
@@ -118,10 +124,13 @@ impl CreateViewOp {
 
         debug!("View '{}' created at {}", name, view_dir_path);
 
-        Ok((CreateViewOp {
-            name: name.to_string(),
-            id: view_id,
-        }, view_builder))
+        Ok((
+            CreateViewOp {
+                name: name.to_string(),
+                id: view_id,
+            },
+            view_builder,
+        ))
     }
 }
 

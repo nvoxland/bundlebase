@@ -1,9 +1,9 @@
-use bundlebase::bundle::BundleFacade;
 use arrow::array::{ArrayRef, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use bundlebase::bundle::BundleFacade;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -68,9 +68,10 @@ impl TableProvider for BundleColumnsTable {
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let facade = self.facade()?;
-        let bundle_schema = facade.schema().await.map_err(|e| {
-            datafusion::error::DataFusionError::External(e)
-        })?;
+        let bundle_schema = facade
+            .schema()
+            .await
+            .map_err(|e| datafusion::error::DataFusionError::External(e))?;
 
         let columns: Vec<&str> = bundle_schema
             .fields()
@@ -98,7 +99,8 @@ impl TableProvider for BundleColumnsTable {
             }
         }
         // Build pack name list for disambiguated join column detection
-        let pack_names: Vec<String> = packs.values()
+        let pack_names: Vec<String> = packs
+            .values()
             .filter(|p| p.is_join())
             .map(|p| p.name().to_string())
             .collect();
@@ -110,7 +112,8 @@ impl TableProvider for BundleColumnsTable {
                 let name = f.name();
                 // Direct lookup: column name is known to BundleSchema
                 if let Some(col_id) = bs.column_id(name) {
-                    if let Some(pack_name) = bs.blocks_for_column(&col_id)
+                    if let Some(pack_name) = bs
+                        .blocks_for_column(&col_id)
                         .first()
                         .and_then(|(block_id, _)| block_to_pack.get(block_id).cloned())
                     {
@@ -137,8 +140,10 @@ impl TableProvider for BundleColumnsTable {
         let sources_array: ArrayRef = Arc::new(StringArray::from(sources));
 
         let output_schema = Self::output_schema();
-        let batch =
-            RecordBatch::try_new(output_schema.clone(), vec![columns_array, types_array, nullables_array, sources_array])?;
+        let batch = RecordBatch::try_new(
+            output_schema.clone(),
+            vec![columns_array, types_array, nullables_array, sources_array],
+        )?;
         let mem_table = MemTable::try_new(output_schema, vec![vec![batch]])?;
         mem_table.scan(state, projection, filters, limit).await
     }

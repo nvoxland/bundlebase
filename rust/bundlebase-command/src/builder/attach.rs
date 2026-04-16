@@ -1,13 +1,13 @@
 //! Attach command implementation.
 
-use crate::parser::{extract_identifier, quote_identifier};
-use crate::{CommandParsing, Rule};
 use crate::parser::extract_string_content;
-use bundlebase::bundle::operation::AttachBlockOp;
-use bundlebase_common::BundlebaseError;
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::AttachBlockOp;
 use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to attach a data block to the bundle.
 #[derive(Debug, Clone)]
@@ -70,9 +70,8 @@ impl CommandParsing for AttachCommand {
             }
         }
 
-        let path = path.ok_or_else(|| -> BundlebaseError {
-            "ATTACH statement missing path".into()
-        })?;
+        let path =
+            path.ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
 
         Ok(AttachCommand::new(path, pack))
     }
@@ -81,7 +80,11 @@ impl CommandParsing for AttachCommand {
         use crate::parser::escape_string;
         match &self.pack {
             Some(pack) if pack != "base" => {
-                format!("ATTACH {} TO {}", escape_string(&self.path), quote_identifier(pack))
+                format!(
+                    "ATTACH {} TO {}",
+                    escape_string(&self.path),
+                    quote_identifier(pack)
+                )
             }
             _ => format!("ATTACH {}", escape_string(&self.path)),
         }
@@ -95,14 +98,17 @@ impl BundleBuilderCommand for AttachCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
-        let temp_reader = builder.bundle().reader_factory
+        let temp_reader = builder
+            .bundle()
+            .reader_factory
             .detect(&self.path, &bundlebase_data::BlockId::generate(), builder)
             .await?;
         let format = temp_reader.format();
 
-        let op =
-            AttachBlockOp::setup(&pack_id, &self.path, format, None, None, None, builder, None)
-                .await?;
+        let op = AttachBlockOp::setup(
+            &pack_id, &self.path, format, None, None, None, builder, None,
+        )
+        .await?;
         builder.apply_operation(op.into()).await?;
 
         // Apply always-delete rules to the newly attached data
@@ -118,13 +124,13 @@ impl BundleBuilderCommand for AttachCommand {
                     );
                     builder.mark_deleted(delete_rowids, rule);
 
-                    let filter_query = format!(
-                        "SELECT * FROM bundle WHERE NOT ({})",
-                        rule
-                    );
-                    builder.apply_operation(
-                        bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()
-                    ).await?;
+                    let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", rule);
+                    builder
+                        .apply_operation(
+                            bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![])
+                                .into(),
+                        )
+                        .await?;
                 }
             }
         }
@@ -133,13 +139,26 @@ impl BundleBuilderCommand for AttachCommand {
         let update_rules = builder.always_update_rules();
         if !update_rules.is_empty() {
             for rule in &update_rules {
-                let full_sql = format!("UPDATE bundle SET {} WHERE {}", rule.set_clause, rule.where_clause);
+                let full_sql = format!(
+                    "UPDATE bundle SET {} WHERE {}",
+                    rule.set_clause, rule.where_clause
+                );
                 let cmd = crate::parser::parse_command(&full_sql)?;
                 if let crate::BundleCommand::Update(update_cmd) = cmd {
-                    let columns: Vec<String> = update_cmd.assignments.iter().map(|a| a.column.clone()).collect();
-                    let expressions: Vec<String> = update_cmd.assignments.iter().map(|a| a.expression.clone()).collect();
+                    let columns: Vec<String> = update_cmd
+                        .assignments
+                        .iter()
+                        .map(|a| a.column.clone())
+                        .collect();
+                    let expressions: Vec<String> = update_cmd
+                        .assignments
+                        .iter()
+                        .map(|a| a.expression.clone())
+                        .collect();
 
-                    let updated = builder.evaluate_update_cols(&columns, &expressions, &rule.where_clause).await?;
+                    let updated = builder
+                        .evaluate_update_cols(&columns, &expressions, &rule.where_clause)
+                        .await?;
                     if updated > 0 {
                         tracing::debug!(
                             "[ALWAYS UPDATE] Auto-updated {} rows matching SET {} WHERE {}",
@@ -151,19 +170,34 @@ impl BundleBuilderCommand for AttachCommand {
 
                         // Build CASE WHEN using internal name column names from the internal schema
                         let col_names_map = builder.bundle_schema();
-                        let select_cols: Vec<String> = col_names_map.keys().map(|col_id| {
-                            let internal_name = col_names_map.internal_name(col_id).expect("column ID from schema keys");
-                            let quoted = format!("\"{}\"", internal_name);
-                            if let Some(assignment) = update_cmd.assignments.iter().find(|a| a.column == internal_name) {
-                                format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", rule.where_clause, assignment.expression, quoted, quoted)
-                            } else {
-                                quoted
-                            }
-                        }).collect();
+                        let select_cols: Vec<String> = col_names_map
+                            .keys()
+                            .map(|col_id| {
+                                let internal_name = col_names_map
+                                    .internal_name(col_id)
+                                    .expect("column ID from schema keys");
+                                let quoted = format!("\"{}\"", internal_name);
+                                if let Some(assignment) = update_cmd
+                                    .assignments
+                                    .iter()
+                                    .find(|a| a.column == internal_name)
+                                {
+                                    format!(
+                                        "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
+                                        rule.where_clause, assignment.expression, quoted, quoted
+                                    )
+                                } else {
+                                    quoted
+                                }
+                            })
+                            .collect();
                         let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
-                        builder.apply_operation(
-                            bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()
-                        ).await?;
+                        builder
+                            .apply_operation(
+                                bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![])
+                                    .into(),
+                            )
+                            .await?;
                     }
                 }
             }
@@ -176,9 +210,9 @@ impl BundleBuilderCommand for AttachCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_attach_simple() {

@@ -3,11 +3,11 @@
 //! `SHOW COUNT` returns the number of rows in the bundle.
 
 use crate::response::OutputShape;
-use crate::{BundleFacadeCommand, CommandParsing, Rule};
-use bundlebase::BundleFacade;
 use crate::CommandResponse;
-use bundlebase_common::BundlebaseError;
+use crate::{BundleFacadeCommand, CommandParsing, Rule};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 use crate::repl::commands::{self, ReplCommand};
-use bundlebase_command::parser::available_commands;
 use bundlebase::BundleFacade;
+use bundlebase_command::parser::available_commands;
 use reedline::{Completer, Span, Suggestion};
 use std::sync::Arc;
 
@@ -18,7 +18,10 @@ impl BundleCompleter {
             .collect();
 
         // SELECT is standard SQL, not a bundlebase command, but useful for completion
-        commands.push(("select".to_string(), Some("SELECT <columns> FROM <table>".to_string())));
+        commands.push((
+            "select".to_string(),
+            Some("SELECT <columns> FROM <table>".to_string()),
+        ));
 
         // Sort for deterministic completion order
         commands.sort_by(|a, b| a.0.cmp(&b.0));

@@ -6,11 +6,11 @@
 
 use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::BundleFacade;
 use bundlebase_common::namespaced_name::NamespacedName;
 use bundlebase_common::BundlebaseError;
-use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -107,9 +107,16 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
                 types.join(", ")
             })
             .collect();
-        let return_types: Vec<String> = matching.iter().map(|e| e.return_type.to_string()).collect();
-        let runtimes: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let entrypoints: Vec<String> = matching.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        let return_types: Vec<String> =
+            matching.iter().map(|e| e.return_type.to_string()).collect();
+        let runtimes: Vec<String> = matching
+            .iter()
+            .map(|e| e.from.runtime_name().to_string())
+            .collect();
+        let entrypoints: Vec<String> = matching
+            .iter()
+            .map(|e| e.from.to_entrypoint_string())
+            .collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
 
@@ -135,9 +142,9 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_describe_function() {

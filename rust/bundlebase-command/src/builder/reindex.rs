@@ -1,9 +1,9 @@
 //! Reindex command implementation.
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to rebuild all indexes.
 #[derive(Debug, Clone, Default)]
@@ -43,9 +43,9 @@ impl BundleBuilderCommand for ReindexCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_reindex() {

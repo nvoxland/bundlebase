@@ -1,12 +1,12 @@
 //! Filter command implementation.
 
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::FilterOp;
 use bundlebase::bundle::BundleFacade;
+use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
-use crate::BundleBuilderCommand;
-use bundlebase::BundleBuilder;
 
 /// Command to filter rows with a SELECT query.
 #[derive(Debug, Clone)]
@@ -41,9 +41,8 @@ impl CommandParsing for FilterCommand {
             }
         }
 
-        let query = query.ok_or_else(|| -> BundlebaseError {
-            "FILTER statement missing query".into()
-        })?;
+        let query =
+            query.ok_or_else(|| -> BundlebaseError { "FILTER statement missing query".into() })?;
 
         if query.is_empty() {
             return Err("FILTER query cannot be empty".into());
@@ -75,9 +74,9 @@ impl BundleBuilderCommand for FilterCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_filter_simple() {
@@ -93,11 +92,15 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_filter_complex() {
-        let input = "FILTER WITH SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')";
+        let input =
+            "FILTER WITH SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Filter(c) => {
-                assert_eq!(c.query, "SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')");
+                assert_eq!(
+                    c.query,
+                    "SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')"
+                );
             }
             _ => panic!("Expected Filter variant"),
         }
@@ -107,7 +110,10 @@ mod parsing_tests {
     fn test_round_trip() {
         let cmd = FilterCommand::new("SELECT * FROM bundle WHERE salary > 50000", vec![]);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "FILTER WITH SELECT * FROM bundle WHERE salary > 50000");
+        assert_eq!(
+            statement,
+            "FILTER WITH SELECT * FROM bundle WHERE salary > 50000"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

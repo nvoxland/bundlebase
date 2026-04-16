@@ -8,7 +8,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::ffi_stream::ArrowArrayStreamReader;
 use arrow::ffi_stream::FFI_ArrowArrayStream;
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{export_source, Location, Connector, StableUrl};
+use bundlebase_sdk::{export_source, Connector, Location, StableUrl};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::sync::Arc;

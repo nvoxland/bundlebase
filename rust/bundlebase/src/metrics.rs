@@ -15,7 +15,6 @@ use opentelemetry::{
     trace::{Span as OtelSpanTrait, Status, Tracer},
 };
 
-
 use lazy_static::lazy_static;
 
 // Re-export KeyValue for use by callers

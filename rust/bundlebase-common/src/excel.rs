@@ -26,9 +26,8 @@ pub fn is_excel_format(filename: &str) -> bool {
 /// for writing to the data directory.
 pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, BundlebaseError> {
     let cursor = Cursor::new(data);
-    let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|e| {
-        BundlebaseError::from(format!("Failed to open Excel file: {}", e))
-    })?;
+    let mut workbook = open_workbook_auto_from_rs(cursor)
+        .map_err(|e| BundlebaseError::from(format!("Failed to open Excel file: {}", e)))?;
 
     let sheet_names = workbook.sheet_names().to_vec();
     if sheet_names.is_empty() {
@@ -49,9 +48,9 @@ pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, 
         None => sheet_names[0].clone(),
     };
 
-    let range = workbook
-        .worksheet_range(&target_sheet)
-        .map_err(|e| BundlebaseError::from(format!("Failed to read sheet '{}': {}", target_sheet, e)))?;
+    let range = workbook.worksheet_range(&target_sheet).map_err(|e| {
+        BundlebaseError::from(format!("Failed to read sheet '{}': {}", target_sheet, e))
+    })?;
 
     let (row_count, col_count) = range.get_size();
     if row_count == 0 || col_count == 0 {
@@ -72,9 +71,7 @@ pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, 
         .collect();
 
     // Build string arrays for each column
-    let mut builders: Vec<StringBuilder> = (0..col_count)
-        .map(|_| StringBuilder::new())
-        .collect();
+    let mut builders: Vec<StringBuilder> = (0..col_count).map(|_| StringBuilder::new()).collect();
 
     for row in 1..row_count {
         for col in 0..col_count {

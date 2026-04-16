@@ -1,11 +1,11 @@
 //! ImportFunction operation — registers a named function definition.
 
+use crate::bundle::function_entry::{parse_function_name, FunctionEntry, FunctionKind};
+use crate::bundle::operation::Operation;
+use crate::data::ObjectId;
 use crate::platform::Platform;
 use crate::udf::UdfRuntime;
-use crate::bundle::function_entry::{parse_function_name, FunctionEntry, FunctionKind};
-use crate::data::ObjectId;
 use crate::NamespacedName;
-use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
@@ -42,7 +42,15 @@ impl ImportFunctionOp {
         platform: Platform,
         kind: FunctionKind,
     ) -> Self {
-        Self { id: ObjectId::generate(), name, input_types, return_type, from, platform, kind }
+        Self {
+            id: ObjectId::generate(),
+            name,
+            input_types,
+            return_type,
+            from,
+            platform,
+            kind,
+        }
     }
 }
 
@@ -69,7 +77,9 @@ impl Operation for ImportFunctionOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        let namespaced = self.name.parse::<NamespacedName>()
+        let namespaced = self
+            .name
+            .parse::<NamespacedName>()
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         let entry = FunctionEntry {
             id: self.id,
@@ -82,10 +92,16 @@ impl Operation for ImportFunctionOp {
             kind: self.kind,
         };
         if bundle.function_registry().read().has(&self.name) {
-            tracing::warn!("Overwriting existing function definition for '{}'", self.name);
+            tracing::warn!(
+                "Overwriting existing function definition for '{}'",
+                self.name
+            );
         }
 
-        bundle.function_registry().write().add_and_register(entry)
+        bundle
+            .function_registry()
+            .write()
+            .add_and_register(entry)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         Ok(())
     }
@@ -155,7 +171,10 @@ mod tests {
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be in format 'namespace.name'"));
     }
 
     #[tokio::test]

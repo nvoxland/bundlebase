@@ -1,13 +1,13 @@
 //! NormalizeColumnNames command implementation.
 
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
+use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::operation::RenameColumnOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use arrow::datatypes::SchemaRef;
-use std::collections::HashMap;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
+use std::collections::HashMap;
 
 /// Command to normalize all column names to lowercase+underscore identifiers.
 #[derive(Debug, Clone)]
@@ -35,7 +35,13 @@ fn normalize_single_name(name: &str) -> String {
     // 2. Replace non-alphanumeric, non-underscore characters with underscores
     let replaced: String = lowered
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     // 3. Collapse consecutive underscores into one
@@ -104,16 +110,18 @@ impl BundleBuilderCommand for NormalizeColumnNamesCommand {
         let count = renames.len();
 
         for (old_name, new_name) in &renames {
-            let column_id = builder.column_id(old_name)
+            let column_id = builder
+                .column_id(old_name)
                 .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", old_name)))?;
             builder
-                .apply_operation(
-                    RenameColumnOp::setup(column_id, new_name).into(),
-                )
+                .apply_operation(RenameColumnOp::setup(column_id, new_name).into())
                 .await?;
         }
 
-        Ok(format!("Normalized column names: {} columns renamed", count))
+        Ok(format!(
+            "Normalized column names: {} columns renamed",
+            count
+        ))
     }
 }
 
@@ -177,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_compute_renames_dedup() {
-        use arrow::datatypes::{Field, Schema, DataType};
+        use arrow::datatypes::{DataType, Field, Schema};
         use std::sync::Arc;
 
         // No duplicates
@@ -186,10 +194,13 @@ mod tests {
             Field::new("Last Name", DataType::Utf8, false),
         ]));
         let renames = compute_renames(&schema);
-        assert_eq!(renames, vec![
-            ("First Name".to_string(), "first_name".to_string()),
-            ("Last Name".to_string(), "last_name".to_string()),
-        ]);
+        assert_eq!(
+            renames,
+            vec![
+                ("First Name".to_string(), "first_name".to_string()),
+                ("Last Name".to_string(), "last_name".to_string()),
+            ]
+        );
 
         // Duplicates after normalization
         let schema = Arc::new(Schema::new(vec![
@@ -198,11 +209,14 @@ mod tests {
             Field::new("user.name", DataType::Utf8, false),
         ]));
         let renames = compute_renames(&schema);
-        assert_eq!(renames, vec![
-            ("User Name".to_string(), "user_name".to_string()),
-            ("user-name".to_string(), "user_name_2".to_string()),
-            ("user.name".to_string(), "user_name_3".to_string()),
-        ]);
+        assert_eq!(
+            renames,
+            vec![
+                ("User Name".to_string(), "user_name".to_string()),
+                ("user-name".to_string(), "user_name_2".to_string()),
+                ("user.name".to_string(), "user_name_3".to_string()),
+            ]
+        );
 
         // Already simple names should not appear in renames
         let schema = Arc::new(Schema::new(vec![

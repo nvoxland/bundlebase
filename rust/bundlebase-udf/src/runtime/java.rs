@@ -2,13 +2,13 @@
 
 use crate::bridge::ipc_bridge::SubprocessCache;
 use crate::bridge::manifest::Manifest;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::entrypoint::{UdfEntrypoint, RuntimeType, validate_file_reachable};
-use super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
+use super::entrypoint::{validate_file_reachable, RuntimeType, UdfEntrypoint};
+use super::ipc_utils::{create_ipc_accumulator, invoke_ipc_scalar_impl};
 
 /// Java runtime: holds a path to a JAR and an optional class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,13 +32,15 @@ impl JavaRuntime {
                 return Err(format!(
                     "Invalid Java entrypoint '{}'. Path before ':' cannot be empty.",
                     entrypoint
-                ).into());
+                )
+                .into());
             }
             if class.is_empty() {
                 return Err(format!(
                     "Invalid Java entrypoint '{}'. Class after ':' cannot be empty.",
                     entrypoint
-                ).into());
+                )
+                .into());
             }
 
             Ok(Self {
@@ -116,7 +118,13 @@ impl UdfEntrypoint for JavaRuntime {
         return_type: &DataType,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<Box<dyn Accumulator>> {
-        create_ipc_accumulator(name, &self.to_entrypoint_string(), function_name, return_type, subprocess_cache)
+        create_ipc_accumulator(
+            name,
+            &self.to_entrypoint_string(),
+            function_name,
+            return_type,
+            subprocess_cache,
+        )
     }
 
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {
@@ -159,7 +167,9 @@ fn load_java_ipc_manifest(jar_path: &str) -> Result<Manifest, BundlebaseError> {
     let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to parse manifest JSON from 'java -jar {}': {}. Output: {}",
-            jar_path, e, json_str.trim()
+            jar_path,
+            e,
+            json_str.trim()
         ))
     })?;
 

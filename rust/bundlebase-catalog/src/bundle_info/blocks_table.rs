@@ -1,8 +1,8 @@
-use bundlebase::bundle::{BundleFacade, DataBlock};
-use bundlebase_common::object_id::ObjectId;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use bundlebase::bundle::{BundleFacade, DataBlock};
+use bundlebase_common::object_id::ObjectId;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -35,7 +35,9 @@ impl BundleBlocksTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.blocks)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.blocks)".to_string(),
+            )
         })
     }
 
@@ -78,15 +80,21 @@ impl BundleBlocksTable {
         let source_locations: Vec<Option<&str>> = blocks
             .iter()
             .map(|(b, _, _)| {
-                b.source_info()
-                    .and_then(|si| si.batch_sources.first().map(|source| source.location.as_str()))
+                b.source_info().and_then(|si| {
+                    si.batch_sources
+                        .first()
+                        .map(|source| source.location.as_str())
+                })
             })
             .collect();
         let source_versions: Vec<Option<&str>> = blocks
             .iter()
             .map(|(b, _, _)| {
-                b.source_info()
-                    .and_then(|si| si.batch_sources.first().map(|source| source.version.as_str()))
+                b.source_info().and_then(|si| {
+                    si.batch_sources
+                        .first()
+                        .map(|source| source.version.as_str())
+                })
             })
             .collect();
 

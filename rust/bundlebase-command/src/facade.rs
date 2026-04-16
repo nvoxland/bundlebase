@@ -5,44 +5,44 @@
 
 // Facade command implementations
 mod describe_connector;
+pub mod describe_data;
 mod describe_function;
-mod export_data;
-mod import_temp_connector;
-mod import_temp_function;
-mod explain;
 mod drop_temp_connector;
 mod drop_temp_function;
+mod explain;
+mod export_data;
+mod generate_report;
+mod import_temp_connector;
+mod import_temp_function;
+mod profile_column;
 mod rename_temp_connector;
 mod rename_temp_function;
 mod set_config;
 mod show;
 mod show_count;
-pub mod describe_data;
 mod syntax;
 mod test_connector;
-mod profile_column;
-mod generate_report;
 
-pub use describe_data::DescribeDataCommand;
-pub use profile_column::ProfileColumnCommand;
-pub use test_connector::TestConnectorCommand;
 pub use describe_connector::DescribeConnectorCommand;
+pub use describe_data::DescribeDataCommand;
 pub use describe_function::DescribeFunctionCommand;
-pub use export_data::ExportDataCommand;
-pub use import_temp_connector::ImportTempConnectorCommand;
-pub use import_temp_function::ImportTempFunctionCommand;
 pub use drop_temp_connector::DropTempConnectorCommand;
 pub use drop_temp_function::DropTempFunctionCommand;
+pub use explain::ExplainPlanCommand;
+pub use export_data::ExportDataCommand;
+pub use generate_report::GenerateReportCommand;
+pub use import_temp_connector::ImportTempConnectorCommand;
+pub use import_temp_function::ImportTempFunctionCommand;
+pub use profile_column::ProfileColumnCommand;
 pub use rename_temp_connector::RenameTempConnectorCommand;
 pub use rename_temp_function::RenameTempFunctionCommand;
-pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;
 pub use show::{
-    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
-    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
-    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
-    ShowReportsCommand,
+    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowBlocksCommand, ShowColumnsCommand,
+    ShowCommandsCommand, ShowConfigCommand, ShowConnectorsCommand, ShowDetailsCommand,
+    ShowFunctionsCommand, ShowHistoryCommand, ShowIndexesCommand, ShowPacksCommand,
+    ShowReportsCommand, ShowStatusCommand, ShowViewsCommand,
 };
 pub use show_count::ShowCountCommand;
-pub use generate_report::GenerateReportCommand;
 pub use syntax::SyntaxCommand;
+pub use test_connector::TestConnectorCommand;

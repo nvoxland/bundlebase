@@ -44,10 +44,13 @@ impl IndexCache {
     /// Gets a cached `BTreeIndex` if it exists, promoting it to most-recently-used.
     pub fn get(&self, index_path: &str) -> Option<Arc<BTreeIndex>> {
         let result = self.cache.lock().get(index_path).cloned();
-        INDEX_CACHE_OPS.add(1, &[
-            KeyValue::new("cache_name", "index_cache"),
-            KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
-        ]);
+        INDEX_CACHE_OPS.add(
+            1,
+            &[
+                KeyValue::new("cache_name", "index_cache"),
+                KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
+            ],
+        );
         result
     }
 
@@ -105,9 +108,9 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bundlebase_common::RowId;
     use crate::btree_index::IndexedValue;
     use arrow::datatypes::DataType;
+    use bundlebase_common::RowId;
     use std::collections::HashMap;
 
     fn build_test_index(name: &str) -> Arc<BTreeIndex> {

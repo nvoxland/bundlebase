@@ -1,11 +1,11 @@
 //! DropFunction command implementation (persistent).
 
-use crate::{CommandParsing, Rule};
-use bundlebase_common::Platform;
-use bundlebase::bundle::operation::DropFunctionOp;
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
+use bundlebase::bundle::operation::DropFunctionOp;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
+use bundlebase_common::Platform;
 
 /// Command to drop all overloads of a function by name.
 #[derive(Debug, Clone)]
@@ -39,9 +39,8 @@ impl CommandParsing for DropFunctionCommand {
             }
         }
 
-        let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP FUNCTION missing function name".into()
-        })?;
+        let name = name
+            .ok_or_else(|| -> BundlebaseError { "DROP FUNCTION missing function name".into() })?;
 
         Ok(DropFunctionCommand::new(name, None))
     }
@@ -65,9 +64,9 @@ impl BundleBuilderCommand for DropFunctionCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_drop_function() {

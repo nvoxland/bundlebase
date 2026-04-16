@@ -2,14 +2,14 @@
 
 use crate::bridge::ipc_bridge::SubprocessCache;
 use crate::bridge::manifest::Manifest;
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::DataType;
+use bundlebase_common::BundlebaseError;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::entrypoint::{UdfEntrypoint, RuntimeType};
-use super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
+use super::entrypoint::{RuntimeType, UdfEntrypoint};
 use super::ipc::load_ipc_manifest;
+use super::ipc_utils::{create_ipc_accumulator, invoke_ipc_scalar_impl};
 
 /// Docker runtime: holds an image name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,13 @@ impl UdfEntrypoint for DockerRuntime {
         return_type: &DataType,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<Box<dyn Accumulator>> {
-        create_ipc_accumulator(name, &self.image, function_name, return_type, subprocess_cache)
+        create_ipc_accumulator(
+            name,
+            &self.image,
+            function_name,
+            return_type,
+            subprocess_cache,
+        )
     }
 
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {

@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::dataframe::DataFrame;
 use datafusion::datasource::TableType;
-use datafusion::logical_expr::{Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown};
+use datafusion::logical_expr::{
+    Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown,
+};
 use datafusion::physical_plan::ExecutionPlan;
 use std::any::Any;
 use std::borrow::Cow;

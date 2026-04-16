@@ -1,9 +1,9 @@
-use bundlebase_common::data_reader::DataReader;
-use bundlebase_common::{RowId};
-use datafusion::physical_plan::SendableRecordBatchStream;
 use crate::btree_index::{BTreeIndex, IndexedValue};
-use bundlebase_common::BundlebaseError;
 use arrow::datatypes::SchemaRef;
+use bundlebase_common::data_reader::DataReader;
+use bundlebase_common::BundlebaseError;
+use bundlebase_common::RowId;
+use datafusion::physical_plan::SendableRecordBatchStream;
 use std::fmt;
 use std::sync::Arc;
 

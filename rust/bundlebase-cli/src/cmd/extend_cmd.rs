@@ -7,8 +7,8 @@
 
 use super::{auto_commit_message, load_config};
 use bundlebase::{Bundle, BundleFacade};
-use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::io::Read;
 use std::sync::Arc;
@@ -40,15 +40,14 @@ pub struct ExtendArgs {
     pub config: Option<String>,
 }
 
-
 pub async fn run(args: ExtendArgs) -> Result<(), BundlebaseError> {
     let sql = match args.sql {
         Some(s) => s,
         None => {
             let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .map_err(|e| BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e)))?;
+            std::io::stdin().read_to_string(&mut buf).map_err(|e| {
+                BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e))
+            })?;
             let trimmed = buf.trim().to_string();
             if trimmed.is_empty() {
                 eprintln!("Error: No SQL provided. Pass SQL as an argument or pipe it via stdin.");
@@ -63,7 +62,11 @@ pub async fn run(args: ExtendArgs) -> Result<(), BundlebaseError> {
         Ok(b) => b,
         Err(e) => {
             let msg = e.to_string();
-            if msg.contains("does not exist") || msg.contains("not found") || msg.contains("No such file") || msg.contains("init.yaml") {
+            if msg.contains("does not exist")
+                || msg.contains("not found")
+                || msg.contains("No such file")
+                || msg.contains("init.yaml")
+            {
                 return Err(format!(
                     "No bundle found at '{}'. To create a new bundle, use 'bundlebase create'.\n\nUnderlying error: {}",
                     args.bundle, msg
@@ -72,9 +75,7 @@ pub async fn run(args: ExtendArgs) -> Result<(), BundlebaseError> {
             return Err(e);
         }
     };
-    let state: Arc<dyn BundleFacade> = bundle
-        .extend(args.to.as_deref())
-        .await?;
+    let state: Arc<dyn BundleFacade> = bundle.extend(args.to.as_deref()).await?;
 
     // Execute the user's command
     bundlebase_cli::repl::execute_single(state.clone(), &sql, args.format).await?;

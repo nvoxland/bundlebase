@@ -113,10 +113,7 @@ impl ConfigScope {
     }
 
     /// Builder: override the URL-to-name conversion function.
-    pub const fn with_url_to_name(
-        mut self,
-        f: fn(&ConfigScope, &str) -> Option<String>,
-    ) -> Self {
+    pub const fn with_url_to_name(mut self, f: fn(&ConfigScope, &str) -> Option<String>) -> Self {
         self.url_to_name_fn = f;
         self
     }

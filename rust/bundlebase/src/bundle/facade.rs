@@ -3,11 +3,11 @@ use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
 use crate::bundle::Pack;
+use crate::bundle::{AlwaysUpdateRule, ReportEntry};
+use crate::bundle_config::Scope;
 use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
 use crate::object_id::ColumnId;
-use crate::bundle_config::Scope;
-use crate::bundle::{AlwaysUpdateRule, ReportEntry};
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -75,13 +75,21 @@ pub trait BundleFacade: Send + Sync {
         // Fallback: compute from schema + column_names
         use super::bundle_schema;
         let schema = self.schema().await?;
-        let col_id_fields: Vec<Arc<arrow_schema::Field>> = schema.fields().iter().filter_map(|f| {
-            bs.iter()
-                .find(|(_, name)| name.as_str() == f.name())
-                .map(|(id, _)| {
-                    Arc::new(f.as_ref().clone().with_name(bundle_schema::generate_internal_name(id)))
-                })
-        }).collect();
+        let col_id_fields: Vec<Arc<arrow_schema::Field>> = schema
+            .fields()
+            .iter()
+            .filter_map(|f| {
+                bs.iter()
+                    .find(|(_, name)| name.as_str() == f.name())
+                    .map(|(id, _)| {
+                        Arc::new(
+                            f.as_ref()
+                                .clone()
+                                .with_name(bundle_schema::generate_internal_name(id)),
+                        )
+                    })
+            })
+            .collect();
         Ok(Arc::new(arrow_schema::Schema::new(col_id_fields)))
     }
 
@@ -92,10 +100,7 @@ pub trait BundleFacade: Send + Sync {
     async fn dataframe(&self) -> Result<Arc<DataFrame>, BundlebaseError>;
 
     /// Extends this bundle to create a new BundleBuilder.
-    async fn extend(
-        &self,
-        data_dir: Option<&str>,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError>;
+    async fn extend(&self, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError>;
 
     /// Executes a SQL query and returns streaming results directly.
     async fn query(
@@ -184,7 +189,9 @@ pub trait BundleFacade: Send + Sync {
     fn connector_registry(&self) -> Arc<parking_lot::RwLock<crate::source::ConnectorRegistry>>;
 
     /// Returns the function registry.
-    fn function_registry(&self) -> Arc<parking_lot::RwLock<crate::bundle::function_entry::FunctionRegistry>>;
+    fn function_registry(
+        &self,
+    ) -> Arc<parking_lot::RwLock<crate::bundle::function_entry::FunctionRegistry>>;
 
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;

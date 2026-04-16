@@ -115,7 +115,11 @@ impl BlockCache {
         let mut inner = self.inner.lock();
         if let Some(entry) = inner.cache.pop(key) {
             inner.current_bytes -= entry.size_bytes;
-            log::debug!("Invalidated block {} from cache ({} bytes)", key, entry.size_bytes);
+            log::debug!(
+                "Invalidated block {} from cache ({} bytes)",
+                key,
+                entry.size_bytes
+            );
         }
     }
 
@@ -189,7 +193,10 @@ mod tests {
     fn test_lru_eviction() {
         // Tiny budget: each batch is ~800 bytes, budget allows ~2
         let batch = make_batch(100);
-        let batch_size: usize = vec![batch.clone()].iter().map(|b| b.get_array_memory_size()).sum();
+        let batch_size: usize = vec![batch.clone()]
+            .iter()
+            .map(|b| b.get_array_memory_size())
+            .sum();
         let budget = batch_size * 2 + 1; // Room for 2, not 3
         let cache = BlockCache::new(budget);
 

@@ -45,8 +45,7 @@ async fn find_bundle_urls(path: &str) -> Result<Vec<String>, BundlebaseError> {
             let url_str = f.url.to_string();
             if url_str.ends_with(&init_suffix) {
                 // Strip the /_bundlebase/00000000000000000.yaml suffix to get the bundle URL
-                let bundle_url = url_str[..url_str.len() - init_suffix.len()]
-                    .trim_end_matches('/');
+                let bundle_url = url_str[..url_str.len() - init_suffix.len()].trim_end_matches('/');
                 Some(bundle_url.to_string())
             } else {
                 None
@@ -125,7 +124,9 @@ mod tests {
     async fn test_empty_directory_finds_no_bundles() {
         init();
         let prefix = unique_prefix("empty");
-        let urls = find_bundle_urls(&prefix).await.expect("find_bundle_urls failed");
+        let urls = find_bundle_urls(&prefix)
+            .await
+            .expect("find_bundle_urls failed");
         assert!(urls.is_empty(), "Expected no bundles, got: {:?}", urls);
     }
 
@@ -140,9 +141,15 @@ mod tests {
             .expect("Failed to create bundle");
         builder.commit("Initial").await.expect("Failed to commit");
 
-        let urls = find_bundle_urls(&prefix).await.expect("find_bundle_urls failed");
+        let urls = find_bundle_urls(&prefix)
+            .await
+            .expect("find_bundle_urls failed");
         assert_eq!(urls.len(), 1, "Expected 1 bundle, got: {:?}", urls);
-        assert!(urls[0].ends_with("/my_bundle"), "Unexpected URL: {}", urls[0]);
+        assert!(
+            urls[0].ends_with("/my_bundle"),
+            "Unexpected URL: {}",
+            urls[0]
+        );
     }
 
     #[tokio::test]
@@ -159,7 +166,9 @@ mod tests {
             builder.commit("Initial").await.expect("Failed to commit");
         }
 
-        let urls = find_bundle_urls(&prefix).await.expect("find_bundle_urls failed");
+        let urls = find_bundle_urls(&prefix)
+            .await
+            .expect("find_bundle_urls failed");
         assert_eq!(urls.len(), 3, "Expected 3 bundles, got: {:?}", urls);
 
         // Verify sorted order
@@ -190,12 +199,16 @@ mod tests {
         .expect("Failed to set metadata");
 
         // Verify the bundle can be opened and has the right metadata
-        let bundle = Bundle::open(&bundle_url, None).await.expect("Failed to open");
+        let bundle = Bundle::open(&bundle_url, None)
+            .await
+            .expect("Failed to open");
         assert_eq!(bundle.name(), Some("My Bundle".to_string()));
         assert_eq!(bundle.description(), Some("A test bundle".to_string()));
 
         // Verify it's discoverable
-        let urls = find_bundle_urls(&prefix).await.expect("find_bundle_urls failed");
+        let urls = find_bundle_urls(&prefix)
+            .await
+            .expect("find_bundle_urls failed");
         assert_eq!(urls.len(), 1);
     }
 
@@ -203,10 +216,7 @@ mod tests {
     async fn test_run_succeeds_on_empty_directory() {
         init();
         let prefix = unique_prefix("run_empty");
-        let result = run(ListBundlesArgs {
-            path: prefix,
-        })
-        .await;
+        let result = run(ListBundlesArgs { path: prefix }).await;
         assert!(result.is_ok(), "Expected success, got: {:?}", result.err());
     }
 }

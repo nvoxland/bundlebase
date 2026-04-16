@@ -1,13 +1,13 @@
 //! SaveConfig command implementation.
 
-use crate::parser::{extract_identifier, quote_identifier};
-use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
+use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::SaveConfigOp;
 use bundlebase::bundle_config::Scope;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to save a configuration value to the bundle manifest.
 ///
@@ -25,11 +25,7 @@ pub struct SaveConfigCommand {
 
 impl SaveConfigCommand {
     /// Create a new SaveConfigCommand.
-    pub fn new(
-        scope: Scope,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    pub fn new(scope: Scope, key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             key: key.into(),
             value: value.into(),
@@ -68,7 +64,8 @@ impl CommandParsing for SaveConfigCommand {
         }
 
         let key = key.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing key".into() })?;
-        let value = value.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing value".into() })?;
+        let value =
+            value.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing value".into() })?;
         let scope = match scope {
             Some(s) => Scope::try_from(s.as_str())?,
             None => {
@@ -76,11 +73,7 @@ impl CommandParsing for SaveConfigCommand {
             }
         };
 
-        Ok(SaveConfigCommand {
-            key,
-            value,
-            scope,
-        })
+        Ok(SaveConfigCommand { key, value, scope })
     }
 
     fn to_statement(&self) -> String {
@@ -112,14 +105,17 @@ impl BundleBuilderCommand for SaveConfigCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_save_config_without_for_fails() {
         let input = "SAVE CONFIG timeout = '30'";
-        assert!(parse_command(input).is_err(), "SAVE CONFIG without FOR should fail");
+        assert!(
+            parse_command(input).is_err(),
+            "SAVE CONFIG without FOR should fail"
+        );
     }
 
     #[test]

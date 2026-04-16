@@ -1,10 +1,10 @@
 //! RenameConnector command implementation.
 
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::RenameConnectorOp;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to rename a connector.
 ///
@@ -79,9 +79,9 @@ impl BundleBuilderCommand for RenameConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rename_connector() {
@@ -113,7 +113,10 @@ mod parsing_tests {
     fn test_round_trip() {
         let cmd = RenameConnectorCommand::new("acme.weather", "acme.weather_v2");
         let statement = cmd.to_statement();
-        assert_eq!(statement, "RENAME CONNECTOR acme.weather TO acme.weather_v2");
+        assert_eq!(
+            statement,
+            "RENAME CONNECTOR acme.weather TO acme.weather_v2"
+        );
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

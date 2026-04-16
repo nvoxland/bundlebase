@@ -239,7 +239,7 @@ If a bundle has a name set, it appears after the directory name separated by ` :
 
 ## Agent Skills
 
-The `setup-agent` subcommand installs [Agent Skills](https://agentskills.io) files that make bundlebase automatically discoverable by coding agents like Claude Code, Cursor, Copilot, Gemini CLI, and others.
+The `setup-agent` subcommand installs local agent integration for Claude Code and GitHub Copilot.
 
 ### Project-Level Install (default)
 
@@ -247,10 +247,20 @@ The `setup-agent` subcommand installs [Agent Skills](https://agentskills.io) fil
 bundlebase setup-agent
 ```
 
-Installs into the current directory:
+Auto-detects supported agents from your `PATH` (`claude` for Claude Code, `copilot` for Copilot) and installs into the current directory for whatever it finds.
+
+Use `--agent claude` or `--agent copilot` to bypass auto-detection.
+
+For Claude Code, it installs:
 
 - `.agents/skills/bundlebase/SKILL.md` and `reference.md` — agent skill files with CLI workflows and SQL command reference
+- `.mcp.json` — Claude Code MCP server config
 - Appends a `## Bundlebase` section to `CLAUDE.md` (creates the file if it doesn't exist) so agents always know bundlebase is available
+
+For GitHub Copilot, it installs:
+
+- `.vscode/mcp.json` — workspace MCP server config for Bundlebase
+- `AGENTS.md` — always-on Bundlebase guidance for Copilot chat/agent workflows
 
 ### User-Level Install
 
@@ -258,10 +268,11 @@ Installs into the current directory:
 bundlebase setup-agent --scope global
 ```
 
-Same as above but installs to `~/.agents/skills/bundlebase/` and `~/CLAUDE.md`, making bundlebase skills available across all projects.
+Global scope is Claude-only. It installs to `~/.agents/skills/bundlebase/`, `~/.mcp.json`, and `~/CLAUDE.md`, making bundlebase skills available across all projects.
 
 ### Notes
 
-- The command is idempotent — running it again overwrites skill files with the latest version
+- The command is idempotent — running it again refreshes Bundlebase-managed config and skill files
 - No `--bundle` flag is needed
+- If auto-detection finds nothing on `PATH`, rerun with `--agent claude` or `--agent copilot`
 - The installed files contain CLI usage patterns and the full SQL command reference so agents can use bundlebase without making web requests to documentation

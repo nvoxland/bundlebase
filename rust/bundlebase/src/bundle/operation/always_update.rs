@@ -4,9 +4,9 @@
 //! automatically applied to newly attached data. The rule persists
 //! across commits and reopens.
 
-use crate::bundle::AlwaysUpdateRule;
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
+use crate::bundle::AlwaysUpdateRule;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -40,7 +40,10 @@ impl AlwaysUpdateOp {
 
 impl Operation for AlwaysUpdateOp {
     fn describe(&self) -> String {
-        format!("ALWAYS UPDATE SET {} WHERE {}", self.set_clause, self.where_clause)
+        format!(
+            "ALWAYS UPDATE SET {} WHERE {}",
+            self.set_clause, self.where_clause
+        )
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -81,7 +84,10 @@ mod tests {
     #[test]
     fn test_describe() {
         let op = AlwaysUpdateOp::new("salary = 0", "salary < 0");
-        assert_eq!(op.describe(), "ALWAYS UPDATE SET salary = 0 WHERE salary < 0");
+        assert_eq!(
+            op.describe(),
+            "ALWAYS UPDATE SET salary = 0 WHERE salary < 0"
+        );
     }
 
     #[test]

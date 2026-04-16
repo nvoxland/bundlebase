@@ -1,10 +1,10 @@
 //! RebuildIndex command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
-use crate::{CommandParsing, Rule};
-use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
+use crate::{CommandParsing, Rule};
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to rebuild an index on a column.
 #[derive(Debug, Clone)]
@@ -60,9 +60,9 @@ impl BundleBuilderCommand for RebuildIndexCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_rebuild_index() {

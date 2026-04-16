@@ -1,12 +1,12 @@
 //! CreateView command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
+use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::CreateViewOp;
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::BundlebaseError;
-use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase_common::BundlebaseError;
 
 /// Command to create a view from a SQL statement.
 #[derive(Debug, Clone)]
@@ -55,7 +55,11 @@ impl CommandParsing for CreateViewCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("CREATE VIEW {} AS {}", quote_identifier(&self.name), self.sql)
+        format!(
+            "CREATE VIEW {} AS {}",
+            quote_identifier(&self.name),
+            self.sql
+        )
     }
 }
 
@@ -79,11 +83,13 @@ impl BundleBuilderCommand for CreateViewCommand {
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;
-    use crate::{BundleCommand, CommandParsing};
     use crate::parser::{BundlebaseParser, Rule};
+    use crate::{BundleCommand, CommandParsing};
     use pest::Parser;
 
-    fn parse_create_view(input: &str) -> Result<CreateViewCommand, bundlebase_common::BundlebaseError> {
+    fn parse_create_view(
+        input: &str,
+    ) -> Result<CreateViewCommand, bundlebase_common::BundlebaseError> {
         let mut pairs = BundlebaseParser::parse(Rule::statement, input)
             .map_err(|e| bundlebase_common::BundlebaseError::from(e.to_string()))?;
 
@@ -107,14 +113,20 @@ mod parsing_tests {
         let input = "CREATE VIEW high_earners AS SELECT id, name, salary FROM bundle WHERE salary > 100000 ORDER BY salary DESC";
         let cmd = parse_create_view(input).unwrap();
         assert_eq!(cmd.name, "high_earners");
-        assert_eq!(cmd.sql, "SELECT id, name, salary FROM bundle WHERE salary > 100000 ORDER BY salary DESC");
+        assert_eq!(
+            cmd.sql,
+            "SELECT id, name, salary FROM bundle WHERE salary > 100000 ORDER BY salary DESC"
+        );
     }
 
     #[test]
     fn test_round_trip() {
         let cmd = CreateViewCommand::new("my_view", "SELECT * FROM bundle WHERE x > 5");
         let statement = cmd.to_statement();
-        assert_eq!(statement, "CREATE VIEW my_view AS SELECT * FROM bundle WHERE x > 5");
+        assert_eq!(
+            statement,
+            "CREATE VIEW my_view AS SELECT * FROM bundle WHERE x > 5"
+        );
 
         let cmd2 = parse_create_view(&statement).unwrap();
         assert_eq!(cmd2.name, "my_view");
@@ -125,7 +137,11 @@ mod parsing_tests {
     fn test_parse_command_succeeds() {
         let input = "CREATE VIEW adults AS SELECT * FROM bundle WHERE age > 21";
         let result = parse_command(input);
-        assert!(result.is_ok(), "CREATE VIEW should parse successfully: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "CREATE VIEW should parse successfully: {:?}",
+            result.err()
+        );
         let cmd = result.unwrap();
         match cmd {
             BundleCommand::CreateView(create_view) => {

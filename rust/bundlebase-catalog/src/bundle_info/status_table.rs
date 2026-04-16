@@ -1,7 +1,7 @@
-use bundlebase::bundle::{BundleFacade, BundleStatus};
-use bundlebase_common::command_response::CommandResponse;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use bundlebase::bundle::{BundleFacade, BundleStatus};
+use bundlebase_common::command_response::CommandResponse;
 use datafusion::catalog::Session;
 use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
@@ -29,7 +29,9 @@ impl BundleStatusTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.status)".to_string())
+            datafusion::error::DataFusionError::Internal(
+                "Bundle has been dropped (while accessing bundle_info.status)".to_string(),
+            )
         })
     }
 }

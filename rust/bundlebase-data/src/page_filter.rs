@@ -3,8 +3,8 @@
 //! Given a filter predicate and a column's pre-computed min/max, determine
 //! whether a page (or block) can be skipped entirely.
 
-use bundlebase_index::{IndexedValue, IndexPredicate};
 use crate::page_map::StatValue;
+use bundlebase_index::{IndexPredicate, IndexedValue};
 
 /// Returns true if the given exact value is provably outside [page_min, page_max],
 /// meaning the page can be skipped.
@@ -17,7 +17,10 @@ pub fn prune_exact(
         (Some(mn), Some(mx)) => (mn, mx),
         _ => return false, // No stats — can't prune
     };
-    let below_min = matches!(min.compare_to_indexed(val), Some(std::cmp::Ordering::Greater));
+    let below_min = matches!(
+        min.compare_to_indexed(val),
+        Some(std::cmp::Ordering::Greater)
+    );
     let above_max = matches!(max.compare_to_indexed(val), Some(std::cmp::Ordering::Less));
     below_min || above_max
 }
@@ -35,8 +38,14 @@ pub fn prune_range(
         _ => return false,
     };
     // No overlap: filter max is below page min, or filter min is above page max
-    let filter_above_page = matches!(pmin.compare_to_indexed(filter_max), Some(std::cmp::Ordering::Greater));
-    let filter_below_page = matches!(pmax.compare_to_indexed(filter_min), Some(std::cmp::Ordering::Less));
+    let filter_above_page = matches!(
+        pmin.compare_to_indexed(filter_max),
+        Some(std::cmp::Ordering::Greater)
+    );
+    let filter_below_page = matches!(
+        pmax.compare_to_indexed(filter_min),
+        Some(std::cmp::Ordering::Less)
+    );
     filter_above_page || filter_below_page
 }
 
@@ -71,8 +80,13 @@ pub fn prefix_upper_bound(prefix: &str) -> Option<String> {
     loop {
         match bytes.last_mut() {
             None => return None,
-            Some(b) if *b == 0xFF => { bytes.pop(); }
-            Some(b) => { *b += 1; break; }
+            Some(b) if *b == 0xFF => {
+                bytes.pop();
+            }
+            Some(b) => {
+                *b += 1;
+                break;
+            }
         }
     }
     if bytes.is_empty() {
@@ -96,13 +110,19 @@ pub fn prune_prefix(
     };
     // Page is entirely below the prefix
     let lower = IndexedValue::Utf8(prefix.to_string());
-    if matches!(pmax.compare_to_indexed(&lower), Some(std::cmp::Ordering::Less)) {
+    if matches!(
+        pmax.compare_to_indexed(&lower),
+        Some(std::cmp::Ordering::Less)
+    ) {
         return true;
     }
     // Page is entirely at or above the exclusive upper bound
     if let Some(upper_s) = prefix_upper_bound(prefix) {
         let upper = IndexedValue::Utf8(upper_s);
-        if !matches!(pmin.compare_to_indexed(&upper), Some(std::cmp::Ordering::Less)) {
+        if !matches!(
+            pmin.compare_to_indexed(&upper),
+            Some(std::cmp::Ordering::Less)
+        ) {
             return true;
         }
     }
@@ -112,13 +132,19 @@ pub fn prune_prefix(
 /// Returns true if `page_min` is strictly above `upper` — meaning pages from here on
 /// cannot match an upper-bound filter on a strictly increasing column.
 pub fn is_value_above_bound(upper: &IndexedValue, page_min: &StatValue) -> bool {
-    matches!(page_min.compare_to_indexed(upper), Some(std::cmp::Ordering::Greater))
+    matches!(
+        page_min.compare_to_indexed(upper),
+        Some(std::cmp::Ordering::Greater)
+    )
 }
 
 /// Returns true if `page_max` is strictly below `lower` — meaning pages from here on
 /// cannot match a lower-bound filter on a strictly decreasing column.
 pub fn is_value_below_bound(lower: &IndexedValue, page_max: &StatValue) -> bool {
-    matches!(page_max.compare_to_indexed(lower), Some(std::cmp::Ordering::Less))
+    matches!(
+        page_max.compare_to_indexed(lower),
+        Some(std::cmp::Ordering::Less)
+    )
 }
 
 // FNV-1a constants (must match column_stats_builder)

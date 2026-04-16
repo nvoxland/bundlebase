@@ -6,10 +6,10 @@
 use crate::parser::extract_string_content;
 use crate::response::OutputShape;
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase::bundle::export::create_export_writer;
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use futures::StreamExt;
 use std::sync::Arc;
 
@@ -59,7 +59,8 @@ impl CommandParsing for ExportDataCommand {
             }
         }
 
-        let path = path.ok_or_else(|| BundlebaseError::from("EXPORT DATA TO: missing file path"))?;
+        let path =
+            path.ok_or_else(|| BundlebaseError::from("EXPORT DATA TO: missing file path"))?;
         let sql = sql.ok_or_else(|| BundlebaseError::from("EXPORT DATA TO: missing SQL query"))?;
 
         Ok(ExportDataCommand { path, sql })
@@ -100,9 +101,9 @@ impl BundleFacadeCommand for ExportDataCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::CommandParsing;
     use crate::parser::parse_command;
     use crate::BundleCommand;
+    use crate::CommandParsing;
 
     #[test]
     fn test_parse_export_data_basic() {
@@ -126,10 +127,7 @@ mod parsing_tests {
         match cmd {
             BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "/tmp/results.json");
-                assert_eq!(
-                    c.sql,
-                    "SELECT name, count FROM bundle WHERE active = true"
-                );
+                assert_eq!(c.sql, "SELECT name, count FROM bundle WHERE active = true");
             }
             _ => panic!("Expected ExportData variant"),
         }
@@ -166,7 +164,10 @@ mod parsing_tests {
             sql: "SELECT * FROM bundle".to_string(),
         };
         let statement = cmd.to_statement();
-        assert_eq!(statement, "EXPORT DATA TO 'output.csv' SELECT * FROM bundle");
+        assert_eq!(
+            statement,
+            "EXPORT DATA TO 'output.csv' SELECT * FROM bundle"
+        );
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {
