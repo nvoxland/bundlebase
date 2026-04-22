@@ -27,6 +27,7 @@ pub mod tables {
     pub static VIEWS: &str = "views";
     pub static INDEXES: &str = "indexes";
     pub static PACKS: &str = "packs";
+    pub static SOURCES: &str = "sources";
     pub static BLOCKS: &str = "blocks";
     pub static CONFIG: &str = "config";
     pub static COMMANDS: &str = "commands";

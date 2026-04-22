@@ -11,6 +11,7 @@ mod history_table;
 mod indexes_table;
 mod packs_table;
 mod reports_table;
+mod sources_table;
 mod status_table;
 mod views_table;
 
@@ -32,6 +33,7 @@ use history_table::BundleHistoryTable;
 use indexes_table::BundleIndexesTable;
 use packs_table::BundlePacksTable;
 use reports_table::BundleReportsTable;
+use sources_table::BundleSourcesTable;
 use status_table::BundleStatusTable;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -81,6 +83,10 @@ impl BundleInfoSchemaProvider {
         tables.insert(
             tables::PACKS,
             Arc::new(BundlePacksTable::new(bundle.clone())),
+        );
+        tables.insert(
+            tables::SOURCES,
+            Arc::new(BundleSourcesTable::new(bundle.clone())),
         );
         tables.insert(
             tables::CONFIG,

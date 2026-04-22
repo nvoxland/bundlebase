@@ -1,6 +1,6 @@
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::BatchedSource;
-use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
+use crate::bundle::operation::{Operation, SourceInfo};
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
 use crate::connector::AttachFormat;
@@ -40,8 +40,8 @@ pub struct ReplaceBlockOp {
 impl ReplaceBlockOp {
     /// Create a ReplaceBlockOp by looking up the block ID from the old location.
     ///
-    /// Searches through AttachBlockOp and ReplaceBlockOp operations to find a block with
-    /// the matching location. Uses the most recent metadata for that block.
+    /// Resolves the currently attached block whose current location matches the old
+    /// location. Uses that block's current source metadata.
     /// Reads version and computes hash from the new location.
     pub async fn setup(
         old_location: &str,
@@ -49,13 +49,14 @@ impl ReplaceBlockOp {
         format: AttachFormat,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        // Find block ID by searching AttachBlockOp operations for matching location
-        // Also check ReplaceBlockOp in case the block was already replaced
-        let (block_id, old_source_info) =
-            Self::find_block_by_location(old_location, &builder.bundle().operations.read())
-                .ok_or_else(|| {
-                    BundlebaseError::from(format!("No block found at location '{}'", old_location))
-                })?;
+        let block = builder
+            .bundle()
+            .find_block_by_current_location(old_location)
+            .ok_or_else(|| {
+                BundlebaseError::from(format!("No block found at location '{}'", old_location))
+            })?;
+        let block_id = *block.id();
+        let old_source_info = block.source_info().cloned();
 
         // Create adapter to read version from the new location
         let temp_id = BlockId::generate();
@@ -90,6 +91,7 @@ impl ReplaceBlockOp {
                 .map(|source| BatchedSource {
                     location: source.location,
                     version: new_version.clone(),
+                    num_rows: source.num_rows,
                 })
                 .collect(),
         });
@@ -102,37 +104,6 @@ impl ReplaceBlockOp {
             new_hash,
             source_info,
         })
-    }
-
-    /// Find a block by its current location, searching through both AttachBlockOp and ReplaceBlockOp.
-    ///
-    /// Returns the block ID and the most recent source_info for that block.
-    /// For blocks that have been replaced, this finds the ReplaceBlockOp with the matching new_location
-    /// and returns the updated source_info from that operation.
-    fn find_block_by_location(
-        location: &str,
-        operations: &[AnyOperation],
-    ) -> Option<(BlockId, Option<SourceInfo>)> {
-        // First, check if any ReplaceBlockOp has this as its new_location (most recent state)
-        // We iterate in reverse to find the most recent replacement
-        for op in operations.iter().rev() {
-            if let AnyOperation::ReplaceBlock(replace_op) = op {
-                if replace_op.new_location == location {
-                    return Some((replace_op.id, replace_op.source_info.clone()));
-                }
-            }
-        }
-
-        // If not found in ReplaceBlockOp, check AttachBlockOp
-        for op in operations.iter() {
-            if let AnyOperation::AttachBlock(attach_op) = op {
-                if attach_op.location == location {
-                    return Some((attach_op.id, attach_op.source_info.clone()));
-                }
-            }
-        }
-
-        None
     }
 
     /// Find the block in any pack within the bundle.
@@ -325,6 +296,7 @@ mod tests {
                 batch_sources: vec![BatchedSource {
                     location: "original/path.csv".to_string(),
                     version: "etag:abc123".to_string(),
+                    num_rows: None,
                 }],
             }),
         };

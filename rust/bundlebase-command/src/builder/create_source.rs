@@ -346,7 +346,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
             .get_source(&source_id)
             .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
 
-        let actions = source.fetch(builder, SyncMode::Add).await?;
+        let actions = source.fetch(builder, SyncMode::Add, false).await?;
 
         // Extract json_* args as reader-level read options (connector validation already skips them).
         let json_read_options = super::extract_json_opts(&self.args);
@@ -380,7 +380,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             data.hash.clone(),
                         )
                     };
-                    let op = AttachBlockOp::setup(
+                    let mut op = AttachBlockOp::setup(
                         &pack_id,
                         &final_location,
                         format,
@@ -390,6 +390,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             batch_sources: vec![BatchedSource {
                                 location: data.source_location,
                                 version: data.version,
+                                num_rows: None,
                             }],
                         }),
                         None,
@@ -397,6 +398,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         Some(&shared_ctx),
                     )
                     .await?;
+                    super::fetch::populate_batch_source_num_rows(&mut op);
                     let attach_location = op.location.clone();
                     prepared_ops.push((op, attach_location));
                 }

@@ -1591,6 +1591,10 @@ impl BundleFacade for BundleBuilder {
         self.bundle.packs.read().clone()
     }
 
+    fn sources(&self) -> HashMap<ObjectId, Arc<crate::bundle::Source>> {
+        self.bundle.sources.read().clone()
+    }
+
     fn views_by_name(&self) -> HashMap<String, ObjectId> {
         self.bundle.views.read().clone()
     }

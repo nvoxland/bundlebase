@@ -127,6 +127,7 @@ impl Source {
         &self,
         builder: &BundleBuilder,
         mode: SyncMode,
+        dry_run: bool,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let connector_name = self.connector();
         let (func, data_dir, config, resolved_args) = if connector_name.contains('.') {
@@ -185,6 +186,7 @@ impl Source {
             data_dir.as_ref(),
             &attached_files,
             &(Arc::clone(&config) as Arc<dyn crate::ConfigProvider>),
+            dry_run,
         )
         .await
     }

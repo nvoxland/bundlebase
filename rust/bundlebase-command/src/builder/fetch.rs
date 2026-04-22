@@ -115,7 +115,9 @@ impl BundleBuilderCommand for FetchCommand {
 
         let mut results = Vec::new();
         for source in sources {
-            let result = fetch_from_source(builder, &source, &pack_id, &pack_name, mode).await?;
+            let result =
+                fetch_from_source(builder, &source, &pack_id, &pack_name, mode, self.dry_run)
+                    .await?;
             results.push(result);
         }
 
@@ -207,7 +209,9 @@ impl BundleBuilderCommand for FetchAllCommand {
 
         let mut results = Vec::new();
         for (source, pack_id, pack_name) in sources_with_packs {
-            let result = fetch_from_source(builder, &source, &pack_id, &pack_name, mode).await?;
+            let result =
+                fetch_from_source(builder, &source, &pack_id, &pack_name, mode, self.dry_run)
+                    .await?;
             results.push(result);
         }
 
@@ -222,6 +226,7 @@ async fn fetch_from_source(
     pack_id: &ObjectId,
     pack_name: &str,
     mode: SyncMode,
+    dry_run: bool,
 ) -> Result<FetchResults, BundlebaseError> {
     let source_id = *source.id();
 
@@ -243,7 +248,16 @@ async fn fetch_from_source(
     // Skip rows_before: full scan is too expensive for large bundles
     let rows_before: u64 = 0;
 
-    let actions = source.fetch(builder, mode).await?;
+    let actions = source.fetch(builder, mode, dry_run).await?;
+
+    // Dry run: report what would change without materializing data or applying ops.
+    if dry_run {
+        let mut results =
+            FetchResults::from_actions(connector, source_url, pack_name.to_string(), actions);
+        results.rows_before = rows_before;
+        results.rows_after = rows_before;
+        return Ok(results);
+    }
 
     // Separate Add actions (parallelizable setup) from Replace/Remove (sequential)
     let mut add_actions = Vec::new();
@@ -288,7 +302,7 @@ async fn fetch_from_source(
                         json_read_options.as_ref(),
                     )
                     .await?;
-                    let op = AttachBlockOp::setup(
+                    let mut op = AttachBlockOp::setup(
                         pack_id,
                         &final_location,
                         format,
@@ -298,6 +312,7 @@ async fn fetch_from_source(
                             batch_sources: vec![BatchedSource {
                                 location: data.source_location.clone(),
                                 version: data.version.clone(),
+                                num_rows: None,
                             }],
                         }),
                         expected_schema.as_deref(),
@@ -305,6 +320,7 @@ async fn fetch_from_source(
                         Some(&shared_ctx),
                     )
                     .await?;
+                    populate_batch_source_num_rows(&mut op);
                     validate_schema_against_expected(
                         &op,
                         expected_schema.as_deref(),
@@ -340,66 +356,87 @@ async fn fetch_from_source(
         info!("Fetched {} to {}", attach_location, pack_name);
     }
 
-    // Phase 4: Process Replace/Remove actions sequentially (depend on bundle state)
-    for action in &sequential_actions {
-        match action {
-            FetchAction::Replace {
-                old_source_location,
-                data,
-            } => {
-                let bundle_snapshot = builder.bundle().clone();
-                let old_location = find_block_location_by_source(
-                    &bundle_snapshot,
-                    &source_id,
-                    old_source_location,
-                )?;
-                let detach_op = DetachBlockOp::setup(&old_location, builder).await?;
-                builder.apply_operation(detach_op.into()).await?;
+    // Phase 4: Group Replace/Remove actions by the block they target. Single-source
+    // blocks are processed per-action (detach + attach). Batch blocks (multiple
+    // source_locations in one parquet) are rebuilt in a single pass, slicing the
+    // old merged parquet so unchanged sources keep their existing rows and
+    // replaced/removed sources are swapped in or dropped.
+    let pre_phase4_bundle = builder.bundle().clone();
+    let grouped = group_sequential_actions_by_block(&pre_phase4_bundle, &source_id, &sequential_actions);
 
-                let (final_location, format, hash) = resolve_attach_location(
-                    builder,
-                    &data.attach_location,
-                    data.hash.clone(),
-                    json_read_options.as_ref(),
-                )
-                .await?;
-                let op = AttachBlockOp::setup(
-                    pack_id,
-                    &final_location,
-                    format,
-                    hash.as_deref(),
-                    Some(SourceInfo {
-                        id: source_id,
-                        batch_sources: vec![BatchedSource {
-                            location: data.source_location.clone(),
-                            version: data.version.clone(),
-                        }],
-                    }),
-                    expected_schema.as_deref(),
-                    builder,
-                    None,
-                )
-                .await?;
-                validate_schema_against_expected(
-                    &op,
-                    expected_schema.as_deref(),
-                    &data.attach_location,
-                );
-                builder.apply_operation(op.into()).await?;
-                info!("Replaced {} in {}", data.attach_location, pack_name);
-            }
-            FetchAction::Remove { source_location } => {
-                let bundle_snapshot = builder.bundle().clone();
-                let location =
-                    find_block_location_by_source(&bundle_snapshot, &source_id, source_location)?;
-                let detach_op = DetachBlockOp::setup(&location, builder).await?;
-                builder.apply_operation(detach_op.into()).await?;
-                info!("Removed {} from {}", location, pack_name);
-            }
-            _ => {}
+    for (snapshot, action_refs) in grouped {
+        if snapshot.source_info.batch_sources.len() > 1 {
+            // Batch block — rebuild via parquet slicing.
+            rebuild_batch_block(
+                builder,
+                pack_id,
+                pack_name,
+                source_id,
+                &snapshot,
+                &action_refs,
+                expected_schema.as_deref(),
+                json_read_options.as_ref(),
+            )
+            .await?;
+            applied += action_refs.len();
+            progress.update(applied as u64, None);
+            continue;
         }
-        applied += 1;
-        progress.update(applied as u64, None);
+
+        // Single-source block: keep per-action flow.
+        for action in action_refs {
+            match action {
+                FetchAction::Replace {
+                    old_source_location: _,
+                    data,
+                } => {
+                    let detach_op = DetachBlockOp { id: snapshot.id };
+                    builder.apply_operation(detach_op.into()).await?;
+
+                    let (final_location, format, hash) = resolve_attach_location(
+                        builder,
+                        &data.attach_location,
+                        data.hash.clone(),
+                        json_read_options.as_ref(),
+                    )
+                    .await?;
+                    let mut op = AttachBlockOp::setup(
+                        pack_id,
+                        &final_location,
+                        format,
+                        hash.as_deref(),
+                        Some(SourceInfo {
+                            id: source_id,
+                            batch_sources: vec![BatchedSource {
+                                location: data.source_location.clone(),
+                                version: data.version.clone(),
+                                num_rows: None,
+                            }],
+                        }),
+                        expected_schema.as_deref(),
+                        builder,
+                        None,
+                    )
+                    .await?;
+                    populate_batch_source_num_rows(&mut op);
+                    validate_schema_against_expected(
+                        &op,
+                        expected_schema.as_deref(),
+                        &data.attach_location,
+                    );
+                    builder.apply_operation(op.into()).await?;
+                    info!("Replaced {} in {}", data.attach_location, pack_name);
+                }
+                FetchAction::Remove { source_location: _ } => {
+                    let detach_op = DetachBlockOp { id: snapshot.id };
+                    builder.apply_operation(detach_op.into()).await?;
+                    info!("Removed {} from {}", snapshot.location, pack_name);
+                }
+                FetchAction::Add(_) => unreachable!("Add actions handled in Phase 3"),
+            }
+            applied += 1;
+            progress.update(applied as u64, None);
+        }
     }
 
     let processed_actions = actions;
@@ -444,50 +481,255 @@ async fn resolve_attach_location(
     }
 }
 
-/// Find the current location of a block that was attached from a source.
-fn find_block_location_by_source(
+/// Group sequential Replace/Remove actions by the block storage location they
+/// target. Also snapshots the SourceInfo of each affected block so later
+/// mutations (detach) don't invalidate the lookup.
+///
+/// Actions whose source_location is no longer attached (should not happen
+/// given orchestrate_fetch only emits actions for attached files) are dropped.
+/// Resolved metadata about a block affected by one or more Phase 4 actions.
+struct BlockSnapshot {
+    id: BlockId,
+    location: String,
+    source_info: SourceInfo,
+}
+
+fn group_sequential_actions_by_block<'a>(
     bundle: &Bundle,
     source_id: &ObjectId,
-    source_location: &str,
-) -> Result<String, BundlebaseError> {
-    use bundlebase::bundle::operation::AnyOperation;
+    actions: &'a [FetchAction],
+) -> Vec<(BlockSnapshot, Vec<&'a FetchAction>)> {
+    use std::collections::BTreeMap;
 
-    // First, check ReplaceBlockOp operations (in reverse order to get most recent)
-    let operations = bundle.operations.read();
-    for op in operations.iter().rev() {
-        if let AnyOperation::ReplaceBlock(replace) = op {
-            if let Some(ref info) = replace.source_info {
-                if &info.id == source_id
-                    && info
-                        .batch_sources
-                        .iter()
-                        .any(|source| source.location == source_location)
-                {
-                    return Ok(replace.new_location.clone());
-                }
-            }
-        }
+    let source = bundle.get_source(source_id);
+    let attached = source
+        .as_ref()
+        .map(|s| s.attached_files())
+        .unwrap_or_default();
+
+    let mut by_location: BTreeMap<String, (Option<BlockSnapshot>, Vec<&'a FetchAction>)> =
+        BTreeMap::new();
+
+    for action in actions {
+        let source_loc = match action {
+            FetchAction::Replace {
+                old_source_location,
+                ..
+            } => old_source_location.as_str(),
+            FetchAction::Remove { source_location } => source_location.as_str(),
+            FetchAction::Add(_) => continue,
+        };
+        let Some(info) = attached.get(source_loc) else {
+            warn!(
+                "Ignoring action for source_location '{}': not currently attached",
+                source_loc
+            );
+            continue;
+        };
+        let block_location = info.location.clone();
+        let slot = by_location.entry(block_location.clone()).or_insert_with(|| {
+            let snap = bundle
+                .find_block_by_current_location(&block_location)
+                .and_then(|block| {
+                    block.source_info().cloned().map(|si| BlockSnapshot {
+                        id: *block.id(),
+                        location: block_location.clone(),
+                        source_info: si,
+                    })
+                });
+            (snap, Vec::new())
+        });
+        slot.1.push(action);
     }
 
-    // If not found in ReplaceBlockOp, check AttachBlockOp
-    operations
-        .iter()
-        .find_map(|op| {
-            if let AnyOperation::AttachBlock(attach) = op {
-                if let Some(ref info) = attach.source_info {
-                    if &info.id == source_id
-                        && info
-                            .batch_sources
-                            .iter()
-                            .any(|b| b.location == source_location)
-                    {
-                        return Some(attach.location.clone());
+    by_location
+        .into_iter()
+        .filter_map(|(loc, (snap, actions))| match snap {
+            Some(s) => Some((s, actions)),
+            None => {
+                warn!(
+                    "Skipping {} action(s) for block {}: block metadata not found",
+                    actions.len(),
+                    loc
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+/// Rebuild a batched parquet block by slicing its merged parquet: unchanged
+/// sources keep their existing row slices, replaced sources are swapped in
+/// with their new materialized data, removed sources are dropped. Old block
+/// is detached and a new AttachBlockOp for the merged result is applied.
+#[allow(clippy::too_many_arguments)]
+async fn rebuild_batch_block(
+    builder: &BundleBuilder,
+    pack_id: &ObjectId,
+    pack_name: &str,
+    source_id: ObjectId,
+    snapshot: &BlockSnapshot,
+    actions: &[&FetchAction],
+    expected_schema: Option<&[ExpectedColumn]>,
+    json_read_options: Option<&HashMap<String, String>>,
+) -> Result<(), BundlebaseError> {
+    use bundlebase::source::{read_parquet_batches, write_merged_parquet};
+    let old_block_location = snapshot.location.as_str();
+    let old_source_info = &snapshot.source_info;
+
+    // Index actions by source_location for O(1) lookup as we walk batch_sources.
+    let mut action_by_source: HashMap<&str, &FetchAction> = HashMap::new();
+    for action in actions {
+        let key = match action {
+            FetchAction::Replace {
+                old_source_location,
+                ..
+            } => old_source_location.as_str(),
+            FetchAction::Remove { source_location } => source_location.as_str(),
+            FetchAction::Add(_) => continue,
+        };
+        action_by_source.insert(key, action);
+    }
+
+    let data_dir = builder.bundle().data_dir();
+    let total_sources = old_source_info.batch_sources.len();
+
+    // Read the old merged parquet and concatenate into one contiguous RecordBatch
+    // so we can slice by row offset.
+    let read_progress = ProgressScope::new(
+        &format!(
+            "Rebuilding batch block ({} sources): reading old parquet",
+            total_sources
+        ),
+        None,
+    );
+    let (old_schema, old_batches) =
+        read_parquet_batches(old_block_location, data_dir.as_ref()).await?;
+    let old_combined = if old_batches.is_empty() {
+        arrow::record_batch::RecordBatch::new_empty(old_schema.clone())
+    } else {
+        arrow::compute::concat_batches(&old_schema, &old_batches).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to concatenate old batch parquet {}: {}",
+                old_block_location, e
+            ))
+        })?
+    };
+    drop(read_progress);
+
+    let source_progress = ProgressScope::new(
+        &format!("Rebuilding batch block: processing {} sources", total_sources),
+        Some(total_sources as u64),
+    );
+
+    let mut new_batches: Vec<arrow::record_batch::RecordBatch> = Vec::new();
+    let mut new_batch_sources: Vec<BatchedSource> = Vec::new();
+    let mut offset = 0usize;
+    let mut kept = 0usize;
+    let mut replaced = 0usize;
+    let mut removed = 0usize;
+
+    for (idx, src) in old_source_info.batch_sources.iter().enumerate() {
+        let rows = src.num_rows.ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "BatchedSource '{}' in block '{}' is missing num_rows; \
+                 bundle predates batch-rebuild support. Re-fetch the source to populate row counts.",
+                src.location, old_block_location
+            ))
+        })?;
+
+        match action_by_source.remove(src.location.as_str()) {
+            None => {
+                // Unchanged — keep the slice.
+                if rows > 0 {
+                    new_batches.push(old_combined.slice(offset, rows));
+                }
+                new_batch_sources.push(src.clone());
+                kept += 1;
+            }
+            Some(FetchAction::Replace { data, .. }) => {
+                let (new_loc, _new_fmt, _new_hash) = resolve_attach_location(
+                    builder,
+                    &data.attach_location,
+                    data.hash.clone(),
+                    json_read_options,
+                )
+                .await?;
+                let (src_schema, src_batches) =
+                    read_parquet_batches(&new_loc, data_dir.as_ref()).await?;
+                // Extend the union schema if the new source introduces new fields.
+                for field in src_schema.fields() {
+                    if old_schema.field_with_name(field.name()).is_err() {
+                        // Intentionally dropped: the old merged parquet has no column
+                        // for this field, and widening schema mid-rebuild is out of scope.
+                        warn!(
+                            "Dropping new column '{}' from replaced source '{}' during batch rebuild",
+                            field.name(),
+                            src.location
+                        );
                     }
                 }
+                let mut src_rows = 0usize;
+                for b in &src_batches {
+                    src_rows += b.num_rows();
+                    new_batches.push(align_batch_to_schema(b, &old_schema)?);
+                }
+                new_batch_sources.push(BatchedSource {
+                    location: data.source_location.clone(),
+                    version: data.version.clone(),
+                    num_rows: Some(src_rows),
+                });
+                replaced += 1;
             }
-            None
-        })
-        .ok_or_else(|| format!("No block found for source_location '{}'", source_location).into())
+            Some(FetchAction::Remove { .. }) => {
+                // Drop the source: contribute no rows, no batch_sources entry.
+                removed += 1;
+            }
+            Some(FetchAction::Add(_)) => unreachable!(),
+        }
+
+        offset += rows;
+        source_progress.update((idx + 1) as u64, Some(&src.location));
+    }
+    drop(source_progress);
+
+    // Write merged parquet and apply detach+attach as a pair.
+    let write_progress = ProgressScope::new("Rebuilding batch block: writing merged parquet", None);
+    let write_result = write_merged_parquet(new_batches, data_dir.as_ref()).await?;
+    drop(write_progress);
+    let new_location = data_dir.relative_path(write_result.file.as_ref())?;
+    let new_hash = write_result.hash;
+
+    let detach_op = DetachBlockOp { id: snapshot.id };
+    builder.apply_operation(detach_op.into()).await?;
+
+    let mut op = AttachBlockOp::setup(
+        pack_id,
+        &new_location,
+        AttachFormat::Parquet,
+        Some(&new_hash),
+        Some(SourceInfo {
+            id: source_id,
+            batch_sources: new_batch_sources,
+        }),
+        expected_schema,
+        builder,
+        None,
+    )
+    .await?;
+    // setup() recomputes block-level num_rows from the parquet itself.
+    // The per-source counts we populated in new_batch_sources are preserved.
+    validate_schema_against_expected(&op, expected_schema, &new_location);
+    // Defensive: make sure any BatchedSource still missing num_rows gets one.
+    populate_batch_source_num_rows(&mut op);
+    builder.apply_operation(op.into()).await?;
+
+    info!(
+        "Rebuilt batch block in {} (kept {} sources, replaced {}, removed {})",
+        pack_name, kept, replaced, removed
+    );
+
+    Ok(())
 }
 
 /// Public wrapper for `batch_small_ops` — used by create_source.rs.
@@ -587,9 +829,12 @@ async fn batch_small_ops(
 
         let data_dir = builder.bundle().data_dir();
         let first_op = &chunk[0].0;
-        let batch_sources = build_batch_sources(&chunk);
+        let mut batch_sources = build_batch_sources(&chunk);
 
-        // First pass: read all parquet files in parallel (I/O bound)
+        // First pass: read all parquet files in parallel (I/O bound).
+        // `buffered` preserves source order in the result Vec so we can
+        // correlate each read with its originating op (needed for
+        // per-source row counts recorded in `batch_sources`).
         let data_dir_clone = builder.bundle().data_dir();
         let locations: Vec<String> = chunk.iter().map(|(op, _)| op.location.clone()).collect();
         let read_results: Vec<
@@ -605,7 +850,7 @@ async fn batch_small_ops(
                 let dir = data_dir_clone.clone();
                 async move { read_parquet_batches(&location, dir.as_ref()).await }
             })
-            .buffer_unordered(50)
+            .buffered(50)
             .collect()
             .await;
 
@@ -614,6 +859,7 @@ async fn batch_small_ops(
         let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut total_rows: usize = 0;
         let mut total_bytes: usize = 0;
+        let mut per_file_rows: Vec<usize> = Vec::with_capacity(chunk.len());
 
         for (read_result, (op, _)) in read_results.into_iter().zip(chunk.iter()) {
             let (schema, batches) = read_result?;
@@ -622,11 +868,19 @@ async fn batch_small_ops(
                     union_fields.push(field.as_ref().clone());
                 }
             }
-            for batch in &batches {
-                total_rows += batch.num_rows();
-            }
+            let file_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+            total_rows += file_rows;
+            per_file_rows.push(file_rows);
             per_file_batches.push(batches);
             total_bytes += op.bytes.unwrap_or(0);
+        }
+
+        // Stamp row-count on each BatchedSource in source order. `build_batch_sources`
+        // flattens per-op batch_sources, and in this path each op is single-source,
+        // so the Vec length matches per_file_rows.
+        debug_assert_eq!(batch_sources.len(), per_file_rows.len());
+        for (bs, rows) in batch_sources.iter_mut().zip(per_file_rows.iter()) {
+            bs.num_rows = Some(*rows);
         }
 
         let union_schema = Arc::new(arrow_schema::Schema::new(union_fields));
@@ -768,6 +1022,21 @@ fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> 
                 .unwrap_or_default()
         })
         .collect()
+}
+
+/// After `AttachBlockOp::setup` has populated `op.num_rows`, mirror that onto
+/// any `BatchedSource` entries that were constructed with `num_rows: None`.
+/// This is called for single-source attaches; batched attaches populate
+/// per-source counts in `batch_small_ops` directly.
+pub(crate) fn populate_batch_source_num_rows(op: &mut AttachBlockOp) {
+    let total = op.num_rows;
+    if let Some(ref mut si) = op.source_info {
+        if si.batch_sources.len() == 1 {
+            if si.batch_sources[0].num_rows.is_none() {
+                si.batch_sources[0].num_rows = total;
+            }
+        }
+    }
 }
 
 /// Build a merged AttachBlockOp from a batch.

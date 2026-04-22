@@ -1269,6 +1269,23 @@ impl Bundle {
         None
     }
 
+    /// Find the currently attached block whose current location matches `location`.
+    pub fn find_block_by_current_location(&self, location: &str) -> Option<Arc<DataBlock>> {
+        let block_locations = self.build_block_location_map();
+        let packs = self.packs.read();
+        for pack in packs.values() {
+            for block in pack.blocks() {
+                if block_locations
+                    .get(block.id())
+                    .is_some_and(|current_location| current_location == location)
+                {
+                    return Some(block);
+                }
+            }
+        }
+        None
+    }
+
     /// Get the connector registry
     pub(crate) fn connector_registry(&self) -> Arc<RwLock<ConnectorRegistry>> {
         Arc::clone(&self.connector_registry)
@@ -1781,6 +1798,10 @@ impl BundleFacade for Bundle {
 
     fn packs(&self) -> HashMap<ObjectId, Arc<Pack>> {
         self.packs.read().clone()
+    }
+
+    fn sources(&self) -> HashMap<ObjectId, Arc<crate::bundle::Source>> {
+        self.sources.read().clone()
     }
 
     fn views_by_name(&self) -> HashMap<String, ObjectId> {

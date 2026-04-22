@@ -1044,6 +1044,125 @@ async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
+async fn test_fetch_sync_rebuilds_batch_block() -> Result<(), BundlebaseError> {
+    use bundlebase_command::BundleFacadeCommandExt;
+    use futures::StreamExt;
+    init();
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Three small parquet files batch together under the 1GB threshold.
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "a.parquet",
+    )
+    .await?;
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "b.parquet",
+    )
+    .await?;
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "c.parquet",
+    )
+    .await?;
+
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    let sql = format!(
+        "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') MIN BATCH 1G",
+        source_dir.url()
+    );
+    let mut stream = bundle.execute(&sql, vec![]).await?;
+    while let Some(batch) = stream.next().await {
+        batch?;
+    }
+
+    // userdata.parquet has 1000 rows; three copies batched = 3000 total.
+    assert_eq!(bundle.num_rows().await?, 3000);
+
+    // Overwrite two of the three files so one fetch produces two Replace actions
+    // targeting the same batch block — the path that previously crashed.
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "a.parquet",
+    )
+    .await?;
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "b.parquet",
+    )
+    .await?;
+
+    let results = bundle.fetch_all(SyncMode::Sync).await?;
+    // Batch block rebuilt: row count preserved.
+    assert_eq!(bundle.num_rows().await?, 3000);
+    // Fetch results still count individual per-source replacements.
+    let total_replaced: usize = results.iter().map(|r| r.replaced.len()).sum();
+    assert_eq!(total_replaced, 2);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_fetch_sync_can_replace_same_source_twice() -> Result<(), BundlebaseError> {
+    init();
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    let bundle = bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
+        .await?;
+
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    let first_results = bundle.fetch_all(SyncMode::Sync).await?;
+    assert_eq!(first_results.len(), 1);
+    assert_eq!(first_results[0].replaced.len(), 1);
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    let second_results = bundle.fetch_all(SyncMode::Sync).await?;
+    assert_eq!(second_results.len(), 1);
+    assert_eq!(second_results[0].replaced.len(), 1);
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), BundlebaseError> {
     init();
     let source_dir = random_memory_dir();

@@ -119,6 +119,7 @@ metadata_stmt = {
     | show_views_stmt
     | show_indexes_stmt
     | show_packs_stmt
+    | show_sources_stmt
     | show_blocks_stmt
     | show_config_stmt
     | show_commands_stmt
@@ -217,6 +218,7 @@ show_status_stmt     = { ^"show" ~ ^"status" }
 show_views_stmt      = { ^"show" ~ ^"views" }
 show_indexes_stmt    = { ^"show" ~ ^"indexes" }
 show_packs_stmt      = { ^"show" ~ ^"packs" }
+show_sources_stmt    = { ^"show" ~ ^"sources" }
 show_blocks_stmt     = { ^"show" ~ ^"blocks" }
 show_config_stmt     = { ^"show" ~ ^"config" }
 show_commands_stmt   = { ^"show" ~ ^"commands" }

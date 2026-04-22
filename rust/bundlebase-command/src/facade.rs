@@ -41,7 +41,7 @@ pub use show::{
     ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowBlocksCommand, ShowColumnsCommand,
     ShowCommandsCommand, ShowConfigCommand, ShowConnectorsCommand, ShowDetailsCommand,
     ShowFunctionsCommand, ShowHistoryCommand, ShowIndexesCommand, ShowPacksCommand,
-    ShowReportsCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowReportsCommand, ShowSourcesCommand, ShowStatusCommand, ShowViewsCommand,
 };
 pub use show_count::ShowCountCommand;
 pub use syntax::SyntaxCommand;

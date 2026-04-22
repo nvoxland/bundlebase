@@ -64,6 +64,7 @@ show_table_command!(ShowStatusCommand, show_status_stmt, "status", "STATUS");
 show_table_command!(ShowViewsCommand, show_views_stmt, "views", "VIEWS");
 show_table_command!(ShowIndexesCommand, show_indexes_stmt, "indexes", "INDEXES");
 show_table_command!(ShowPacksCommand, show_packs_stmt, "packs", "PACKS");
+show_table_command!(ShowSourcesCommand, show_sources_stmt, "sources", "SOURCES");
 show_table_command!(ShowBlocksCommand, show_blocks_stmt, "blocks", "BLOCKS");
 show_table_command!(ShowConfigCommand, show_config_stmt, "config", "CONFIG");
 show_table_command!(
@@ -197,6 +198,7 @@ mod tests {
             ("SHOW VIEWS", "ShowViews"),
             ("SHOW INDEXES", "ShowIndexes"),
             ("SHOW PACKS", "ShowPacks"),
+            ("SHOW SOURCES", "ShowSources"),
             ("SHOW BLOCKS", "ShowBlocks"),
             ("SHOW CONFIG", "ShowConfig"),
             ("SHOW COMMANDS", "ShowCommands"),

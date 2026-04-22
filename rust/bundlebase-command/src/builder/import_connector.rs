@@ -7,9 +7,9 @@ use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::ImportConnectorOp;
 use bundlebase::BundleBuilder;
 use bundlebase::BundleFacade;
-use bundlebase_connector::plugin::ffi::verify_shared_lib_connector;
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
+use bundlebase_connector::plugin::ffi::verify_shared_lib_connector;
 use bundlebase_udf::runtime::UdfRuntime;
 use std::collections::HashMap;
 
@@ -148,7 +148,9 @@ impl BundleBuilderCommand for ImportConnectorCommand {
             })?;
             verify_shared_lib_connector(path)?;
         } else {
-            resolved.verify_bundled_connector(&builder.data_dir()).await?;
+            resolved
+                .verify_bundled_connector(&builder.data_dir())
+                .await?;
         }
 
         let op = ImportConnectorOp::new(self.name.clone(), bundled_from, self.platform.clone());

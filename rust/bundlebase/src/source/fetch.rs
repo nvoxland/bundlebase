@@ -432,6 +432,7 @@ pub async fn orchestrate_fetch(
     data_dir: &dyn IOReadWriteDir,
     attached_files: &HashMap<String, AttachedFileInfo>,
     config: &Arc<dyn ConfigProvider>,
+    dry_run: bool,
 ) -> Result<Vec<FetchAction>, BundlebaseError> {
     let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
     let discovered = func.discover(args, &attached_locations, config).await?;
@@ -471,17 +472,31 @@ pub async fn orchestrate_fetch(
 
     progress.update(0, Some(&format!("Fetching {} files", pending.len())));
 
-    // Fetch data for all pending locations concurrently
+    // Fetch data for all pending locations concurrently.
+    // In dry-run mode, skip materialization: emit actions with placeholder
+    // attach_location/source_url/hash so callers can preview what would change
+    // without downloading anything.
     let fetch_results: Vec<Result<FetchAction, BundlebaseError>> = futures::stream::iter(pending)
         .map(|(kind, location)| async move {
-            let data =
-                get_data_for_location(func, &location, args, config, data_dir, &save_as).await?;
-            let materialized = MaterializedData {
-                attach_location: data.attach_location,
-                source_location: location.location.clone(),
-                source_url: data.source_url,
-                hash: data.hash,
-                version: location.version.clone(),
+            let materialized = if dry_run {
+                MaterializedData {
+                    attach_location: String::new(),
+                    source_location: location.location.clone(),
+                    source_url: String::new(),
+                    hash: None,
+                    version: location.version.clone(),
+                }
+            } else {
+                let data =
+                    get_data_for_location(func, &location, args, config, data_dir, &save_as)
+                        .await?;
+                MaterializedData {
+                    attach_location: data.attach_location,
+                    source_location: location.location.clone(),
+                    source_url: data.source_url,
+                    hash: data.hash,
+                    version: location.version.clone(),
+                }
             };
             Ok(match kind {
                 PendingKind::Add => FetchAction::Add(materialized),

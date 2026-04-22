@@ -101,7 +101,7 @@ pub use facade::{
     ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowBlocksCommand, ShowColumnsCommand,
     ShowCommandsCommand, ShowConfigCommand, ShowConnectorsCommand, ShowCountCommand,
     ShowDetailsCommand, ShowFunctionsCommand, ShowHistoryCommand, ShowIndexesCommand,
-    ShowPacksCommand, ShowReportsCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowPacksCommand, ShowReportsCommand, ShowSourcesCommand, ShowStatusCommand, ShowViewsCommand,
 };
 
 // Re-export extension traits
@@ -143,6 +143,7 @@ pub enum FacadeCommand {
     ShowViews(ShowViewsCommand),
     ShowIndexes(ShowIndexesCommand),
     ShowPacks(ShowPacksCommand),
+    ShowSources(ShowSourcesCommand),
     ShowBlocks(ShowBlocksCommand),
     ShowConfig(ShowConfigCommand),
     ShowCommands(ShowCommandsCommand),
@@ -243,6 +244,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::ShowSources(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::ShowBlocks(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -319,6 +324,7 @@ impl FacadeCommand {
             FacadeCommand::ShowViews(_) => ShowViewsCommand::output_schema(),
             FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_schema(),
             FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_schema(),
+            FacadeCommand::ShowSources(_) => ShowSourcesCommand::output_schema(),
             FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_schema(),
             FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_schema(),
             FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_schema(),
@@ -356,6 +362,7 @@ impl FacadeCommand {
             FacadeCommand::ShowViews(_) => ShowViewsCommand::output_shape(),
             FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_shape(),
             FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_shape(),
+            FacadeCommand::ShowSources(_) => ShowSourcesCommand::output_shape(),
             FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_shape(),
             FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_shape(),
             FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_shape(),
@@ -398,6 +405,7 @@ impl BundleCommand {
             BundleCommand::ShowViews(cmd) => Ok(FacadeCommand::ShowViews(cmd)),
             BundleCommand::ShowIndexes(cmd) => Ok(FacadeCommand::ShowIndexes(cmd)),
             BundleCommand::ShowPacks(cmd) => Ok(FacadeCommand::ShowPacks(cmd)),
+            BundleCommand::ShowSources(cmd) => Ok(FacadeCommand::ShowSources(cmd)),
             BundleCommand::ShowBlocks(cmd) => Ok(FacadeCommand::ShowBlocks(cmd)),
             BundleCommand::ShowConfig(cmd) => Ok(FacadeCommand::ShowConfig(cmd)),
             BundleCommand::ShowCommands(cmd) => Ok(FacadeCommand::ShowCommands(cmd)),
@@ -479,6 +487,7 @@ impl BundleCommand {
                     | BundleCommand::ShowViews(_)
                     | BundleCommand::ShowIndexes(_)
                     | BundleCommand::ShowPacks(_)
+                    | BundleCommand::ShowSources(_)
                     | BundleCommand::ShowBlocks(_)
                     | BundleCommand::ShowConfig(_)
                     | BundleCommand::ShowCommands(_)
@@ -526,6 +535,7 @@ impl BundleCommand {
                 | BundleCommand::ShowViews(_)
                 | BundleCommand::ShowIndexes(_)
                 | BundleCommand::ShowPacks(_)
+                | BundleCommand::ShowSources(_)
                 | BundleCommand::ShowBlocks(_)
                 | BundleCommand::ShowConfig(_)
                 | BundleCommand::ShowCommands(_)
@@ -934,6 +944,8 @@ register_commands! {
             "SHOW INDEXES" => "SHOW INDEXES",
         ShowPacks(ShowPacksCommand) => Rule::show_packs_stmt,
             "SHOW PACKS" => "SHOW PACKS",
+        ShowSources(ShowSourcesCommand) => Rule::show_sources_stmt,
+            "SHOW SOURCES" => "SHOW SOURCES",
         ShowBlocks(ShowBlocksCommand) => Rule::show_blocks_stmt,
             "SHOW BLOCKS" => "SHOW BLOCKS",
         ShowConfig(ShowConfigCommand) => Rule::show_config_stmt,

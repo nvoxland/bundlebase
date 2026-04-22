@@ -3,6 +3,7 @@ use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
 use crate::bundle::Pack;
+use crate::bundle::Source;
 use crate::bundle::{AlwaysUpdateRule, ReportEntry};
 use crate::bundle_config::Scope;
 use crate::index::IndexDefinition;
@@ -130,6 +131,9 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns packs (id -> pack)
     fn packs(&self) -> HashMap<ObjectId, Arc<Pack>>;
+
+    /// Returns sources (id -> source)
+    fn sources(&self) -> HashMap<ObjectId, Arc<Source>>;
 
     /// Returns views by name (name -> id mapping)
     fn views_by_name(&self) -> HashMap<String, ObjectId>;

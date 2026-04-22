@@ -25,6 +25,16 @@ use std::sync::Arc;
 use stream_formatter::format_stream;
 use tracing::{error, info};
 
+fn prompt_label(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty() && !segment.ends_with(':'))
+        .unwrap_or(url)
+        .to_string()
+}
+
 /// Print the REPL header with bundle info.
 pub fn print_header(bundle: &dyn BundleFacade) {
     let url = bundle.url();
@@ -159,7 +169,7 @@ pub async fn start(
         .with_edit_mode(Box::new(Emacs::new(default_emacs_keybindings())));
 
     let prompt = DefaultPrompt {
-        left_prompt: DefaultPromptSegment::Basic(bundle.url().to_string()),
+        left_prompt: DefaultPromptSegment::Basic(prompt_label(&bundle.url().to_string())),
         right_prompt: DefaultPromptSegment::CurrentDateTime,
     };
 
@@ -240,4 +250,24 @@ pub async fn start(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prompt_label;
+
+    #[test]
+    fn prompt_label_uses_last_path_segment() {
+        assert_eq!(
+            prompt_label("file:///tmp/claude-history-bundle"),
+            "claude-history-bundle"
+        );
+        assert_eq!(prompt_label("s3://bucket/path/to/bundle"), "bundle");
+    }
+
+    #[test]
+    fn prompt_label_falls_back_when_url_has_no_path_segment() {
+        assert_eq!(prompt_label("memory://"), "memory://");
+        assert_eq!(prompt_label("file:///"), "file:///");
+    }
 }

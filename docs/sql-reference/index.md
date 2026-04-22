@@ -1158,7 +1158,7 @@ Shows the contents of a bundle metadata table. A shortcut for `SELECT * FROM bun
 SHOW <table>
 ```
 
-Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`.
+Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `SOURCES`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`.
 
 **Examples:**
 
@@ -1169,6 +1169,7 @@ SHOW DETAILS
 SHOW CONFIG
 SHOW COMMANDS
 SHOW CONNECTORS
+SHOW SOURCES
 ```
 
 ### SYNTAX

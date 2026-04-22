@@ -173,6 +173,7 @@ pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
         ("SHOW VIEWS", "SHOW VIEWS", "read-only"),
         ("SHOW INDEXES", "SHOW INDEXES", "read-only"),
         ("SHOW PACKS", "SHOW PACKS", "read-only"),
+        ("SHOW SOURCES", "SHOW SOURCES", "read-only"),
         ("SHOW BLOCKS", "SHOW BLOCKS", "read-only"),
         ("SHOW CONFIG", "SHOW CONFIG", "read-only"),
         ("SHOW COMMANDS", "SHOW COMMANDS", "read-only"),

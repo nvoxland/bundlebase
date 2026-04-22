@@ -13,4 +13,5 @@ Show the contents of a bundle metadata table. A shortcut for
     SHOW CONNECTORS
     SHOW FUNCTIONS
     SHOW PACKS
+    SHOW SOURCES
     SHOW BLOCKS

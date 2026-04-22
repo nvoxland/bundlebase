@@ -1,8 +1,8 @@
 use crate::bundle::bundle_schema::BundleSchema;
-use crate::bundle::operation::{AnyOperation, Operation};
+use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::data::BlockId;
-use crate::{Bundle, BundleFacade, BundlebaseError};
+use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -23,21 +23,12 @@ pub struct DetachBlockOp {
 impl DetachBlockOp {
     /// Create a DetachBlockOp by looking up the block ID from the location.
     ///
-    /// Searches through AttachBlockOp operations to find a block with
-    /// the matching location.
+    /// Resolves the currently attached block whose current location matches.
     pub async fn setup(location: &str, builder: &BundleBuilder) -> Result<Self, BundlebaseError> {
-        // Find block ID by searching AttachBlockOp operations for matching location
         let block_id = builder
-            .operations()
-            .iter()
-            .find_map(|op| {
-                if let AnyOperation::AttachBlock(attach_op) = op {
-                    if attach_op.location == location {
-                        return Some(attach_op.id);
-                    }
-                }
-                None
-            })
+            .bundle()
+            .find_block_by_current_location(location)
+            .map(|block| *block.id())
             .ok_or_else(|| {
                 BundlebaseError::from(format!("No block found at location '{}'", location))
             })?;

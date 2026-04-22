@@ -34,6 +34,10 @@ pub struct SourceInfo {
 pub struct BatchedSource {
     pub location: String,
     pub version: String,
+    /// Number of rows this source contributed to the block. Needed to slice
+    /// the merged parquet when rebuilding a batch after some sources change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_rows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

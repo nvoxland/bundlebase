@@ -1,9 +1,9 @@
 mod common;
-use arrow::array::{Array, StringArray};
+use arrow::array::{Array, StringArray, UInt64Array};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, BundleBuilder};
-use bundlebase_command::BundleBuilderExt;
+use bundlebase_command::{BundleBuilderExt, BundleFacadeCommandExt};
 use bundlebase_index::IndexType;
 use futures::StreamExt;
 use futures::TryStreamExt;
@@ -888,6 +888,105 @@ async fn test_bundle_packs_table_base_pack() {
         .downcast_ref::<StringArray>()
         .unwrap();
     assert_eq!(name_col.value(0), "base");
+}
+
+// ==================== bundle_info.sources tests ====================
+
+#[tokio::test]
+async fn test_bundle_sources_table_schema_and_show_sources() {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    bundle
+        .execute(
+            "CREATE SOURCE USING remote_dir WITH (url = 'file:///tmp/data', patterns = '**/*.parquet') SAVE AS PARQUET MIN BATCH 15M",
+            vec![],
+        )
+        .await
+        .unwrap();
+
+    bundle.commit("Create source").await.unwrap();
+
+    let bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();
+
+    let df = bundle
+        .ctx()
+        .sql("SELECT * FROM bundle_info.sources")
+        .await
+        .unwrap();
+
+    let schema = df.schema();
+    assert_eq!(
+        schema.fields().len(),
+        7,
+        "bundle_info.sources should have 7 columns"
+    );
+
+    let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert_eq!(
+        field_names,
+        vec![
+            "id",
+            "pack_id",
+            "pack_name",
+            "connector",
+            "save_as",
+            "min_batch_bytes",
+            "args"
+        ]
+    );
+
+    let stream = bundle.execute("SHOW SOURCES", vec![]).await.unwrap();
+    let batches: Vec<_> = stream.collect::<Vec<_>>().await;
+
+    let total_rows: usize = batches
+        .iter()
+        .filter_map(|result| result.as_ref().ok())
+        .map(|batch| batch.num_rows())
+        .sum();
+    assert_eq!(
+        total_rows, 1,
+        "SHOW SOURCES should return the configured source"
+    );
+
+    let batch = batches[0].as_ref().unwrap();
+    let pack_name_col = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let connector_col = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let save_as_col = batch
+        .column(4)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let min_batch_bytes_col = batch
+        .column(5)
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap();
+    let args_col = batch
+        .column(6)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+
+    assert_eq!(pack_name_col.value(0), "base");
+    assert_eq!(connector_col.value(0), "remote_dir");
+    assert_eq!(save_as_col.value(0), "parquet");
+    assert_eq!(min_batch_bytes_col.value(0), 15 * 1024 * 1024);
+    assert_eq!(
+        args_col.value(0),
+        r#"{"patterns":"**/*.parquet","url":"file:///tmp/data"}"#
+    );
 }
 
 // ==================== bundle_info.blocks tests ====================
