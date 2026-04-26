@@ -17,9 +17,9 @@ use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::env::current_dir;
 use std::fmt::{Debug, Display};
-use std::path::PathBuf;
+use std::env::current_dir;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use url::Url;
 
@@ -616,6 +616,8 @@ pub(crate) fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
 
 /// Returns a URL for a file path.
 /// If the path is relative, returns an absolute file URL relative to the current working directory.
+/// `..` and `.` segments are resolved lexically so the resulting URL does not contain
+/// path-traversal segments that downstream parsers (e.g. object_store) reject.
 fn file_url(path: &str) -> Result<Url, BundlebaseError> {
     let path_buf = PathBuf::from(path);
     let absolute_path = if path_buf.is_absolute() {
@@ -626,8 +628,30 @@ fn file_url(path: &str) -> Result<Url, BundlebaseError> {
             .join(path_buf)
     };
 
-    Url::from_file_path(absolute_path.as_path())
+    let normalized = normalize_path(&absolute_path);
+
+    Url::from_file_path(normalized.as_path())
         .map_err(|_| BundlebaseError::from(format!("Invalid file path: {}", path)))
+}
+
+/// Resolve `.` and `..` components in `path` lexically (without touching the
+/// filesystem). The path may not exist yet, so `std::fs::canonicalize` isn't
+/// usable.
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 // ============================================================================

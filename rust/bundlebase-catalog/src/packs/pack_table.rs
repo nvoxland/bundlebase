@@ -6,13 +6,14 @@ use datafusion::catalog::{Session, TableProvider};
 use datafusion::datasource::TableType;
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
-use datafusion::physical_expr::expressions::{Column, Literal};
+use datafusion::physical_expr::expressions::{CastExpr, Column, Literal};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::{union::UnionExec, ExecutionPlan};
 use datafusion::scalar::ScalarValue;
 use futures::future::try_join_all;
 use std::any::Any;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Custom TableProvider that represents a UNION of all blocks in a pack.
@@ -49,14 +50,32 @@ impl PackTable {
 
         // Compute merged schema from ALL blocks (union of fields by name).
         // Preserves insertion order: first block's fields first, then additional
-        // fields from subsequent blocks appended in order.
+        // fields from subsequent blocks appended in order. When the same name
+        // appears with different types across blocks, widen to a common type
+        // (e.g. Utf8 + Utf8View -> Utf8View) so the per-block plans can be
+        // unioned without DataFusion failing on schema mismatch.
         let mut merged_fields: Vec<Arc<Field>> = Vec::new();
-        let mut seen_names: HashSet<String> = HashSet::new();
+        let mut name_to_idx: HashMap<String, usize> = HashMap::new();
         for block in &blocks {
             let block_schema = block.schema();
             for field in block_schema.fields() {
-                if seen_names.insert(field.name().clone()) {
-                    merged_fields.push(field.clone());
+                match name_to_idx.get(field.name()) {
+                    None => {
+                        name_to_idx.insert(field.name().clone(), merged_fields.len());
+                        merged_fields.push(field.clone());
+                    }
+                    Some(&idx) => {
+                        let existing = &merged_fields[idx];
+                        if existing.data_type() != field.data_type() {
+                            let widened = widen_type(existing.data_type(), field.data_type());
+                            let nullable = existing.is_nullable() || field.is_nullable();
+                            merged_fields[idx] = Arc::new(Field::new(
+                                existing.name(),
+                                widened,
+                                nullable,
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -219,9 +238,12 @@ impl TableProvider for PackTable {
 }
 
 impl PackTable {
-    /// Build the per-block ExecutionPlan, including the missing-columns
-    /// padding path. Extracted from `scan()` so it can be invoked
-    /// concurrently per block via `try_join_all`.
+    /// Build the per-block ExecutionPlan. Always wraps the block scan in a
+    /// projection so each block's output schema matches the pack-level schema
+    /// exactly (column order, types, missing columns padded with nulls). This
+    /// is required for the UnionExec across blocks to plan successfully when
+    /// blocks have heterogeneous types for the same column (e.g. Utf8 vs
+    /// Utf8View) or omit columns.
     async fn plan_for_block(
         block: Arc<DataBlock>,
         state: &dyn Session,
@@ -231,11 +253,9 @@ impl PackTable {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let block_schema = block.schema();
 
-        // Build mapping: for each projected pack column, find it in block schema.
-        let mut block_proj_indices: Vec<usize> = Vec::new();
-        let mut missing_columns: Vec<(usize, Arc<Field>)> = Vec::new();
-        let mut all_present = true;
-
+        // Indices of fields to scan from the block, in scan-output order.
+        // Each entry is (block_field_idx, position-in-projected_pack_fields).
+        let mut scan_entries: Vec<(usize, usize)> = Vec::new();
         for (output_idx, (_pack_idx, pack_field)) in projected_pack_fields.iter().enumerate() {
             if let Some((block_idx, _)) = block_schema
                 .fields()
@@ -243,68 +263,67 @@ impl PackTable {
                 .enumerate()
                 .find(|(_, f)| f.name() == pack_field.name())
             {
-                block_proj_indices.push(block_idx);
-            } else {
-                all_present = false;
-                missing_columns.push((output_idx, pack_field.clone()));
+                scan_entries.push((block_idx, output_idx));
             }
         }
 
-        if all_present {
-            // All projected columns exist in this block — pass translated projection
-            let block_proj = if block_proj_indices.len() == block_schema.fields().len()
-                && block_proj_indices.iter().enumerate().all(|(i, &v)| i == v)
-            {
-                None // identity projection, pass None for efficiency
-            } else {
-                Some(block_proj_indices)
-            };
-            block.scan(state, block_proj.as_ref(), filters, limit).await
+        let scan_proj: Option<Vec<usize>> = if scan_entries.is_empty() {
+            None
         } else {
-            // Some columns missing — scan existing columns, then project to add nulls
-            let existing_proj: Vec<usize> = projected_pack_fields
-                .iter()
-                .filter_map(|(_, pack_field)| {
-                    block_schema
-                        .fields()
-                        .iter()
-                        .position(|f| f.name() == pack_field.name())
-                })
-                .collect();
+            Some(scan_entries.iter().map(|(b, _)| *b).collect())
+        };
+        let inner_plan = block
+            .scan(state, scan_proj.as_ref(), filters, limit)
+            .await?;
+        let inner_schema = inner_plan.schema();
 
-            let scan_proj = if existing_proj.is_empty() {
-                None
-            } else {
-                Some(existing_proj)
-            };
-            let inner_plan = block
-                .scan(state, scan_proj.as_ref(), filters, limit)
-                .await?;
-            let inner_schema = inner_plan.schema();
+        // Map output_idx -> (inner_col_idx, inner_data_type).
+        let mut output_to_inner: HashMap<usize, (usize, DataType)> = HashMap::new();
+        for (i, (_block_idx, output_idx)) in scan_entries.iter().enumerate() {
+            let dt = inner_schema.fields()[i].data_type().clone();
+            output_to_inner.insert(*output_idx, (i, dt));
+        }
 
-            let mut exprs: Vec<(Arc<dyn datafusion::physical_expr::PhysicalExpr>, String)> =
-                Vec::new();
-            let mut inner_col_idx = 0;
-
-            for (output_idx, (_pack_idx, pack_field)) in projected_pack_fields.iter().enumerate() {
-                if missing_columns.iter().any(|(mi, _)| *mi == output_idx) {
+        let mut exprs: Vec<(Arc<dyn PhysicalExpr>, String)> =
+            Vec::with_capacity(projected_pack_fields.len());
+        for (output_idx, (_pack_idx, pack_field)) in projected_pack_fields.iter().enumerate() {
+            match output_to_inner.get(&output_idx) {
+                Some((inner_col_idx, inner_dt)) => {
+                    let inner_name = inner_schema.fields()[*inner_col_idx].name();
+                    let mut e: Arc<dyn PhysicalExpr> =
+                        Arc::new(Column::new(inner_name, *inner_col_idx));
+                    if inner_dt != pack_field.data_type() {
+                        e = Arc::new(CastExpr::new(e, pack_field.data_type().clone(), None));
+                    }
+                    exprs.push((e, pack_field.name().clone()));
+                }
+                None => {
                     let null_value = ScalarValue::try_from(pack_field.data_type())?;
                     exprs.push((
                         Arc::new(Literal::new(null_value)),
                         pack_field.name().clone(),
                     ));
-                } else {
-                    let inner_field = &inner_schema.fields()[inner_col_idx];
-                    exprs.push((
-                        Arc::new(Column::new(inner_field.name(), inner_col_idx)),
-                        pack_field.name().clone(),
-                    ));
-                    inner_col_idx += 1;
                 }
             }
-
-            Ok(Arc::new(ProjectionExec::try_new(exprs, inner_plan)?))
         }
+
+        Ok(Arc::new(ProjectionExec::try_new(exprs, inner_plan)?))
+    }
+}
+
+/// Pick a common data type that can losslessly hold values of `a` and `b`.
+/// Falls back to `a` (the existing merged-schema type) when no obvious widening
+/// applies — that matches the prior "first block wins" behavior.
+fn widen_type(a: &DataType, b: &DataType) -> DataType {
+    use DataType::*;
+    match (a, b) {
+        // String family: prefer Utf8View, then LargeUtf8, then Utf8.
+        (Utf8View, _) | (_, Utf8View) => Utf8View,
+        (LargeUtf8, Utf8) | (Utf8, LargeUtf8) => LargeUtf8,
+        // Binary family: same ordering as strings.
+        (BinaryView, _) | (_, BinaryView) => BinaryView,
+        (LargeBinary, Binary) | (Binary, LargeBinary) => LargeBinary,
+        _ => a.clone(),
     }
 }
 

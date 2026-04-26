@@ -83,7 +83,7 @@ impl Operation for DetachBlockOp {
             pack.remove_block(&self.id);
         }
 
-        log::info!("Detached block {}", self.id);
+        log::debug!("Detached block {}", self.id);
 
         Ok(())
     }

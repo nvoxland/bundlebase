@@ -109,6 +109,20 @@ impl BundleSchema {
             }
         }
 
+        // Backfill physical fields from CreateSource.expected_schema for any
+        // columns that weren't seen via an AttachBlock. AttachBlock-derived
+        // types take precedence (they reflect the actual on-disk type), so we
+        // only add expected_schema entries here when no AttachBlock has
+        // registered them. This is what lets hollow bundles validate
+        // schema-dependent ops (like CREATE TEXT INDEX) before any data has
+        // been fetched.
+        backfill_physical_from_sources(
+            operations,
+            &mut physical_fields,
+            &mut physical_col_ids,
+            &mut seen_physical,
+        );
+
         Self {
             columns: id_to_name,
             computed_columns: computed,
@@ -194,6 +208,16 @@ impl BundleSchema {
                 _ => {}
             }
         }
+
+        // Same backfill as in `initial`: source-derived columns whose blocks
+        // haven't been attached yet (e.g. hollow bundles) get their type from
+        // CreateSource.expected_schema so schema-dependent ops still validate.
+        backfill_physical_from_sources(
+            operations,
+            &mut physical_fields,
+            &mut physical_col_ids,
+            &mut seen_physical,
+        );
 
         Self {
             columns: id_to_name,
@@ -435,6 +459,35 @@ pub fn parse_internal_name(name: &str) -> Option<ColumnId> {
 
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Append physical fields for any CreateSource.expected_schema columns whose
+/// ColumnIds aren't already in `seen_physical`. Names use the internal
+/// `col_<id>` form to match AttachBlock-derived fields. Nullable defaults to
+/// true since expected_schema describes intended columns rather than a
+/// guarantee from any specific data file.
+fn backfill_physical_from_sources(
+    operations: &[AnyOperation],
+    physical_fields: &mut Vec<Arc<arrow::datatypes::Field>>,
+    physical_col_ids: &mut Vec<ColumnId>,
+    seen_physical: &mut HashSet<ColumnId>,
+) {
+    for op in operations {
+        if let AnyOperation::CreateSource(src) = op {
+            if let Some(ref expected) = src.expected_schema {
+                for col in expected {
+                    if seen_physical.insert(col.id) {
+                        physical_fields.push(Arc::new(arrow::datatypes::Field::new(
+                            generate_internal_name(&col.id),
+                            col.data_type.clone(),
+                            true,
+                        )));
+                        physical_col_ids.push(col.id);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

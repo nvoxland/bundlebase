@@ -52,7 +52,14 @@ impl Operation for CreateIndexOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        let schema = bundle.schema().await?;
+        // Use the BundleSchema (built from operations) rather than the
+        // dataframe schema. This works for both populated bundles and hollow
+        // bundles: the latter have no AttachBlock ops so the dataframe is
+        // empty, but BundleSchema backfills column types from
+        // CreateSource.expected_schema.
+        let bundle_schema = bundle.bundle_schema();
+        let physical = bundle_schema.physical_schema();
+        let physical_ids = bundle_schema.physical_column_ids();
 
         // Resolve column names from IDs
         let columns: Vec<String> = self
@@ -65,10 +72,16 @@ impl Operation for CreateIndexOp {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let column_name_set: std::collections::HashSet<&str> =
+            bundle_schema.columns().values().map(|s| s.as_str()).collect();
+
         if self.index_type.is_inverted() {
             // Validate all columns exist and are string types
-            for col in &columns {
-                let field = schema.column_with_name(col).map(|(_, f)| f);
+            for (col, col_id) in columns.iter().zip(self.column_ids.iter()) {
+                let field = physical_ids
+                    .iter()
+                    .position(|id| id == col_id)
+                    .map(|i| physical.field(i));
                 let field = match field {
                     Some(f) => f,
                     None => return Err(format!("Column '{}' not found in schema", col).into()),
@@ -86,7 +99,7 @@ impl Operation for CreateIndexOp {
             }
 
             // Validate name doesn't conflict with data column names
-            if schema.column_with_name(&self.name).is_some() {
+            if column_name_set.contains(self.name.as_str()) {
                 return Err(format!(
                     "Text index name '{}' conflicts with an existing data column",
                     self.name
