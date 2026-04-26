@@ -244,6 +244,170 @@ pub fn verify_shared_lib_connector(path: &str) -> Result<(), BundlebaseError> {
     SharedLibHandle::load(path).map(|_| ())
 }
 
+/// Confirm `path` looks like a shared-library file for `(target_os, target_arch)`
+/// without `dlopen`-ing it.
+///
+/// Used for non-host platforms during multi-platform IMPORT CONNECTOR — the
+/// build host can't load a foreign binary, but it can still check the file
+/// header so a typo or wrong-platform mistake is caught at registration time
+/// rather than at fetch time on the consumer.
+///
+/// `target_arch == "*"` skips the arch-byte check (useful for `linux/*`-style
+/// patterns). `target_os == "*"` rejects: a wildcard OS has no defined header
+/// format to validate against.
+pub fn verify_shared_lib_header(
+    path: &str,
+    target_os: &str,
+    target_arch: &str,
+) -> Result<(), BundlebaseError> {
+    if target_os == "*" {
+        return Err(format!(
+            "Cannot structurally verify '{}' against wildcard os '*' — pin the os in the platform string.",
+            path
+        )
+        .into());
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Failed to read shared library '{}': {}", path, e))?;
+
+    match target_os {
+        "linux" => verify_elf(&bytes, path, target_arch),
+        "darwin" => verify_macho(&bytes, path, target_arch),
+        "windows" => verify_pe(&bytes, path, target_arch),
+        other => Err(format!(
+            "Unsupported target os '{}' for structural verification (expected linux, darwin, or windows).",
+            other
+        )
+        .into()),
+    }
+}
+
+fn verify_elf(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), BundlebaseError> {
+    if bytes.len() < 20 || &bytes[0..4] != b"\x7FELF" {
+        return Err(format!(
+            "'{}' is not an ELF shared library (expected for linux/*).",
+            path
+        )
+        .into());
+    }
+    if target_arch == "*" {
+        return Ok(());
+    }
+    // e_machine is a u16 at offset 18, little-endian for ELF (which is what
+    // we care about for amd64/arm64 — both are LE).
+    let e_machine = u16::from_le_bytes([bytes[18], bytes[19]]);
+    let expected = match target_arch {
+        "amd64" => 0x3E,
+        "arm64" => 0xB7,
+        "386" | "i386" => 0x03,
+        other => {
+            return Err(format!(
+                "Unsupported linux arch '{}' for structural verification.",
+                other
+            )
+            .into())
+        }
+    };
+    if e_machine != expected {
+        return Err(format!(
+            "ELF '{}' e_machine 0x{:X} does not match linux/{} (expected 0x{:X}).",
+            path, e_machine, target_arch, expected
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn verify_macho(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), BundlebaseError> {
+    if bytes.len() < 8 {
+        return Err(format!("'{}' is too small to be a Mach-O binary.", path).into());
+    }
+    let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    // Fat (universal) binary — big-endian magic. Don't try to validate the
+    // embedded slice list; assume the toolchain produced it correctly.
+    const FAT_MAGIC_BE: u32 = 0xCAFEBABE;
+    const FAT_MAGIC_BE_64: u32 = 0xCAFEBABF;
+    if magic.swap_bytes() == FAT_MAGIC_BE || magic.swap_bytes() == FAT_MAGIC_BE_64 {
+        return Ok(());
+    }
+    // Thin Mach-O — little-endian magic.
+    const MH_MAGIC_64: u32 = 0xFEEDFACF;
+    const MH_MAGIC_32: u32 = 0xFEEDFACE;
+    if magic != MH_MAGIC_64 && magic != MH_MAGIC_32 {
+        return Err(format!(
+            "'{}' is not a Mach-O binary (expected for darwin/*).",
+            path
+        )
+        .into());
+    }
+    if target_arch == "*" {
+        return Ok(());
+    }
+    // cputype is at offset 4, little-endian.
+    let cputype = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    // Strip the 0x01000000 ABI64 bit before comparing.
+    let base_cputype = cputype & 0x00FFFFFF;
+    let expected = match target_arch {
+        "amd64" => 7u32,    // CPU_TYPE_X86_64 = CPU_TYPE_X86 (7) | ABI64
+        "arm64" => 12u32,   // CPU_TYPE_ARM64 = CPU_TYPE_ARM (12) | ABI64
+        other => {
+            return Err(format!(
+                "Unsupported darwin arch '{}' for structural verification.",
+                other
+            )
+            .into())
+        }
+    };
+    if base_cputype != expected {
+        return Err(format!(
+            "Mach-O '{}' cputype 0x{:X} does not match darwin/{} (expected base 0x{:X}).",
+            path, cputype, target_arch, expected
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn verify_pe(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), BundlebaseError> {
+    if bytes.len() < 0x40 || &bytes[0..2] != b"MZ" {
+        return Err(format!(
+            "'{}' is not a PE/DLL binary (expected for windows/*).",
+            path
+        )
+        .into());
+    }
+    // PE header offset is a u32 at 0x3C.
+    let pe_off = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
+    if pe_off + 6 > bytes.len() || &bytes[pe_off..pe_off + 4] != b"PE\0\0" {
+        return Err(format!("'{}' has no valid PE signature.", path).into());
+    }
+    if target_arch == "*" {
+        return Ok(());
+    }
+    // COFF header machine field is u16 at pe_off+4.
+    let machine = u16::from_le_bytes([bytes[pe_off + 4], bytes[pe_off + 5]]);
+    let expected = match target_arch {
+        "amd64" => 0x8664,
+        "arm64" => 0xAA64,
+        "386" | "i386" => 0x014C,
+        other => {
+            return Err(format!(
+                "Unsupported windows arch '{}' for structural verification.",
+                other
+            )
+            .into())
+        }
+    };
+    if machine != expected {
+        return Err(format!(
+            "PE '{}' machine 0x{:X} does not match windows/{} (expected 0x{:X}).",
+            path, machine, target_arch, expected
+        )
+        .into());
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // FfiConnector
 // ---------------------------------------------------------------------------
@@ -696,5 +860,196 @@ mod tests {
         assert!(!err
             .to_string()
             .contains("External code execution is disabled"));
+    }
+
+    // ----- structural shared-lib header verification -----
+
+    fn write_tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "bb_verify_{}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            name
+        ));
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    fn fake_elf(e_machine: u16) -> Vec<u8> {
+        let mut v = vec![0u8; 64];
+        v[0..4].copy_from_slice(b"\x7FELF");
+        v[18..20].copy_from_slice(&e_machine.to_le_bytes());
+        v
+    }
+
+    fn fake_macho(cputype: u32) -> Vec<u8> {
+        let mut v = vec![0u8; 32];
+        v[0..4].copy_from_slice(&0xFEEDFACFu32.to_le_bytes());
+        v[4..8].copy_from_slice(&cputype.to_le_bytes());
+        v
+    }
+
+    fn fake_pe(machine: u16) -> Vec<u8> {
+        let mut v = vec![0u8; 0x100];
+        v[0..2].copy_from_slice(b"MZ");
+        let pe_off: u32 = 0x80;
+        v[0x3C..0x40].copy_from_slice(&pe_off.to_le_bytes());
+        v[0x80..0x84].copy_from_slice(b"PE\0\0");
+        v[0x84..0x86].copy_from_slice(&machine.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn test_verify_header_elf_amd64_ok() {
+        // ELF e_machine 0x3E = AMD64
+        let p = write_tmp("good.so", &fake_elf(0x3E));
+        verify_shared_lib_header(p.to_str().unwrap(), "linux", "amd64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_elf_arm64_ok() {
+        let p = write_tmp("good_arm.so", &fake_elf(0xB7));
+        verify_shared_lib_header(p.to_str().unwrap(), "linux", "arm64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_elf_arch_mismatch() {
+        // amd64 ELF claimed as arm64
+        let p = write_tmp("mismatch.so", &fake_elf(0x3E));
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "linux", "arm64").unwrap_err();
+        assert!(
+            err.to_string().contains("does not match linux/arm64"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_elf_wildcard_arch_skips_check() {
+        let p = write_tmp("wild.so", &fake_elf(0x3E));
+        verify_shared_lib_header(p.to_str().unwrap(), "linux", "*").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_not_elf() {
+        let p = write_tmp("notelf.so", b"not an elf file at all");
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "linux", "amd64").unwrap_err();
+        assert!(err.to_string().contains("not an ELF"), "got: {}", err);
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_macho_amd64_ok() {
+        // CPU_TYPE_X86_64 = 0x01000007
+        let p = write_tmp("good.dylib", &fake_macho(0x01000007));
+        verify_shared_lib_header(p.to_str().unwrap(), "darwin", "amd64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_macho_arm64_ok() {
+        let p = write_tmp("good_arm.dylib", &fake_macho(0x0100000C));
+        verify_shared_lib_header(p.to_str().unwrap(), "darwin", "arm64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_macho_arch_mismatch() {
+        let p = write_tmp("bad.dylib", &fake_macho(0x01000007));
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "darwin", "arm64").unwrap_err();
+        assert!(
+            err.to_string().contains("does not match darwin/arm64"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_macho_fat_skips_arch() {
+        // Fat binary big-endian magic 0xCAFEBABE
+        let mut v = vec![0u8; 32];
+        v[0..4].copy_from_slice(&0xCAFEBABEu32.swap_bytes().to_le_bytes());
+        let p = write_tmp("fat.dylib", &v);
+        verify_shared_lib_header(p.to_str().unwrap(), "darwin", "arm64").unwrap();
+        verify_shared_lib_header(p.to_str().unwrap(), "darwin", "amd64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_pe_amd64_ok() {
+        let p = write_tmp("good.dll", &fake_pe(0x8664));
+        verify_shared_lib_header(p.to_str().unwrap(), "windows", "amd64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_pe_arm64_ok() {
+        let p = write_tmp("good_arm.dll", &fake_pe(0xAA64));
+        verify_shared_lib_header(p.to_str().unwrap(), "windows", "arm64").unwrap();
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_pe_machine_mismatch() {
+        let p = write_tmp("bad.dll", &fake_pe(0x8664));
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "windows", "arm64").unwrap_err();
+        assert!(
+            err.to_string().contains("does not match windows/arm64"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_not_pe() {
+        let p = write_tmp("notpe.dll", b"this is not a PE binary");
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "windows", "amd64").unwrap_err();
+        assert!(
+            err.to_string().contains("not a PE/DLL") || err.to_string().contains("PE signature"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_wildcard_os_rejected() {
+        let p = write_tmp("any.so", &fake_elf(0x3E));
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "*", "amd64").unwrap_err();
+        assert!(
+            err.to_string().contains("wildcard os"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_unsupported_os() {
+        let p = write_tmp("any2.so", &fake_elf(0x3E));
+        let err = verify_shared_lib_header(p.to_str().unwrap(), "freebsd", "amd64").unwrap_err();
+        assert!(
+            err.to_string().contains("Unsupported target os"),
+            "got: {}",
+            err
+        );
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn test_verify_header_missing_file() {
+        let err = verify_shared_lib_header("/nonexistent/path/lib.so", "linux", "amd64")
+            .unwrap_err();
+        assert!(err.to_string().contains("Failed to read"), "got: {}", err);
     }
 }

@@ -22,6 +22,12 @@ pub struct ConnectorEntry {
     pub from: UdfRuntime,
     pub platform: Platform,
     pub temporary: bool,
+    /// Bundle-relative path (under `data_dir`) to a content-addressed source
+    /// archive for this connector, or `None` if no source was bundled.
+    /// Multi-platform IMPORT CONNECTOR populates this on every entry produced
+    /// by one statement, so any one entry's `src` is sufficient to recover the
+    /// archive.
+    pub src: Option<String>,
 }
 
 /// Resolve the best connector entry for the current platform.
@@ -87,6 +93,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::first").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
@@ -94,6 +101,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::second").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             },
         ];
 
@@ -109,6 +117,7 @@ mod tests {
             from: UdfRuntime::parse_from("ffi::test").unwrap(),
             platform: "nonexistent/arch".parse().unwrap(),
             temporary: false,
+            src: None,
         }];
 
         let result = resolve_connector(&entries, "test.source");
@@ -136,6 +145,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::persisted").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
@@ -143,6 +153,7 @@ mod tests {
                 from: UdfRuntime::parse_from("python::temp:source").unwrap(),
                 platform: Platform::any(),
                 temporary: true,
+                src: None,
             },
         ];
 

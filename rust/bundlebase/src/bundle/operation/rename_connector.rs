@@ -217,6 +217,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             });
 
         let op = RenameConnectorOp {
@@ -240,6 +241,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             });
         bundle
             .connector_registry()
@@ -250,6 +252,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test2").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             });
 
         let op = RenameConnectorOp {
@@ -274,6 +277,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             });
 
         let op = RenameConnectorOp {
@@ -303,6 +307,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test1").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
+                src: None,
             });
         bundle
             .connector_registry()
@@ -313,6 +318,7 @@ mod tests {
                 from: UdfRuntime::parse_from("ffi::test2").unwrap(),
                 platform: "linux/amd64".parse().unwrap(),
                 temporary: false,
+                src: None,
             });
 
         let op = RenameConnectorOp {

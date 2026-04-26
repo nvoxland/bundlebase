@@ -88,6 +88,7 @@ pub use facade::DropTempConnectorCommand;
 pub use facade::DropTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::ExportDataCommand;
+pub use facade::ExportSourceCommand;
 pub use facade::GenerateReportCommand;
 pub use facade::ImportTempConnectorCommand;
 pub use facade::ImportTempFunctionCommand;
@@ -116,6 +117,8 @@ pub use facade_ext::BundleFacadeCommandExt;
 pub enum FacadeCommand {
     /// Export query results to a file
     ExportData(ExportDataCommand),
+    /// Export the bundled source archive of a connector to a file
+    ExportSource(ExportSourceCommand),
     /// Describe a registered connector's metadata
     DescribeConnector(DescribeConnectorCommand),
     /// Describe a registered function's metadata
@@ -173,6 +176,10 @@ impl FacadeCommand {
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
             FacadeCommand::ExportData(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ExportSource(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -307,6 +314,7 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::ExportData(_) => ExportDataCommand::output_schema(),
+            FacadeCommand::ExportSource(_) => ExportSourceCommand::output_schema(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_schema(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_schema(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_schema(),
@@ -345,6 +353,7 @@ impl FacadeCommand {
     pub fn output_shape(&self) -> OutputShape {
         match self {
             FacadeCommand::ExportData(_) => ExportDataCommand::output_shape(),
+            FacadeCommand::ExportSource(_) => ExportSourceCommand::output_shape(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_shape(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_shape(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_shape(),
@@ -388,6 +397,7 @@ impl BundleCommand {
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
             BundleCommand::ExportData(cmd) => Ok(FacadeCommand::ExportData(cmd)),
+            BundleCommand::ExportSource(cmd) => Ok(FacadeCommand::ExportSource(cmd)),
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
             BundleCommand::DescribeFunction(cmd) => Ok(FacadeCommand::DescribeFunction(cmd)),
             BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
@@ -469,6 +479,7 @@ impl BundleCommand {
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
                     BundleCommand::ExportData(_)
+                    | BundleCommand::ExportSource(_)
                     | BundleCommand::DescribeConnector(_)
                     | BundleCommand::DescribeFunction(_)
                     | BundleCommand::ImportTempConnector(_)
@@ -517,6 +528,7 @@ impl BundleCommand {
         matches!(
             self,
             BundleCommand::ExportData(_)
+                | BundleCommand::ExportSource(_)
                 | BundleCommand::DescribeConnector(_)
                 | BundleCommand::DescribeFunction(_)
                 | BundleCommand::ImportTempConnector(_)
@@ -872,7 +884,7 @@ register_commands! {
 
         // Source commands
         ImportConnector(ImportConnectorCommand) => Rule::import_connector_stmt,
-            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
+            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)] | FROM { '<plat>' => '<runtime::entrypoint>', ... } | FROM '<runtime::./pat-{os}-{arch}.{ext}>'",
         ImportFunction(ImportFunctionCommand) => Rule::import_function_stmt,
             "IMPORT FUNCTION" => "IMPORT FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         RenameConnector(RenameConnectorCommand) => Rule::rename_connector_stmt,
@@ -912,6 +924,8 @@ register_commands! {
     facade {
         ExportData(ExportDataCommand) => Rule::export_data_stmt,
             "EXPORT DATA" => "EXPORT DATA TO '<path>' <sql>",
+        ExportSource(ExportSourceCommand) => Rule::export_source_stmt,
+            "EXPORT SOURCE" => "EXPORT SOURCE <connector_name> TO '<path>'",
         DescribeConnector(DescribeConnectorCommand) => Rule::describe_connector_stmt,
             "DESCRIBE CONNECTOR" => "DESCRIBE CONNECTOR <name>",
         DescribeFunction(DescribeFunctionCommand) => Rule::describe_function_stmt,

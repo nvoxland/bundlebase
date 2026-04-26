@@ -146,3 +146,47 @@ These are passed to `IMPORT CONNECTOR` or `IMPORT TEMP CONNECTOR`:
 For `runtime='python'`, use `IMPORT TEMP CONNECTOR` (runtime-only). For `runtime='ffi'`, use `IMPORT CONNECTOR` (persisted into the bundle).
 
 Extra arguments passed to `CREATE SOURCE` are forwarded to the connector's `discover()` and `data()` methods, just like IPC mode.
+
+## Multi-platform Connectors
+
+`IMPORT CONNECTOR` registers one binary per `(name, platform)` pair. To ship a fat connector that runs on multiple OS/arch combinations, register all binaries up front — at fetch time the entry whose platform matches the host wins.
+
+Two SQL forms cover the common cases:
+
+**Explicit map** — list every platform you want to support:
+
+```sql
+IMPORT CONNECTOR acme.weather FROM {
+    'linux/amd64'   : 'ffi::./weather-linux-amd64.so',
+    'linux/arm64'   : 'ffi::./weather-linux-arm64.so',
+    'darwin/arm64'  : 'ffi::./weather-darwin-arm64.dylib',
+    'windows/amd64' : 'ffi::./weather-windows-amd64.dll'
+};
+```
+
+**Glob form** — let bundlebase scan a directory for matching files:
+
+```sql
+IMPORT CONNECTOR acme.weather FROM 'ffi::./weather-{os}-{arch}.{ext}';
+```
+
+Placeholders: `{os}` (linux/darwin/windows), `{arch}` (amd64/arm64/...), `{ext}` (so/dylib/dll, validated against `{os}` if both appear).
+
+Each binary is copied into the bundle's content-addressed data directory and verified — fully via `dlopen` for the binary that matches your host, and via shared-library header inspection (ELF / Mach-O / PE magic + arch byte) for foreign-platform binaries the build host can't load. If no entry covers your host, the import succeeds with a warning so you can still build a bundle that targets only deployment hosts.
+
+## Bundling Connector Source
+
+Optionally ship the connector's source code with the bundle. Use `WITH (src = '/path/to.zip')`:
+
+```sql
+IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
+    WITH (platform = 'linux/amd64', src = './weather-source.zip');
+```
+
+The archive is copied into the bundle's data directory (content-addressed), shipped with hollow exports, and extractable later via:
+
+```sql
+EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip';
+```
+
+When combined with the multi-platform forms, all entries share the same source archive — bundle once, ship for every platform.

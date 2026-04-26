@@ -139,6 +139,36 @@ The name must contain exactly one dot.
 
 You can call `IMPORT CONNECTOR` multiple times for different platforms on the same connector — the last call for a given platform wins. At runtime, Bundlebase selects the best match for the current OS/architecture.
 
+#### Multi-platform in one statement
+
+Instead of calling `IMPORT CONNECTOR` once per target, the SQL form accepts a **platform map** or a **glob** with `{os}`, `{arch}`, `{ext}` placeholders. Both desugar to N entries — one per platform — committed atomically.
+
+```sql
+-- Map form: list every platform explicitly
+IMPORT CONNECTOR acme.weather FROM {
+    'linux/amd64'   : 'ffi::./weather-linux-amd64.so',
+    'linux/arm64'   : 'ffi::./weather-linux-arm64.so',
+    'darwin/arm64'  : 'ffi::./weather-darwin-arm64.dylib',
+    'windows/amd64' : 'ffi::./weather-windows-amd64.dll'
+};
+
+-- Glob form: scan a directory for matching files
+IMPORT CONNECTOR acme.weather FROM 'ffi::./weather-{os}-{arch}.{ext}';
+```
+
+Foreign-platform binaries are checked structurally (ELF / Mach-O / PE magic + arch byte) since the build host can't `dlopen` them. The host-platform binary still gets full `dlopen` verification.
+
+#### Bundling Connector Source
+
+Add `WITH (src = '...')` to ship the connector's source code (e.g. a release zip) inside the bundle:
+
+```sql
+IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
+    WITH (platform = 'linux/amd64', src = './weather-source.zip');
+```
+
+The archive is copied into the bundle's content-addressed data directory and travels with hollow exports. Recipients can extract it with [`EXPORT SOURCE`](#export-source). Multi-platform `IMPORT CONNECTOR` shares a single source archive across every platform entry.
+
 ---
 
 ### IMPORT TEMP CONNECTOR

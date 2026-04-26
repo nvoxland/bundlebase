@@ -440,9 +440,18 @@ Creates a named connector. The connector definition is **persisted** into the bu
 
 ```sql
 IMPORT CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
+IMPORT CONNECTOR <name> FROM { '<plat>': '<runtime>::<entrypoint>', ... } [WITH (<key> = '<value>', ...)]
+IMPORT CONNECTOR <name> FROM '<runtime>::./pat-{os}-{arch}.{ext}' [WITH (<key> = '<value>', ...)]
 ```
 
-The `runtime::entrypoint` URI specifies both the runtime and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
+The `runtime::entrypoint` URI specifies both the runtime and what to run.
+
+For fat connectors that ship binaries for several OS/arch targets, use the **platform map** form (`FROM { ... }`) or a **glob** pattern with `{os}`, `{arch}`, `{ext}` placeholders. Each entry becomes a separate registry binding; at runtime the entry whose platform matches the host wins.
+
+**WITH options:**
+
+- `platform = '<os>/<arch>'` — single-platform form only. The map and glob forms reject this (the platform comes from the map key or captured filename).
+- `src = '<path-to-archive>'` — optional path to a source archive (e.g. a zip). Copied into the bundle (content-addressed) and shared by every entry produced by this statement. Recipients can extract it with [`EXPORT SOURCE`](#export-source).
 
 !!! note
     The `python` runtime is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
@@ -464,6 +473,20 @@ IMPORT CONNECTOR example.connector FROM 'ipc::./example_connector'
 
 -- Platform-specific
 IMPORT CONNECTOR example.connector FROM 'ffi::./libexample_connector.so' WITH (platform = 'linux/amd64')
+
+-- Multi-platform (one statement, many platforms)
+IMPORT CONNECTOR example.connector FROM {
+    'linux/amd64'   : 'ffi::./example-linux-amd64.so',
+    'darwin/arm64'  : 'ffi::./example-darwin-arm64.dylib',
+    'windows/amd64' : 'ffi::./example-windows-amd64.dll'
+}
+
+-- Glob form (scan directory)
+IMPORT CONNECTOR example.connector FROM 'ffi::./example-{os}-{arch}.{ext}'
+
+-- With bundled source archive
+IMPORT CONNECTOR example.connector FROM 'ffi::./libexample.so'
+    WITH (platform = 'linux/amd64', src = './example-source.zip')
 ```
 
 ### IMPORT TEMP CONNECTOR
@@ -1147,6 +1170,30 @@ EXPORT HOLLOW TO 'path/to/hollow.tar'
 - Fills the `EXPECTED SCHEMA` on each `CREATE SOURCE` from the last-seen fetched schema
 - The hollow bundle has no rows and no schema until `FETCH` is run
 - History is reset to a single "Hollow export" commit
+
+### EXPORT SOURCE
+
+Copies a connector's bundled source archive (attached at `IMPORT CONNECTOR` time
+via `WITH (src = '...')`) to a file on disk. Lets a recipient of a bundle audit,
+fork, or rebuild the connector.
+
+```sql
+EXPORT SOURCE <connector_name> TO '<path>'
+```
+
+**Examples:**
+
+```sql
+EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip'
+EXPORT SOURCE acme.weather TO 'connector-source.zip'
+```
+
+**Behavior:**
+
+- The output path may be absolute or relative to the current working directory; parent directories are created as needed.
+- Errors if no connector with the given name is registered.
+- Errors if the connector was imported without a `src` attribute.
+- For multi-platform imports, all entries share one source archive; any one entry's `src` is used to recover the file.
 
 ## Help & Introspection
 

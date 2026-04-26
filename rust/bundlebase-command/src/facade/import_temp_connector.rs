@@ -158,6 +158,7 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
             from,
             platform: self.platform,
             temporary: true,
+            src: None,
         };
         facade.connector_registry().write().add_entry(entry);
         facade

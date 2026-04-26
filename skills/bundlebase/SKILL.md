@@ -1312,6 +1312,40 @@ bundlebase build --bundle ./analysis "EXPORT HOLLOW TO './shared/hollow.tar'"
 
 A hollow bundle contains sources, always-update/always-delete rules, column renames/casts, joins, and views — but no attached data files. The `EXPECTED SCHEMA` is preserved so column operations resolve correctly before any data is fetched.
 
+## Multi-platform Custom Connectors
+
+When you build a custom (`ffi::`) connector for several OS/arch targets, register all binaries in one `IMPORT CONNECTOR` statement so the bundle ships every platform. The right binary is selected automatically at fetch time.
+
+```sql
+-- Explicit map: one entry per platform
+IMPORT CONNECTOR acme.weather FROM {
+    'linux/amd64'   : 'ffi::./weather-linux-amd64.so',
+    'linux/arm64'   : 'ffi::./weather-linux-arm64.so',
+    'darwin/arm64'  : 'ffi::./weather-darwin-arm64.dylib',
+    'windows/amd64' : 'ffi::./weather-windows-amd64.dll'
+};
+
+-- Glob form: scan a directory for matching files
+IMPORT CONNECTOR acme.weather FROM 'ffi::./weather-{os}-{arch}.{ext}';
+```
+
+The host-platform binary is verified by `dlopen`; foreign-platform binaries are checked structurally (ELF / Mach-O / PE magic + arch byte) since the build host can't load them.
+
+### Bundling and Recovering Connector Source
+
+Add `WITH (src = '/path/to/source.zip')` to ship the connector's source archive inside the bundle. The archive is content-addressed and travels with hollow exports:
+
+```sql
+IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
+    WITH (platform = 'linux/amd64', src = './weather-source.zip');
+```
+
+Recipients of the bundle can extract the archive with `EXPORT SOURCE`:
+
+```bash
+bundlebase query --bundle ./bundle "EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip'"
+```
+
 ### Sharing Bundles
 
 Bundles are portable — share them with teammates:

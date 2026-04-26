@@ -52,6 +52,17 @@ impl BundleBuilderCommand for ExportHollowCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        // Reject relative paths: they would resolve against the CLI's working
+        // directory, which is rarely what the SQL author intended (the
+        // bundle's own directory is more natural but inconsistent with how
+        // the CLI itself resolves paths). Force callers to be explicit.
+        if !self.path.contains(':') && !std::path::Path::new(&self.path).is_absolute() {
+            return Err(BundlebaseError::from(format!(
+                "EXPORT HOLLOW path '{}' must be absolute or a full URL (e.g. file:///…, s3://…)",
+                self.path
+            )));
+        }
+
         let all_ops = builder.operations();
 
         // Pass 1: Build HollowContext by scanning AttachBlock ops.
@@ -84,17 +95,92 @@ impl BundleBuilderCommand for ExportHollowCommand {
             .filter_map(|op| op.to_hollow(&context))
             .collect();
 
-        // Create target bundle and apply hollow ops.
+        // Create target bundle and apply hollow ops within a change context.
         let hollow_builder = BundleBuilder::create(&self.path, None).await?;
 
-        for op in hollow_ops {
-            hollow_builder.apply_operation(op).await?;
-        }
+        // Copy any bundled connector / function binaries from the source
+        // bundle's data directory into the hollow bundle's data directory.
+        // ImportConnectorOp / ImportFunctionOp reference these by relative
+        // path; without the actual bytes the hollow bundle would fail to load
+        // the connector at fetch time.
+        copy_bundled_runtime_files(&hollow_ops, builder, &hollow_builder).await?;
+
+        hollow_builder
+            .do_change("Hollow export", |b| {
+                Box::pin(async move {
+                    for op in hollow_ops {
+                        b.apply_operation(op).await?;
+                    }
+                    Ok(())
+                })
+            })
+            .await?;
 
         hollow_builder.commit("Hollow export").await?;
 
         Ok(format!("Hollow bundle created at '{}'", self.path))
     }
+}
+
+/// Copy bundle-relative files referenced by ImportConnector / ImportFunction
+/// ops from the source bundle's data directory into the hollow bundle's. Only
+/// relative paths (the content-addressed `xx/<hash>.udf.bin` form produced by
+/// `copy_into_bundle`) are copied — absolute paths and non-file runtimes are
+/// left untouched.
+async fn copy_bundled_runtime_files(
+    ops: &[AnyOperation],
+    src_builder: &BundleBuilder,
+    dst_builder: &BundleBuilder,
+) -> Result<(), BundlebaseError> {
+    let src_dir = src_builder.bundle().data_dir();
+    let dst_dir = dst_builder.bundle().data_dir();
+
+    // Collect every bundle-relative path we need to copy across all ops, then
+    // de-dup so a fat connector with one shared `src` zip only copies it once.
+    let mut paths: Vec<String> = Vec::new();
+    for op in ops {
+        match op {
+            AnyOperation::ImportConnector(o) => {
+                if let Some(p) = o.from.file_path() {
+                    paths.push(p.to_string());
+                }
+                if let Some(s) = &o.src {
+                    paths.push(s.clone());
+                }
+            }
+            AnyOperation::ImportFunction(o) => {
+                if let Some(p) = o.from.file_path() {
+                    paths.push(p.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    paths.sort();
+    paths.dedup();
+
+    for file_path in paths {
+        // Skip absolute / parent-relative paths — those reference files
+        // outside the bundle and aren't ours to copy.
+        if file_path.starts_with('/')
+            || file_path.starts_with("./")
+            || file_path.starts_with("../")
+        {
+            continue;
+        }
+
+        let src_file = src_dir.file(&file_path)?;
+        let bytes = src_file
+            .read_bytes()
+            .await?
+            .ok_or_else(|| BundlebaseError::from(format!(
+                "Bundled runtime file '{}' is missing from source bundle; cannot include it in hollow export",
+                file_path
+            )))?;
+        let dst_file = dst_dir.writable_file(&file_path)?;
+        dst_file.write(bytes).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

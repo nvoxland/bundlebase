@@ -25,6 +25,11 @@ pub struct ImportConnectorOp {
     pub from: UdfRuntime,
     /// Platform pattern in Docker-style os/arch (e.g., "linux/amd64", "*/*")
     pub platform: Platform,
+    /// Optional bundle-relative path to a source archive (zip) for this connector.
+    /// Content-addressed under `data_dir`. Bundles ship the archive so a recipient
+    /// can reproduce or audit the connector binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub src: Option<String>,
 }
 
 impl ImportConnectorOp {
@@ -34,7 +39,15 @@ impl ImportConnectorOp {
             name,
             from,
             platform,
+            src: None,
         }
+    }
+
+    /// Attach a bundle-relative source archive path (returned by `copy_into_bundle`-style
+    /// content addressing). Use `None` to clear.
+    pub fn with_src(mut self, src: Option<String>) -> Self {
+        self.src = src;
+        self
     }
 }
 
@@ -79,6 +92,7 @@ impl Operation for ImportConnectorOp {
                 from: self.from.clone(),
                 platform: self.platform.clone(),
                 temporary: false,
+                src: self.src.clone(),
             });
         Ok(())
     }

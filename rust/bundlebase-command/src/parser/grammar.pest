@@ -113,6 +113,7 @@ transaction_stmt = {
 metadata_stmt = {
     export_data_stmt
     | export_hollow_stmt
+    | export_source_stmt
     | show_details_stmt
     | show_history_stmt
     | show_status_stmt
@@ -200,6 +201,19 @@ export_data_sql = @{
 
 export_hollow_stmt = {
     ^"export" ~ ^"hollow" ~ ^"to" ~ quoted_string
+}
+
+// ============================================================================
+// EXPORT SOURCE Statement
+// ============================================================================
+// Syntax: EXPORT SOURCE <connector_name> TO '<path>'
+// Copies the connector's bundled source archive (the `src` attached at
+// IMPORT CONNECTOR time) to the given filesystem path.
+// Examples:
+//   EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip'
+
+export_source_stmt = {
+    ^"export" ~ ^"source" ~ dotted_identifier ~ ^"to" ~ quoted_string
 }
 
 // ============================================================================
@@ -419,8 +433,15 @@ reindex_stmt = {
 //   IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so' WITH (platform = 'linux/amd64')
 
 import_connector_stmt = {
-    (^"load" | ^"import") ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
+    (^"load" | ^"import") ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ (platform_map | quoted_string) ~ (^"with" ~ source_args)?
 }
+
+// Map of platform-string => from-string used by IMPORT CONNECTOR to register
+// multiple OS/arch binaries in one statement. Trailing comma is allowed.
+platform_map = {
+    "{" ~ platform_map_pair ~ ("," ~ platform_map_pair)* ~ ","? ~ "}"
+}
+platform_map_pair = { quoted_string ~ ":" ~ quoted_string }
 
 // ============================================================================
 // IMPORT TEMP CONNECTOR Statement
