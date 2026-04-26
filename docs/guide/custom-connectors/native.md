@@ -183,7 +183,7 @@ IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
     WITH (platform = 'linux/amd64', src = './weather-source.zip');
 ```
 
-The archive is copied into the bundle's data directory (content-addressed), shipped with hollow exports, and extractable later via:
+The archive is copied into the bundle's data directory (content-addressed), shipped with empty exports, and extractable later via:
 
 ```sql
 EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip';

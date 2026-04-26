@@ -395,7 +395,7 @@ impl Operation for AttachBlockOp {
         hex::encode(h.finalize())[0..12].to_string()
     }
 
-    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+    fn to_empty(&self, _context: &super::EmptyContext) -> Option<super::AnyOperation> {
         None
     }
 

@@ -53,7 +53,7 @@ impl Operation for CreateIndexOp {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Use the BundleSchema (built from operations) rather than the
-        // dataframe schema. This works for both populated bundles and hollow
+        // dataframe schema. This works for both populated bundles and empty
         // bundles: the latter have no AttachBlock ops so the dataframe is
         // empty, but BundleSchema backfills column types from
         // CreateSource.expected_schema.

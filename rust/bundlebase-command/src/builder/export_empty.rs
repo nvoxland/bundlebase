@@ -1,8 +1,8 @@
-//! Export Hollow command implementation.
+//! Export Empty command implementation.
 //!
-//! ExportHollowCommand creates a "hollow" bundle at the target path — containing
+//! ExportEmptyCommand creates an "empty" bundle at the target path — containing
 //! the source definitions, always-update/always-delete rules, column operations,
-//! and structure, but no attached data. The hollow bundle can be shared so
+//! and structure, but no attached data. The empty bundle can be shared so
 //! recipients can re-fetch the raw data themselves.
 
 use crate::parser::extract_string_content;
@@ -10,24 +10,24 @@ use crate::{BundleBuilderCommand, CommandParsing, Rule};
 use arrow::datatypes::DataType;
 use bundlebase::bundle::operation::Operation;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::{AnyOperation, BundleBuilder, BundlebaseError, HollowContext};
+use bundlebase::{AnyOperation, BundleBuilder, BundlebaseError, EmptyContext};
 use bundlebase_common::ColumnId;
 use bundlebase_data::ObjectId;
 use std::collections::HashMap;
 
-/// Command to export a hollow bundle.
+/// Command to export an empty bundle.
 ///
 /// Walks all operations in the bundle's history, strips data-containing operations
 /// (AttachBlock, DetachBlock, etc.), fills expected schemas from AttachBlock history,
 /// creates a new bundle at the target path, applies the remaining ops, and commits.
 #[derive(Debug, Clone)]
-pub struct ExportHollowCommand {
+pub struct ExportEmptyCommand {
     pub path: String,
 }
 
-impl CommandParsing for ExportHollowCommand {
+impl CommandParsing for ExportEmptyCommand {
     fn rule() -> Rule {
-        Rule::export_hollow_stmt
+        Rule::export_empty_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -38,17 +38,17 @@ impl CommandParsing for ExportHollowCommand {
             }
         }
         let path =
-            path.ok_or_else(|| BundlebaseError::from("EXPORT HOLLOW TO: missing target path"))?;
-        Ok(ExportHollowCommand { path })
+            path.ok_or_else(|| BundlebaseError::from("EXPORT EMPTY TO: missing target path"))?;
+        Ok(ExportEmptyCommand { path })
     }
 
     fn to_statement(&self) -> String {
         use crate::parser::escape_string;
-        format!("EXPORT HOLLOW TO {}", escape_string(&self.path))
+        format!("EXPORT EMPTY TO {}", escape_string(&self.path))
     }
 }
 
-impl BundleBuilderCommand for ExportHollowCommand {
+impl BundleBuilderCommand for ExportEmptyCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
@@ -58,14 +58,14 @@ impl BundleBuilderCommand for ExportHollowCommand {
         // the CLI itself resolves paths). Force callers to be explicit.
         if !self.path.contains(':') && !std::path::Path::new(&self.path).is_absolute() {
             return Err(BundlebaseError::from(format!(
-                "EXPORT HOLLOW path '{}' must be absolute or a full URL (e.g. file:///…, s3://…)",
+                "EXPORT EMPTY path '{}' must be absolute or a full URL (e.g. file:///…, s3://…)",
                 self.path
             )));
         }
 
         let all_ops = builder.operations();
 
-        // Pass 1: Build HollowContext by scanning AttachBlock ops.
+        // Pass 1: Build EmptyContext by scanning AttachBlock ops.
         // For each source, collect the most recent schema seen (column name, id, type).
         let mut source_schemas: HashMap<ObjectId, Vec<(String, ColumnId, DataType)>> =
             HashMap::new();
@@ -87,28 +87,28 @@ impl BundleBuilderCommand for ExportHollowCommand {
             }
         }
 
-        let context = HollowContext { source_schemas };
+        let context = EmptyContext { source_schemas };
 
-        // Pass 2: Apply to_hollow() to each op, collecting the ones to keep.
-        let hollow_ops: Vec<AnyOperation> = all_ops
+        // Pass 2: Apply to_empty() to each op, collecting the ones to keep.
+        let empty_ops: Vec<AnyOperation> = all_ops
             .iter()
-            .filter_map(|op| op.to_hollow(&context))
+            .filter_map(|op| op.to_empty(&context))
             .collect();
 
-        // Create target bundle and apply hollow ops within a change context.
-        let hollow_builder = BundleBuilder::create(&self.path, None).await?;
+        // Create target bundle and apply empty ops within a change context.
+        let empty_builder = BundleBuilder::create(&self.path, None).await?;
 
         // Copy any bundled connector / function binaries from the source
-        // bundle's data directory into the hollow bundle's data directory.
+        // bundle's data directory into the empty bundle's data directory.
         // ImportConnectorOp / ImportFunctionOp reference these by relative
-        // path; without the actual bytes the hollow bundle would fail to load
+        // path; without the actual bytes the empty bundle would fail to load
         // the connector at fetch time.
-        copy_bundled_runtime_files(&hollow_ops, builder, &hollow_builder).await?;
+        copy_bundled_runtime_files(&empty_ops, builder, &empty_builder).await?;
 
-        hollow_builder
-            .do_change("Hollow export", |b| {
+        empty_builder
+            .do_change("Empty export", |b| {
                 Box::pin(async move {
-                    for op in hollow_ops {
+                    for op in empty_ops {
                         b.apply_operation(op).await?;
                     }
                     Ok(())
@@ -116,14 +116,14 @@ impl BundleBuilderCommand for ExportHollowCommand {
             })
             .await?;
 
-        hollow_builder.commit("Hollow export").await?;
+        empty_builder.commit("Empty export").await?;
 
-        Ok(format!("Hollow bundle created at '{}'", self.path))
+        Ok(format!("Empty bundle created at '{}'", self.path))
     }
 }
 
 /// Copy bundle-relative files referenced by ImportConnector / ImportFunction
-/// ops from the source bundle's data directory into the hollow bundle's. Only
+/// ops from the source bundle's data directory into the empty bundle's. Only
 /// relative paths (the content-addressed `xx/<hash>.udf.bin` form produced by
 /// `copy_into_bundle`) are copied — absolute paths and non-file runtimes are
 /// left untouched.
@@ -174,7 +174,7 @@ async fn copy_bundled_runtime_files(
             .read_bytes()
             .await?
             .ok_or_else(|| BundlebaseError::from(format!(
-                "Bundled runtime file '{}' is missing from source bundle; cannot include it in hollow export",
+                "Bundled runtime file '{}' is missing from source bundle; cannot include it in empty export",
                 file_path
             )))?;
         let dst_file = dst_dir.writable_file(&file_path)?;
@@ -191,55 +191,55 @@ mod parsing_tests {
     use crate::CommandParsing;
 
     #[test]
-    fn test_parse_export_hollow_basic() {
+    fn test_parse_export_empty_basic() {
         let cmd =
-            parse_command("EXPORT HOLLOW TO 'path/hollow'").expect("Failed to parse EXPORT HOLLOW");
+            parse_command("EXPORT EMPTY TO 'path/empty'").expect("Failed to parse EXPORT EMPTY");
         match cmd {
-            BundleCommand::ExportHollow(ref c) => {
-                assert_eq!(c.path, "path/hollow");
+            BundleCommand::ExportEmpty(ref c) => {
+                assert_eq!(c.path, "path/empty");
             }
-            _ => panic!("Expected ExportHollow variant, got {:?}", cmd),
+            _ => panic!("Expected ExportEmpty variant, got {:?}", cmd),
         }
     }
 
     #[test]
-    fn test_parse_export_hollow_tar() {
-        let cmd = parse_command("EXPORT HOLLOW TO 'path/hollow.tar'")
-            .expect("Failed to parse EXPORT HOLLOW with tar path");
+    fn test_parse_export_empty_tar() {
+        let cmd = parse_command("EXPORT EMPTY TO 'path/empty.tar'")
+            .expect("Failed to parse EXPORT EMPTY with tar path");
         match cmd {
-            BundleCommand::ExportHollow(ref c) => {
-                assert_eq!(c.path, "path/hollow.tar");
+            BundleCommand::ExportEmpty(ref c) => {
+                assert_eq!(c.path, "path/empty.tar");
             }
-            _ => panic!("Expected ExportHollow variant"),
+            _ => panic!("Expected ExportEmpty variant"),
         }
     }
 
     #[test]
-    fn test_parse_export_hollow_case_insensitive() {
-        let cmd = parse_command("export hollow to 'bundle.tar'")
-            .expect("Failed to parse case-insensitive EXPORT HOLLOW");
+    fn test_parse_export_empty_case_insensitive() {
+        let cmd = parse_command("export empty to 'bundle.tar'")
+            .expect("Failed to parse case-insensitive EXPORT EMPTY");
         match cmd {
-            BundleCommand::ExportHollow(ref c) => {
+            BundleCommand::ExportEmpty(ref c) => {
                 assert_eq!(c.path, "bundle.tar");
             }
-            _ => panic!("Expected ExportHollow variant"),
+            _ => panic!("Expected ExportEmpty variant"),
         }
     }
 
     #[test]
     fn test_round_trip() {
-        let cmd = ExportHollowCommand {
-            path: "path/hollow".to_string(),
+        let cmd = ExportEmptyCommand {
+            path: "path/empty".to_string(),
         };
         let statement = cmd.to_statement();
-        assert_eq!(statement, "EXPORT HOLLOW TO 'path/hollow'");
+        assert_eq!(statement, "EXPORT EMPTY TO 'path/empty'");
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {
-            BundleCommand::ExportHollow(ref c) => {
-                assert_eq!(c.path, "path/hollow");
+            BundleCommand::ExportEmpty(ref c) => {
+                assert_eq!(c.path, "path/empty");
             }
-            _ => panic!("Expected ExportHollow variant"),
+            _ => panic!("Expected ExportEmpty variant"),
         }
     }
 }

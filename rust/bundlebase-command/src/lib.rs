@@ -69,7 +69,7 @@ pub use builder::{
     CommitCommand, CreateIndexCommand, CreateReportCommand, CreateSourceCommand, CreateViewCommand,
     DeleteCommand, DetachBlockCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand,
     DropCastColumnCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
-    DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand, ExportHollowCommand,
+    DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand, ExportEmptyCommand,
     FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand,
     ImportJoinCommand, JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand,
     ReindexCommand, RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand,
@@ -477,7 +477,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
+                    BundleCommand::ExportEmpty(_) => "EXPORT EMPTY",
                     BundleCommand::ExportData(_)
                     | BundleCommand::ExportSource(_)
                     | BundleCommand::DescribeConnector(_)
@@ -907,8 +907,8 @@ register_commands! {
             "COMMIT" => "COMMIT '<message>'",
 
         // Export commands
-        ExportHollow(ExportHollowCommand) => Rule::export_hollow_stmt,
-            "EXPORT HOLLOW" => "EXPORT HOLLOW TO '<path>'",
+        ExportEmpty(ExportEmptyCommand) => Rule::export_empty_stmt,
+            "EXPORT EMPTY" => "EXPORT EMPTY TO '<path>'",
     }
     fetch_special {
         // These commands share Rule::fetch_stmt - handled in parser.rs

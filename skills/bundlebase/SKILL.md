@@ -1298,19 +1298,19 @@ bundlebase query --bundle ./analysis "EXPORT DATA TO 'summary.csv' SELECT depart
 
 **Tip:** For data exploration where you need to see results, use `SELECT` with `--format json`. For saving data to a file for further processing, prefer `EXPORT DATA TO` — it streams directly to the file without row limits.
 
-## Exporting Hollow Bundles
+## Exporting Empty Bundles
 
-Use `EXPORT HOLLOW TO` to share a bundle's structure without its data. Recipients can open the hollow bundle and run `FETCH` to pull the raw data themselves.
+Use `EXPORT EMPTY TO` to share a bundle's structure without its data. Recipients can open the empty bundle and run `FETCH` to pull the raw data themselves.
 
 ```bash
-# Export hollow bundle (no data, just sources and transformations)
-bundlebase build --bundle ./analysis "EXPORT HOLLOW TO './shared/hollow'"
+# Export empty bundle (no data, just sources and transformations)
+bundlebase build --bundle ./analysis "EXPORT EMPTY TO './shared/empty'"
 
 # Export as a portable tar file
-bundlebase build --bundle ./analysis "EXPORT HOLLOW TO './shared/hollow.tar'"
+bundlebase build --bundle ./analysis "EXPORT EMPTY TO './shared/empty.tar'"
 ```
 
-A hollow bundle contains sources, always-update/always-delete rules, column renames/casts, joins, and views — but no attached data files. The `EXPECTED SCHEMA` is preserved so column operations resolve correctly before any data is fetched.
+An empty bundle contains sources, always-update/always-delete rules, column renames/casts, joins, and views — but no attached data files. The `EXPECTED SCHEMA` is preserved so column operations resolve correctly before any data is fetched.
 
 ## Multi-platform Custom Connectors
 
@@ -1333,7 +1333,7 @@ The host-platform binary is verified by `dlopen`; foreign-platform binaries are 
 
 ### Bundling and Recovering Connector Source
 
-Add `WITH (src = '/path/to/source.zip')` to ship the connector's source archive inside the bundle. The archive is content-addressed and travels with hollow exports:
+Add `WITH (src = '/path/to/source.zip')` to ship the connector's source archive inside the bundle. The archive is content-addressed and travels with empty exports:
 
 ```sql
 IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'

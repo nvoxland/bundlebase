@@ -120,7 +120,7 @@ pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
         ("VERIFY DATA", "VERIFY DATA [UPDATE]", "read-write"),
         // Facade commands (read-only)
         ("EXPORT DATA", "EXPORT DATA TO '<path>' <sql>", "read-only"),
-        ("EXPORT HOLLOW", "EXPORT HOLLOW TO '<path>'", "read-only"),
+        ("EXPORT EMPTY", "EXPORT EMPTY TO '<path>'", "read-only"),
         (
             "DESCRIBE CONNECTOR",
             "DESCRIBE CONNECTOR <name>",

@@ -96,11 +96,11 @@ use uuid::Uuid;
 
 pub use crate::bundle::operation::create_source::ExpectedColumn;
 
-/// Context for hollow export — maps source ObjectId → columns seen in fetched data.
+/// Context for empty export — maps source ObjectId → columns seen in fetched data.
 ///
 /// Built by walking all `AttachBlock` operations in history, then passed into
-/// `to_hollow()` on each operation so each op can decide what to do.
-pub struct HollowContext {
+/// `to_empty()` on each operation so each op can decide what to do.
+pub struct EmptyContext {
     /// Maps source ObjectId → Vec<(column_name, ColumnId, DataType)>
     /// Built from AttachBlock history. Most recent schema seen per source wins.
     pub source_schemas: HashMap<ObjectId, Vec<(String, ColumnId, DataType)>>,
@@ -170,11 +170,11 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug + Into<AnyOperation
         true
     }
 
-    /// Returns the hollow version of this operation, or None if it should be excluded.
+    /// Returns the empty-export version of this operation, or None if it should be excluded.
     ///
-    /// Used by `EXPORT HOLLOW TO` to strip data-containing operations while preserving structure.
+    /// Used by `EXPORT EMPTY TO` to strip data-containing operations while preserving structure.
     /// Default: include as-is. Override to return `None` (exclude) or a modified copy.
-    fn to_hollow(&self, _context: &HollowContext) -> Option<AnyOperation> {
+    fn to_empty(&self, _context: &EmptyContext) -> Option<AnyOperation> {
         Some(self.clone().into())
     }
 }
@@ -241,9 +241,9 @@ macro_rules! define_any_operation {
                 }
             }
 
-            fn to_hollow(&self, context: &HollowContext) -> Option<AnyOperation> {
+            fn to_empty(&self, context: &EmptyContext) -> Option<AnyOperation> {
                 match self {
-                    $( AnyOperation::$variant(op) => op.to_hollow(context), )*
+                    $( AnyOperation::$variant(op) => op.to_empty(context), )*
                 }
             }
         }

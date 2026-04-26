@@ -45,7 +45,7 @@ pub use function_entry::{
 pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::{
-    resolve_cast_ops, AnyOperation, BundleChange, CreateSourceOp, ExpectedColumn, HollowContext,
+    resolve_cast_ops, AnyOperation, BundleChange, CreateSourceOp, EmptyContext, ExpectedColumn,
     Operation,
 };
 pub use pack::JoinTypeOption;

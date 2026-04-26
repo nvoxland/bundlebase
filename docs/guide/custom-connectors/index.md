@@ -167,7 +167,7 @@ IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
     WITH (platform = 'linux/amd64', src = './weather-source.zip');
 ```
 
-The archive is copied into the bundle's content-addressed data directory and travels with hollow exports. Recipients can extract it with [`EXPORT SOURCE`](#export-source). Multi-platform `IMPORT CONNECTOR` shares a single source archive across every platform entry.
+The archive is copied into the bundle's content-addressed data directory and travels with empty exports. Recipients can extract it with [`EXPORT SOURCE`](#export-source). Multi-platform `IMPORT CONNECTOR` shares a single source archive across every platform entry.
 
 ---
 

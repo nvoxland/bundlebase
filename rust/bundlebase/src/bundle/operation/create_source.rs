@@ -107,7 +107,7 @@ impl Operation for CreateSourceOp {
         )
     }
 
-    fn to_hollow(&self, context: &super::HollowContext) -> Option<super::AnyOperation> {
+    fn to_empty(&self, context: &super::EmptyContext) -> Option<super::AnyOperation> {
         let expected = context.source_schemas.get(&self.id).cloned();
         let filled = CreateSourceOp {
             expected_schema: expected.map(|cols| {

@@ -1139,15 +1139,15 @@ EXPORT DATA TO '/tmp/active_users.jsonl' SELECT * FROM bundle WHERE active = tru
 EXPORT DATA TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department
 ```
 
-### EXPORT HOLLOW
+### EXPORT EMPTY
 
-Creates a "hollow" bundle at the target path — containing source definitions,
+Creates a "empty" bundle at the target path — containing source definitions,
 always-update/always-delete rules, column operations, and structure, but no
-attached data. Recipients can open the hollow bundle and run `FETCH` to pull
+attached data. Recipients can open the empty bundle and run `FETCH` to pull
 the raw data themselves.
 
 ```sql
-EXPORT HOLLOW TO '<path>'
+EXPORT EMPTY TO '<path>'
 ```
 
 The target path supports `.tar` files for a portable single-file bundle.
@@ -1156,10 +1156,10 @@ The target path supports `.tar` files for a portable single-file bundle.
 
 ```sql
 -- Export to a directory
-EXPORT HOLLOW TO 'path/to/hollow'
+EXPORT EMPTY TO 'path/to/empty'
 
 -- Export to a tar file
-EXPORT HOLLOW TO 'path/to/hollow.tar'
+EXPORT EMPTY TO 'path/to/empty.tar'
 ```
 
 **Behavior:**
@@ -1168,8 +1168,8 @@ EXPORT HOLLOW TO 'path/to/hollow.tar'
 - Preserves: `CREATE SOURCE`, `ALWAYS DELETE`, `ALWAYS UPDATE`, `RENAME COLUMN`,
   `CAST COLUMN`, `ADD COLUMN`, `DROP COLUMN`, `FILTER`, `JOIN`, views
 - Fills the `EXPECTED SCHEMA` on each `CREATE SOURCE` from the last-seen fetched schema
-- The hollow bundle has no rows and no schema until `FETCH` is run
-- History is reset to a single "Hollow export" commit
+- The empty bundle has no rows and no schema until `FETCH` is run
+- History is reset to a single "Empty export" commit
 
 ### EXPORT SOURCE
 

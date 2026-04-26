@@ -113,7 +113,7 @@ impl BundleSchema {
         // columns that weren't seen via an AttachBlock. AttachBlock-derived
         // types take precedence (they reflect the actual on-disk type), so we
         // only add expected_schema entries here when no AttachBlock has
-        // registered them. This is what lets hollow bundles validate
+        // registered them. This is what lets empty bundles validate
         // schema-dependent ops (like CREATE TEXT INDEX) before any data has
         // been fetched.
         backfill_physical_from_sources(
@@ -210,7 +210,7 @@ impl BundleSchema {
         }
 
         // Same backfill as in `initial`: source-derived columns whose blocks
-        // haven't been attached yet (e.g. hollow bundles) get their type from
+        // haven't been attached yet (e.g. empty bundles) get their type from
         // CreateSource.expected_schema so schema-dependent ops still validate.
         backfill_physical_from_sources(
             operations,

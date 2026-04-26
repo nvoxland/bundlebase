@@ -112,7 +112,7 @@ transaction_stmt = {
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
     export_data_stmt
-    | export_hollow_stmt
+    | export_empty_stmt
     | export_source_stmt
     | show_details_stmt
     | show_history_stmt
@@ -192,15 +192,15 @@ export_data_sql = @{
 }
 
 // ============================================================================
-// EXPORT HOLLOW Statement
+// EXPORT EMPTY Statement
 // ============================================================================
-// Syntax: EXPORT HOLLOW TO '<path>'
+// Syntax: EXPORT EMPTY TO '<path>'
 // Examples:
-//   EXPORT HOLLOW TO 'path/hollow'
-//   EXPORT HOLLOW TO 'path/hollow.tar'
+//   EXPORT EMPTY TO 'path/empty'
+//   EXPORT EMPTY TO 'path/empty.tar'
 
-export_hollow_stmt = {
-    ^"export" ~ ^"hollow" ~ ^"to" ~ quoted_string
+export_empty_stmt = {
+    ^"export" ~ ^"empty" ~ ^"to" ~ quoted_string
 }
 
 // ============================================================================

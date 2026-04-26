@@ -1,14 +1,14 @@
-# EXPORT HOLLOW
+# EXPORT EMPTY
 
-Creates a "hollow" bundle at the target path — containing source definitions,
+Creates an "empty" bundle at the target path — containing source definitions,
 always-update/always-delete rules, column operations, and structure, but no
-attached data. Recipients can open the hollow bundle and run `FETCH` to pull
+attached data. Recipients can open the empty bundle and run `FETCH` to pull
 the raw data themselves.
 
 ## Syntax
 
 ```sql
-EXPORT HOLLOW TO '<path>'
+EXPORT EMPTY TO '<path>'
 ```
 
 The target path supports `.tar` files via the existing tar bundle support.
@@ -17,13 +17,13 @@ The target path supports `.tar` files via the existing tar bundle support.
 
 ```sql
 -- Export to a directory
-EXPORT HOLLOW TO 'path/to/hollow'
+EXPORT EMPTY TO 'path/to/empty'
 
 -- Export to a tar file (portable, single-file bundle)
-EXPORT HOLLOW TO 'path/to/hollow.tar'
+EXPORT EMPTY TO 'path/to/empty.tar'
 
 -- Absolute path
-EXPORT HOLLOW TO '/tmp/hollow_bundle'
+EXPORT EMPTY TO '/tmp/empty_bundle'
 ```
 
 ## Behavior
@@ -33,8 +33,8 @@ EXPORT HOLLOW TO '/tmp/hollow_bundle'
   `CAST COLUMN`, `ADD COLUMN`, `DROP COLUMN`, `FILTER`, `JOIN`, views, indexes definitions
 - Fills the `EXPECTED SCHEMA` on each `CREATE SOURCE` from the last-seen fetched schema —
   so column operations continue to resolve correctly, and `FETCH` can validate the schema
-- The hollow bundle has no rows and no schema until `FETCH` is run
-- History is reset to a single "Hollow export" commit
+- The empty bundle has no rows and no schema until `FETCH` is run
+- History is reset to a single "Empty export" commit
 
 ## Workflow
 
@@ -45,10 +45,10 @@ FETCH base ADD
 RENAME COLUMN old_name TO new_name
 COMMIT 'initial'
 
--- Export the hollow bundle for sharing
-EXPORT HOLLOW TO '/shared/hollow'
+-- Export the empty bundle for sharing
+EXPORT EMPTY TO '/shared/empty'
 
--- Recipient opens hollow bundle and fetches data
--- (in the hollow bundle):
+-- Recipient opens empty bundle and fetches data
+-- (in the empty bundle):
 FETCH base ADD
 ```

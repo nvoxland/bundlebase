@@ -44,8 +44,8 @@ pub(crate) mod udf {
 pub(crate) mod connector;
 
 pub use crate::bundle::{
-    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, ExpectedColumn,
-    FileVerificationResult, HollowContext, Operation, ReportEntry, VerificationResults,
+    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, EmptyContext,
+    ExpectedColumn, FileVerificationResult, Operation, ReportEntry, VerificationResults,
     INIT_FILENAME, META_DIR,
 };
 pub use crate::bundle_config::{

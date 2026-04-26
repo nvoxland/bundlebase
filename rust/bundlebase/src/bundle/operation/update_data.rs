@@ -43,7 +43,7 @@ impl Operation for UpdateDataOp {
         format!("UPDATE DATA: {}", self.overlay)
     }
 
-    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+    fn to_empty(&self, _context: &super::EmptyContext) -> Option<super::AnyOperation> {
         None
     }
 

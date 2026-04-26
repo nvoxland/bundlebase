@@ -998,7 +998,7 @@ impl Operation for IndexBlocksOp {
         "INDEX BLOCKS".to_string()
     }
 
-    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+    fn to_empty(&self, _context: &super::EmptyContext) -> Option<super::AnyOperation> {
         None
     }
 

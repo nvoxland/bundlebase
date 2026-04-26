@@ -1,6 +1,6 @@
 //! End-to-end tests for multi-platform IMPORT CONNECTOR.
 //!
-//! Covers the explicit map form, the glob form, and the hollow-export
+//! Covers the explicit map form, the glob form, and the empty-export
 //! round-trip. Uses synthetic ELF/Mach-O/PE headers so the structural verifier
 //! accepts the binaries without a real cross-compile toolchain.
 
@@ -223,7 +223,7 @@ async fn test_import_connector_platform_map_duplicate_rejected(
 }
 
 #[tokio::test]
-async fn test_export_hollow_includes_all_platform_binaries() -> Result<(), BundlebaseError> {
+async fn test_export_empty_includes_all_platform_binaries() -> Result<(), BundlebaseError> {
     init();
 
     let stage = stage_fake_binaries();
@@ -253,7 +253,7 @@ async fn test_export_hollow_includes_all_platform_binaries() -> Result<(), Bundl
     Box::new(cmd).execute(&builder).await?;
     builder.commit("import").await?;
 
-    // Snapshot the data_dir's files so we know what to look for in the hollow.
+    // Snapshot the data_dir's files so we know what to look for in the empty.
     let src_files: std::collections::HashSet<String> = std::fs::read_dir(bundle_dir.path().join("src"))
         .unwrap()
         .flatten()
@@ -273,17 +273,17 @@ async fn test_export_hollow_includes_all_platform_binaries() -> Result<(), Bundl
         src_files
     );
 
-    // Export hollow.
-    let hollow_path = bundle_dir.path().join("hollow");
-    let export_sql = format!("EXPORT HOLLOW TO 'file://{}'", hollow_path.display());
+    // Export empty.
+    let empty_path = bundle_dir.path().join("empty");
+    let export_sql = format!("EXPORT EMPTY TO 'file://{}'", empty_path.display());
     let cmd = match parse_command(&export_sql).expect("parse") {
-        BundleCommand::ExportHollow(c) => c,
-        other => panic!("expected ExportHollow, got {:?}", other),
+        BundleCommand::ExportEmpty(c) => c,
+        other => panic!("expected ExportEmpty, got {:?}", other),
     };
     Box::new(cmd).execute(&builder).await?;
 
-    // The hollow bundle's data_dir should contain the same 4 binaries.
-    let hollow_files: std::collections::HashSet<String> = std::fs::read_dir(&hollow_path)
+    // The empty bundle's data_dir should contain the same 4 binaries.
+    let empty_files: std::collections::HashSet<String> = std::fs::read_dir(&empty_path)
         .unwrap()
         .flatten()
         .filter(|e| e.path().is_dir() && e.file_name() != "_bundlebase")
@@ -296,8 +296,8 @@ async fn test_export_hollow_includes_all_platform_binaries() -> Result<(), Bundl
         })
         .collect();
     assert_eq!(
-        hollow_files, src_files,
-        "hollow bundle should contain identical connector binaries"
+        empty_files, src_files,
+        "empty bundle should contain identical connector binaries"
     );
 
     Ok(())
