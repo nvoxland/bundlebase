@@ -195,12 +195,18 @@ pub async fn start(
         right_prompt: DefaultPromptSegment::CurrentDateTime,
     };
 
+    // Tracks whether the previous loop iteration ended with a Ctrl-C at the
+    // edit prompt (buffer cleared by reedline). A second consecutive Ctrl-C
+    // exits; any other input — Enter, Ctrl-C during a query, etc. — disarms it.
+    let mut exit_armed = false;
+
     loop {
         // Read line in current thread (reedline is sync but works fine in async context)
         let sig = line_editor.read_line(&prompt)?;
 
         match sig {
             Signal::Success(input) => {
+                exit_armed = false;
                 let input = input.trim();
                 if input.is_empty() {
                     continue;
@@ -224,47 +230,78 @@ pub async fn start(
                     break;
                 }
 
-                // Execute all commands sequentially
+                // Execute all commands sequentially. Each command is racing
+                // against `tokio::signal::ctrl_c()` so the user can interrupt
+                // a long-running query without killing the REPL.
                 let mut had_error = false;
+                let mut interrupted = false;
                 for cmd in cmds {
-                    match commands::execute(cmd, &bundle).await {
-                        Ok(Some((stream, shape))) => {
-                            let result = match format {
-                                OutputFormat::Json => {
-                                    format_stream_json(stream, Some(shape), Some(1000)).await
-                                }
-                                OutputFormat::Table => {
-                                    format_stream(stream, Some(shape), Some(1000)).await
-                                }
-                            };
-                            match result {
-                                Ok(output) => {
-                                    if !output.is_empty() {
-                                        println!("{}", output);
+                    let exec = async {
+                        match commands::execute(cmd, &bundle).await {
+                            Ok(Some((stream, shape))) => {
+                                let result = match format {
+                                    OutputFormat::Json => {
+                                        format_stream_json(stream, Some(shape), Some(1000)).await
                                     }
-                                }
-                                Err(e) => {
-                                    error!("Error formatting output: {}", e);
-                                    had_error = true;
-                                    break;
+                                    OutputFormat::Table => {
+                                        format_stream(stream, Some(shape), Some(1000)).await
+                                    }
+                                };
+                                match result {
+                                    Ok(output) => {
+                                        if !output.is_empty() {
+                                            println!("{}", output);
+                                        }
+                                        Ok(())
+                                    }
+                                    Err(e) => Err(format!("Error formatting output: {}", e)),
                                 }
                             }
+                            Ok(None) => Ok(()), // No output (Clear command)
+                            Err(e) => Err(format!("Error executing command: {}", e)),
                         }
-                        Ok(None) => {
-                            // No output (Clear command)
+                    };
+
+                    tokio::select! {
+                        // Ensure the command future is polled first so that on
+                        // immediate completion we don't gratuitously consume a
+                        // pending signal.
+                        biased;
+                        res = exec => {
+                            if let Err(msg) = res {
+                                error!("{}", msg);
+                                had_error = true;
+                                break;
+                            }
                         }
-                        Err(e) => {
-                            error!("Error executing command: {}", e);
-                            had_error = true;
+                        _ = tokio::signal::ctrl_c() => {
+                            // Print immediately so the user sees the cancel
+                            // landed even if dropping the future takes a
+                            // moment (some streams need to unwind I/O).
+                            // Then drop the in-flight future and bail out of
+                            // the per-statement loop. The outer loop will
+                            // reprompt on the next iteration.
+                            println!("<Cancelling Query...>");
+                            interrupted = true;
                             break;
                         }
                     }
                 }
-                if had_error {
+                if had_error || interrupted {
                     continue;
                 }
             }
-            Signal::CtrlC | Signal::CtrlD => {
+            Signal::CtrlC => {
+                // Reedline already cleared the buffer. First press warns;
+                // a second consecutive press exits.
+                if exit_armed {
+                    info!("Goodbye!");
+                    break;
+                }
+                exit_armed = true;
+                info!("Press Ctrl-C again to exit, or /exit");
+            }
+            Signal::CtrlD => {
                 info!("Goodbye!");
                 break;
             }

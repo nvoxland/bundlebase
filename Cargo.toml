@@ -40,7 +40,7 @@ arrow-schema = { version = "58", features = ["serde"] }
 sqlparser = "0.61"
 pest = "2.8"
 pest_derive = "2.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "process", "signal"] }
 tonic = "0.14"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
