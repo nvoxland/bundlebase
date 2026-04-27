@@ -9,8 +9,11 @@ use crate::index::{
 use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
+use arrow::array::Array;
+use arrow::compute::{cast_with_options, CastOptions};
 use arrow::record_batch::RecordBatch;
-use arrow_schema::{DataType, SchemaRef};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use bundlebase_common::arrow_types::widen_type;
 use bytes::Bytes;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
@@ -124,6 +127,7 @@ async fn iterate_blocks<F>(
     block_infos: &[BlockInfo],
     bundle: &Bundle,
     progress: &ProgressScope,
+    target_type: Option<&DataType>,
     mut processor: F,
 ) -> Result<(), BundlebaseError>
 where
@@ -149,7 +153,17 @@ where
                 BundlebaseError::from(format!("Failed to read row batch from block: {}", e))
             })?;
 
-            processor(&rowid_batch.batch, &rowid_batch.row_ids)?;
+            // When the indexer chose a widened common type, cast this block's
+            // column to it. The single-column projection means we only need
+            // to convert column 0.
+            let batch_for_processor = match target_type {
+                Some(target) if rowid_batch.batch.column(0).data_type() != target => {
+                    cast_batch_column(&rowid_batch.batch, 0, target)?
+                }
+                _ => rowid_batch.batch.clone(),
+            };
+
+            processor(&batch_for_processor, &rowid_batch.row_ids)?;
         }
 
         // Update progress after each block
@@ -158,6 +172,32 @@ where
     }
 
     Ok(())
+}
+
+/// Cast a single column of a RecordBatch to a different DataType, returning a
+/// new batch with the same row count. Used by the indexer to coerce blocks to
+/// a widened common type before building the index.
+fn cast_batch_column(
+    batch: &RecordBatch,
+    col_idx: usize,
+    target: &DataType,
+) -> Result<RecordBatch, BundlebaseError> {
+    let cast_array = cast_with_options(batch.column(col_idx), target, &CastOptions::default())
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to cast column {} to {:?}: {}",
+                col_idx, target, e
+            ))
+        })?;
+    let mut columns: Vec<Arc<dyn Array>> = batch.columns().to_vec();
+    columns[col_idx] = cast_array;
+    let mut fields: Vec<Arc<Field>> = batch.schema().fields().iter().cloned().collect();
+    let old_field = &fields[col_idx];
+    fields[col_idx] = Arc::new(Field::new(old_field.name(), target.clone(), old_field.is_nullable()));
+    let new_schema = Arc::new(Schema::new(fields));
+    RecordBatch::try_new(new_schema, columns).map_err(|e| {
+        BundlebaseError::from(format!("Failed to rebuild batch after cast: {}", e))
+    })
 }
 
 impl IndexBlocksOp {
@@ -268,24 +308,28 @@ impl IndexBlocksOp {
             |_data_type, _block_id| Ok(()), // Initial validation - just check column exists
         )?;
 
-        // Validate data type consistency across all blocks
-        if let Some(first_info) = block_infos.first() {
-            let expected_type = &first_info.data_type;
-            for (idx, block_info) in block_infos.iter().enumerate().skip(1) {
-                if &block_info.data_type != expected_type {
-                    return Err(BundlebaseError::from(format!(
-                        "Data type mismatch for column '{}': {:?} in block 0 vs {:?} in block {}",
-                        column, expected_type, block_info.data_type, idx
-                    )));
-                }
-            }
-        }
-
-        // Get the data type from the first block (we know it's non-empty due to earlier validation)
-        let data_type = block_infos
+        // Compute the widened common type across all blocks. Different blocks
+        // may legitimately use different-but-compatible physical types
+        // (e.g. one parquet writer chose Utf8, another Utf8View) — pick the
+        // widest losslessly-compatible representation and cast each block's
+        // column to it during iteration. If two types can't be widened
+        // (e.g. Utf8 vs Int64), `widen_type` falls back to the first type
+        // and the cast attempt below will surface a clear error.
+        let mut data_type = block_infos
             .first()
             .map(|bi| bi.data_type.clone())
             .ok_or_else(|| BundlebaseError::from("No blocks to index"))?;
+        for info in block_infos.iter().skip(1) {
+            data_type = widen_type(&data_type, &info.data_type);
+        }
+        for (idx, info) in block_infos.iter().enumerate() {
+            if !arrow::compute::can_cast_types(&info.data_type, &data_type) {
+                return Err(BundlebaseError::from(format!(
+                    "Data type mismatch for column '{}': cannot widen {:?} (block {}) to {:?} (common type)",
+                    column, info.data_type, idx, data_type
+                )));
+            }
+        }
 
         // Create progress scope for tracking
         let progress = ProgressScope::new(
@@ -301,7 +345,7 @@ impl IndexBlocksOp {
         let mut sorter = ExternalSortWriter::new(sort_config)?;
 
         // Stream entries to sorter (replaces HashMap accumulation)
-        iterate_blocks(&block_infos, bundle, &progress, |batch, row_ids| {
+        iterate_blocks(&block_infos, bundle, &progress, Some(&data_type), |batch, row_ids| {
             let array = batch.column(0);
 
             for (row, row_id) in row_ids.iter().enumerate() {

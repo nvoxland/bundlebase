@@ -884,7 +884,7 @@ register_commands! {
 
         // Source commands
         ImportConnector(ImportConnectorCommand) => Rule::import_connector_stmt,
-            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)] | FROM { '<plat>' => '<runtime::entrypoint>', ... } | FROM '<runtime::./pat-{os}-{arch}.{ext}>'",
+            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)] | FROM { '<plat>': '<runtime::entrypoint>', ... } | FROM '<runtime::./pat-{os}-{arch}.{ext}>'",
         ImportFunction(ImportFunctionCommand) => Rule::import_function_stmt,
             "IMPORT FUNCTION" => "IMPORT FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         RenameConnector(RenameConnectorCommand) => Rule::rename_connector_stmt,
@@ -896,7 +896,7 @@ register_commands! {
         DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
             "DROP FUNCTION" => "DROP FUNCTION <name>",
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
-            "CREATE SOURCE" => "CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)] [SAVE AS <AUTO|COPY|PARQUET|REF>]",
+            "CREATE SOURCE" => "CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)] [SAVE AS <AUTO|COPY|PARQUET|REF>] [MIN BATCH <size>] [FETCH | NO FETCH]",
 
         // Transaction commands
         Reset(ResetCommand) => Rule::reset_stmt,

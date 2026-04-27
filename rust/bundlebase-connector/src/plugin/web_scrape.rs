@@ -98,6 +98,7 @@ impl Connector for WebScrapeConnector {
                 must_copy: false,
                 format,
                 version,
+                num_rows: None,
             });
         }
 

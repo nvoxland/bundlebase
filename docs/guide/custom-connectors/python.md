@@ -85,6 +85,7 @@ Location(
     must_copy=True,                    # copy into bundle? (default: True)
     format="parquet",                  # file format (default: "parquet")
     version="v1",                      # for change detection (default: "")
+    num_rows=1234,                     # row count when known cheaply (default: None)
 )
 ```
 
@@ -94,6 +95,7 @@ Location(
 | `must_copy` | `bool` | `True` | Whether the data must be copied into the bundle |
 | `format` | `str` | `"parquet"` | File format |
 | `version` | `str` | `""` | Version string for change detection |
+| `num_rows` | `int \| None` | `None` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (e.g. read from a Parquet footer); leave `None` when counting would require fully parsing the data. `None` is preserved distinct from `0`. |
 
 ### StableUrl
 

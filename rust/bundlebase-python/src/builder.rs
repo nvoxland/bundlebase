@@ -2,7 +2,7 @@ use super::commit::PyCommit;
 use crate::utils::convert_py_params;
 use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
-use ::bundlebase::source::{FetchResults, FetchedBlock, SyncMode};
+use ::bundlebase::source::{FetchResults, FetchedSource, SyncMode};
 use bundlebase::bundle::JoinTypeOption;
 use bundlebase_command::{BundleBuilderExt, BundleFacadeCommandExt};
 use pyo3::prelude::*;
@@ -100,21 +100,27 @@ impl std::fmt::Display for PyBundleStatus {
     }
 }
 
-/// Information about a block that was fetched (added or replaced).
+/// Per-source-location record for a fetch action (add or replace).
+///
+/// Note: this is *not* one record per bundle block. With ``MIN BATCH``,
+/// multiple source locations can collapse into a single batch block — every
+/// original source location still gets its own ``PyFetchedSource`` entry.
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
-pub struct PyFetchedBlock {
-    /// Location where the block is attached (path in data_dir or URL)
+pub struct PyFetchedSource {
+    /// On-disk path of the bundle block this source location was attached to.
+    /// Multiple ``PyFetchedSource`` entries can share the same value when
+    /// batching merged them into one block.
     #[pyo3(get)]
     pub attach_location: String,
-    /// Original source location identifier
+    /// The connector-reported source location identifier.
     #[pyo3(get)]
     pub source_location: String,
 }
 
-impl PyFetchedBlock {
-    pub fn from_rust(block: &FetchedBlock) -> Self {
-        PyFetchedBlock {
+impl PyFetchedSource {
+    pub fn from_rust(block: &FetchedSource) -> Self {
+        PyFetchedSource {
             attach_location: block.attach_location.clone(),
             source_location: block.source_location.clone(),
         }
@@ -122,10 +128,10 @@ impl PyFetchedBlock {
 }
 
 #[pymethods]
-impl PyFetchedBlock {
+impl PyFetchedSource {
     fn __repr__(&self) -> String {
         format!(
-            "FetchedBlock(attach_location='{}', source_location='{}')",
+            "FetchedSource(attach_location='{}', source_location='{}')",
             self.attach_location, self.source_location
         )
     }
@@ -138,19 +144,21 @@ pub struct PyFetchResults {
     /// Connector name (e.g., "remote_dir", "web_scrape")
     #[pyo3(get)]
     pub connector: String,
-    /// Source URL or identifier
+    /// Stable identifier for this source — pass to ``DESCRIBE SOURCE`` for
+    /// full configuration.
     #[pyo3(get)]
-    pub source_url: String,
+    pub source_id: String,
     /// Pack name ("base" or join name)
     #[pyo3(get)]
     pub pack: String,
-    /// Blocks that were newly added
+    /// Source locations newly added by this fetch (one entry per
+    /// `DiscoveredLocation`, not per bundle block).
     #[pyo3(get)]
-    pub added: Vec<PyFetchedBlock>,
-    /// Blocks that were replaced (updated)
+    pub added: Vec<PyFetchedSource>,
+    /// Source locations whose content changed and was re-attached.
     #[pyo3(get)]
-    pub replaced: Vec<PyFetchedBlock>,
-    /// Source locations of blocks that were removed
+    pub replaced: Vec<PyFetchedSource>,
+    /// Source locations no longer reported by the connector and detached.
     #[pyo3(get)]
     pub removed: Vec<String>,
 }
@@ -159,19 +167,23 @@ impl PyFetchResults {
     pub fn from_rust(results: &FetchResults) -> Self {
         PyFetchResults {
             connector: results.connector.clone(),
-            source_url: results.source_url.clone(),
+            source_id: results.source_id.to_string(),
             pack: results.pack.clone(),
             added: results
                 .added
                 .iter()
-                .map(PyFetchedBlock::from_rust)
+                .map(PyFetchedSource::from_rust)
                 .collect(),
             replaced: results
                 .replaced
                 .iter()
-                .map(PyFetchedBlock::from_rust)
+                .map(PyFetchedSource::from_rust)
                 .collect(),
-            removed: results.removed.clone(),
+            removed: results
+                .removed
+                .iter()
+                .map(|r| r.source_location.clone())
+                .collect(),
         }
     }
 }
@@ -190,9 +202,9 @@ impl PyFetchResults {
 
     fn __repr__(&self) -> String {
         format!(
-            "FetchResults(connector='{}', source_url='{}', pack='{}', added={}, replaced={}, removed={})",
+            "FetchResults(connector='{}', source_id='{}', pack='{}', added={}, replaced={}, removed={})",
             self.connector,
-            self.source_url,
+            self.source_id,
             self.pack,
             self.added.len(),
             self.replaced.len(),
@@ -710,12 +722,16 @@ impl PyBundleBuilder {
     /// * `pack` - Which pack to create the source for:
     ///   - "base" (default): The base pack
     ///   - A join name: A joined pack by its join name
-    #[pyo3(signature = (connector, args, pack="base"))]
+    /// * `fetch` - Run the implicit FETCH that normally follows source
+    ///   definition. Set to ``False`` to ship an "empty" bundle whose
+    ///   recipients fetch their own data (default: True).
+    #[pyo3(signature = (connector, args, pack="base", *, fetch=true))]
     fn create_source<'py>(
         slf: PyRef<'_, Self>,
         connector: &str,
         args: HashMap<String, String>,
         pack: &str,
+        fetch: bool,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
@@ -727,7 +743,7 @@ impl PyBundleBuilder {
         };
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_source(&connector, args, pack.as_deref())
+                .create_source(&connector, args, pack.as_deref(), fetch)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to create source", e))?;
             Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
@@ -738,24 +754,27 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather")
-    /// * `runtime` - The runtime: "lib", "java", "docker", or "ipc"
-    /// * `entrypoint` - The entrypoint string (path to shared library or binary)
+    /// * `from_` - The runtime URI (e.g., "ipc::./bin", "ffi::./lib.so")
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
-    #[pyo3(signature = (name, from_, platform="*/*"))]
+    /// * `src` - Optional path to a source archive (zip) bundled alongside the
+    ///   connector and recoverable via `EXPORT SOURCE`.
+    #[pyo3(signature = (name, from_, platform="*/*", *, src=None))]
     fn import_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         from_: &str,
         platform: &str,
+        src: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
         let from_ = from_.to_string();
         let platform = platform.to_string();
+        let src = src.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .import_connector(&name, &from_, &platform)
+                .import_connector(&name, &from_, &platform, src.as_deref())
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load connector", e))?;
             Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
@@ -1202,18 +1221,42 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Export this bundle as a single ``.tar`` archive at ``tar_path``.
+    ///
+    /// Setting ``gzip=True`` writes a gzipped tar (``.tar.gz``); the default
+    /// is uncompressed so the file can be inspected with `tar -tf` directly.
+    #[pyo3(signature = (tar_path, *, gzip=false))]
     fn export_tar<'py>(
         slf: PyRef<'_, Self>,
         tar_path: &str,
+        gzip: bool,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let tar_path = tar_path.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .export_tar(&tar_path)
+                .export_tar(&tar_path, gzip)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to export tar", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
+        })
+    }
+
+    /// Export this bundle's structure (sources, indexes, views, column ops,
+    /// expected schema) to a new empty bundle at ``path`` — no attached data.
+    fn export_empty<'py>(
+        slf: PyRef<'_, Self>,
+        path: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let path = path.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .export_empty(&path)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to export empty bundle", e))?;
             Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
         })
     }

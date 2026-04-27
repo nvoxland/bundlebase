@@ -35,6 +35,7 @@ serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 serde_json = { workspace = true }
 tar = { workspace = true }
+flate2 = { workspace = true }
 url = { version = "2.5", features = ["serde"] }
 object_store = { workspace = true }
 async-trait = { workspace = true }

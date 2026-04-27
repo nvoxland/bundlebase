@@ -115,6 +115,7 @@ impl Connector for RemoteDirConnector {
                         must_copy,
                         format,
                         version,
+                        num_rows: None,
                     }
                 }
             })

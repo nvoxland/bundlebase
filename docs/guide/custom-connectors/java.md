@@ -111,8 +111,8 @@ Return a stable URL for the given location. Default returns `null`.
 ### Location
 
 ```java
-public record Location(String location, boolean mustCopy, String format, String version) {
-    public Location(String location) { this(location, true, "parquet", ""); }
+public record Location(String location, boolean mustCopy, String format, String version, Long numRows) {
+    public Location(String location) { this(location, true, "parquet", "", null); }
 }
 ```
 
@@ -122,8 +122,9 @@ public record Location(String location, boolean mustCopy, String format, String 
 | `mustCopy` | `boolean` | `true` | Whether the data must be copied into the bundle |
 | `format` | `String` | `"parquet"` | File format |
 | `version` | `String` | `""` | Version string for change detection |
+| `numRows` | `Long` | `null` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest); leave `null` when counting would require fully parsing the data — bundlebase preserves `null` distinct from `0`. |
 
-The single-argument constructor `new Location("path")` defaults to `mustCopy=true`, `format="parquet"`, `version=""`.
+The single-argument constructor `new Location("path")` defaults to `mustCopy=true`, `format="parquet"`, `version=""`, `numRows=null`.
 
 ### StableUrl
 

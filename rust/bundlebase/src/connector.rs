@@ -43,7 +43,7 @@ use std::sync::Arc;
 // Re-export connector types from common
 pub use bundlebase_common::connector::{
     format_fetch_summary, ArgSpec, AttachedFileInfo, Connector, ConnectorSignature,
-    DiscoveredLocation, FetchAction, FetchResults, FetchedBlock, MaterializedData, SourceData,
+    DiscoveredLocation, FetchAction, FetchResults, FetchedSource, MaterializedData, SourceData,
     SourceFormat,
 };
 pub use bundlebase_common::save_as::{ResolvedSaveAs, SaveAs};
@@ -308,6 +308,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Parquet,
             version: "etag-123".to_string(),
+            num_rows: None,
         };
         assert_eq!(loc.location, "subdir/file.parquet");
         assert!(!loc.must_copy);

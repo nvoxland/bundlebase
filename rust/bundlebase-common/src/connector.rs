@@ -135,6 +135,16 @@ pub struct DiscoveredLocation {
     pub format: SourceFormat,
     /// Source-specific version string used for change detection during sync.
     pub version: String,
+    /// Optional row count, declared by the connector when known cheaply.
+    ///
+    /// Parquet readers and any connector with an authoritative row-count manifest
+    /// should populate this. JSONL / CSV / connectors that would have to fully
+    /// parse the data to count rows should leave it `None`.
+    ///
+    /// Used by `FETCH ... DRY RUN` to report the expected row delta without
+    /// actually reading the data. When `None`, dry-run output reports the row
+    /// delta as estimated (the contribution from this location is skipped).
+    pub num_rows: Option<u64>,
 }
 
 /// Result of materializing a single data unit from a source.
@@ -150,6 +160,9 @@ pub struct MaterializedData {
     pub hash: Option<String>,
     /// Source-specific version string
     pub version: String,
+    /// Optional row count, propagated from `DiscoveredLocation::num_rows`.
+    /// Used by FETCH DRY RUN to estimate row deltas without reading the data.
+    pub num_rows: Option<u64>,
 }
 
 /// Metadata about an attached file from a source.
@@ -182,13 +195,35 @@ pub enum FetchAction {
     },
 }
 
-/// Information about a block that was fetched.
+/// Per-source-location record produced by a fetch.
+///
+/// Note: this is *not* one record per bundle block. When `MIN BATCH` merges
+/// multiple connector locations into a single batch block, every original
+/// source location still gets its own `FetchedSource` entry, all pointing at
+/// the same `attach_location`.
 #[derive(Debug, Clone)]
-pub struct FetchedBlock {
-    /// Location where the block is attached
+pub struct FetchedSource {
+    /// On-disk path of the bundle block this source location was attached to.
+    /// Multiple `FetchedSource` entries can share the same `attach_location`
+    /// when batching merged them into one block.
     pub attach_location: String,
-    /// Original source location identifier
+    /// The connector-reported source location identifier.
     pub source_location: String,
+    /// Source-specific version string
+    pub version: String,
+    /// Optional row count declared by the connector (None = unknown).
+    pub num_rows: Option<u64>,
+}
+
+/// Per-source-location record for content that was removed from the bundle.
+#[derive(Debug, Clone)]
+pub struct RemovedSource {
+    /// The connector-reported source location identifier that was removed.
+    pub source_location: String,
+    /// Source-specific version string of the removed source.
+    pub version: String,
+    /// Row count from the removed source's stored metadata, when known.
+    pub num_rows: Option<u64>,
 }
 
 /// Results from fetching a single source.
@@ -196,43 +231,58 @@ pub struct FetchedBlock {
 pub struct FetchResults {
     /// Connector name
     pub connector: String,
-    /// Source URL or identifier
-    pub source_url: String,
+    /// Stable identifier for this source — users can pass it to
+    /// `DESCRIBE SOURCE` to get full configuration.
+    pub source_id: crate::object_id::ObjectId,
     /// Pack name
     pub pack: String,
     /// Blocks that were newly added
-    pub added: Vec<FetchedBlock>,
+    pub added: Vec<FetchedSource>,
     /// Blocks that were replaced
-    pub replaced: Vec<FetchedBlock>,
-    /// Source locations of blocks that were removed
-    pub removed: Vec<String>,
-    /// Total rows in the pack before fetching
-    pub rows_before: u64,
-    /// Total rows in the pack after fetching
-    pub rows_after: u64,
+    pub replaced: Vec<FetchedSource>,
+    /// Blocks that were removed
+    pub removed: Vec<RemovedSource>,
+    /// Total rows attached to this source before the fetch. `None` means
+    /// "unknown" (e.g. some block lacked num_rows metadata) — display as
+    /// blank rather than 0 to keep the distinction.
+    pub rows_before: Option<u64>,
+    /// Total rows attached to this source after the fetch. `None` when any
+    /// pending Add/Replace had `num_rows = None` from the connector — the
+    /// estimate would otherwise silently understate the delta.
+    pub rows_after: Option<u64>,
 }
 
 impl FetchResults {
     /// Create empty results.
-    pub fn empty(connector: String, source_url: String, pack: String) -> Self {
+    pub fn empty(
+        connector: String,
+        source_id: crate::object_id::ObjectId,
+        pack: String,
+    ) -> Self {
         Self {
             connector,
-            source_url,
+            source_id,
             pack,
             added: Vec::new(),
             replaced: Vec::new(),
             removed: Vec::new(),
-            rows_before: 0,
-            rows_after: 0,
+            rows_before: Some(0),
+            rows_after: Some(0),
         }
     }
 
     /// Create FetchResults from a list of FetchActions.
+    ///
+    /// Removed blocks need extra metadata (version, num_rows) that the caller
+    /// must look up against the bundle — pass them as `removed_metadata`,
+    /// keyed by source_location. Lookups that miss leave version blank and
+    /// num_rows None.
     pub fn from_actions(
         connector: String,
-        source_url: String,
+        source_id: crate::object_id::ObjectId,
         pack: String,
         actions: Vec<FetchAction>,
+        removed_metadata: &std::collections::HashMap<String, (String, Option<u64>)>,
     ) -> Self {
         let mut added = Vec::new();
         let mut replaced = Vec::new();
@@ -241,32 +291,44 @@ impl FetchResults {
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
-                    added.push(FetchedBlock {
+                    added.push(FetchedSource {
                         attach_location: data.attach_location,
                         source_location: data.source_location,
+                        version: data.version,
+                        num_rows: data.num_rows,
                     });
                 }
                 FetchAction::Replace { data, .. } => {
-                    replaced.push(FetchedBlock {
+                    replaced.push(FetchedSource {
                         attach_location: data.attach_location,
                         source_location: data.source_location,
+                        version: data.version,
+                        num_rows: data.num_rows,
                     });
                 }
                 FetchAction::Remove { source_location } => {
-                    removed.push(source_location);
+                    let (version, num_rows) = removed_metadata
+                        .get(&source_location)
+                        .cloned()
+                        .unwrap_or_default();
+                    removed.push(RemovedSource {
+                        source_location,
+                        version,
+                        num_rows,
+                    });
                 }
             }
         }
 
         Self {
             connector,
-            source_url,
+            source_id,
             pack,
             added,
             replaced,
             removed,
-            rows_before: 0,
-            rows_after: 0,
+            rows_before: Some(0),
+            rows_after: Some(0),
         }
     }
 

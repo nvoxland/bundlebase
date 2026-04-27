@@ -456,6 +456,7 @@ fn location_json(location: &DiscoveredLocation) -> Result<String, BundlebaseErro
         "must_copy": location.must_copy,
         "format": location.format.extension(),
         "version": location.version,
+        "num_rows": location.num_rows,
     }))
     .map_err(|e| format!("Failed to serialize location: {}", e).into())
 }
@@ -522,12 +523,41 @@ fn parse_discover_json(json: &str) -> Result<Vec<DiscoveredLocation>, Bundlebase
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        // `num_rows` must be present (either as a non-negative integer or
+        // explicit JSON null). Missing it is a connector bug — leaving it
+        // implicit would silently understate dry-run row deltas.
+        let num_rows = match loc.get("num_rows") {
+            Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::Number(n)) => Some(n.as_u64().ok_or_else(|| {
+                BundlebaseError::from(format!(
+                    "Connector returned non-integer num_rows for location '{}': {}",
+                    location, n
+                ))
+            })?),
+            Some(other) => {
+                return Err(format!(
+                    "Connector returned non-numeric num_rows for location '{}': {:?}",
+                    location, other
+                )
+                .into());
+            }
+            None => {
+                return Err(format!(
+                    "Connector did not return num_rows for location '{}' — \
+                    return an integer when known cheaply, or explicit null \
+                    when unknown",
+                    location
+                )
+                .into());
+            }
+        };
 
         discovered.push(DiscoveredLocation {
             location,
             must_copy,
             format,
             version,
+            num_rows,
         });
     }
 
@@ -773,6 +803,7 @@ mod tests {
             must_copy: true,
             format: SourceFormat::Parquet,
             version: "v1".to_string(),
+            num_rows: None,
         };
         let json = location_json(&loc).expect("should serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("should parse JSON");
@@ -810,6 +841,7 @@ mod tests {
             must_copy: true,
             format: SourceFormat::Parquet,
             version: "v1".to_string(),
+            num_rows: None,
         };
 
         let result = func.data(&location, &args, &config).await;
@@ -830,6 +862,7 @@ mod tests {
             must_copy: true,
             format: SourceFormat::Parquet,
             version: "v1".to_string(),
+            num_rows: None,
         };
 
         let result = func.stable_url(&location, &args, &config).await;

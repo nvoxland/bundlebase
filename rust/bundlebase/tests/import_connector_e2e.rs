@@ -452,3 +452,41 @@ async fn test_export_source_errors_when_no_src() -> Result<(), BundlebaseError> 
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_import_connector_ffi_into_tar_bundle_rejected() -> Result<(), BundlebaseError> {
+    init();
+    let stage = stage_fake_binaries();
+    let (plat, file) = &stage.files[0];
+    let bin_path = stage.dir.path().join(file);
+
+    // Create a bundle backed by a tar archive (tar+file:// scheme).
+    let bundle_dir = tempfile::tempdir().unwrap();
+    let tar_url = format!(
+        "tar+file://{}/empty-tar-bundle.tar/",
+        bundle_dir.path().display()
+    );
+    let builder = BundleBuilder::create(&tar_url, None).await?;
+
+    // Installing an FFI binary into a tar bundle must produce a helpful
+    // up-front error rather than failing later at fetch time with the
+    // dynamic linker's "no such file" message.
+    let sql = format!(
+        "IMPORT CONNECTOR acme.weather FROM 'ffi::{}' WITH (platform = '{}')",
+        bin_path.display(),
+        plat
+    );
+    let cmd = match parse_command(&sql).expect("parse") {
+        BundleCommand::ImportConnector(c) => c,
+        other => panic!("expected ImportConnector, got {:?}", other),
+    };
+    let err = Box::new(cmd).execute(&builder).await.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("ffi") && msg.contains("tar+") && msg.contains("EXPORT TAR"),
+        "expected actionable tar/ffi message, got: {}",
+        msg
+    );
+
+    Ok(())
+}

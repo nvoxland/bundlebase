@@ -175,6 +175,7 @@ impl Connector for KaggleConnector {
                     must_copy: true,
                     format,
                     version: dataset_version.clone(),
+                    num_rows: None,
                 }
             })
             .collect();

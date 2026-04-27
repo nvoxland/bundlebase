@@ -346,25 +346,34 @@ class PyBundleStatus:
         ...
 
 
-class FetchedBlock:
-    """Information about a block that was fetched (added or replaced)."""
+class FetchedSource:
+    """Per-source-location record for a fetch action (add or replace).
+
+    Note: this is *not* one record per bundle block. With ``MIN BATCH``,
+    multiple source locations can collapse into one batch block — every
+    original source location still gets its own ``FetchedSource`` entry.
+    """
 
     @property
     def attach_location(self) -> str:
-        """Location where the block is attached (path in data_dir or URL)."""
+        """On-disk path of the bundle block this source was attached to.
+        Multiple ``FetchedSource`` entries can share the same value when
+        batching merged them into one block."""
         ...
 
     @property
     def source_location(self) -> str:
-        """Original source location identifier."""
+        """Connector-reported source location identifier."""
         ...
 
 
 class FetchResults:
     """Results from fetching a single source.
 
-    Contains information about the source and all blocks that were
-    added, replaced, or removed during the fetch operation.
+    Contains the source identity and per-source-location records for every
+    add / replace / remove action. The list lengths are *upper bounds* on
+    the resulting block delta — `MIN BATCH` may merge several added/replaced
+    source locations into a single bundle block.
     """
 
     @property
@@ -373,8 +382,9 @@ class FetchResults:
         ...
 
     @property
-    def source_url(self) -> str:
-        """Source URL or identifier."""
+    def source_id(self) -> str:
+        """Stable identifier for this source — pass to ``DESCRIBE SOURCE`` for
+        full configuration."""
         ...
 
     @property
@@ -383,22 +393,24 @@ class FetchResults:
         ...
 
     @property
-    def added(self) -> List[FetchedBlock]:
-        """Blocks that were newly added."""
+    def added(self) -> List[FetchedSource]:
+        """Source locations newly added by this fetch (one entry per
+        ``DiscoveredLocation``)."""
         ...
 
     @property
-    def replaced(self) -> List[FetchedBlock]:
-        """Blocks that were replaced (updated)."""
+    def replaced(self) -> List[FetchedSource]:
+        """Source locations whose content changed and was re-attached."""
         ...
 
     @property
     def removed(self) -> List[str]:
-        """Source locations of blocks that were removed."""
+        """Source locations no longer reported by the connector and detached."""
         ...
 
     def total_count(self) -> int:
-        """Total number of actions (added + replaced + removed)."""
+        """Total number of actions (added + replaced + removed source
+        locations)."""
         ...
 
     def is_empty(self) -> bool:
@@ -1216,7 +1228,9 @@ class PyBundleBuilder:
 
         Returns:
             List of FetchResults, one for each source in the pack.
-            Each result contains details about blocks added, replaced, and removed.
+            Each result lists the source locations that were added, modified,
+            or removed (one entry per `DiscoveredLocation` — not per bundle
+            block, since `MIN BATCH` may merge several into one).
 
         Example:
             results = await c.fetch("base", "add")

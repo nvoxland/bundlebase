@@ -1,6 +1,7 @@
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use bundlebase::bundle::{DataBlock, Pack};
+use bundlebase_common::arrow_types::widen_type;
 use bundlebase_common::object_id::ObjectId;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::datasource::TableType;
@@ -311,20 +312,6 @@ impl PackTable {
     }
 }
 
-/// Pick a common data type that can losslessly hold values of `a` and `b`.
-/// Falls back to `a` (the existing merged-schema type) when no obvious widening
-/// applies — that matches the prior "first block wins" behavior.
-fn widen_type(a: &DataType, b: &DataType) -> DataType {
-    use DataType::*;
-    match (a, b) {
-        // String family: prefer Utf8View, then LargeUtf8, then Utf8.
-        (Utf8View, _) | (_, Utf8View) => Utf8View,
-        (LargeUtf8, Utf8) | (Utf8, LargeUtf8) => LargeUtf8,
-        // Binary family: same ordering as strings.
-        (BinaryView, _) | (_, BinaryView) => BinaryView,
-        (LargeBinary, Binary) | (Binary, LargeBinary) => LargeBinary,
-        _ => a.clone(),
-    }
-}
-
-// Unit tests are covered by integration tests (basic_e2e, source_e2e)
+// Unit tests are covered by integration tests (basic_e2e, source_e2e).
+// `widen_type` lives in bundlebase-common::arrow_types for reuse by the
+// indexer, which faces the same per-block type-mismatch problem.

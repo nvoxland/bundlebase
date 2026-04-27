@@ -576,11 +576,13 @@ create_source_stmt = {
     ^"create" ~ ^"source" ~ (^"for" ~ identifier)? ~ ^"using" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ create_source_option* ~ expected_schema_clause?
 }
 
-create_source_option = _{ save_as_clause | min_batch_clause }
+create_source_option = _{ save_as_clause | min_batch_clause | no_fetch_clause | fetch_clause }
 save_as_clause = { ^"save" ~ ^"as" ~ save_as_value }
 save_as_value = @{ ^"auto" | ^"copy" | ^"parquet" | ^"ref" }
 min_batch_clause = { ^"min" ~ ^"batch" ~ min_batch_value }
 min_batch_value = @{ ASCII_DIGIT+ ~ (^"kb" | ^"k" | ^"mb" | ^"m" | ^"gb" | ^"g" | ^"tb" | ^"t") }
+no_fetch_clause = { ^"no" ~ ^"fetch" }
+fetch_clause = { ^"fetch" }
 
 source_args = {
     "(" ~ source_arg_pair ~ ("," ~ source_arg_pair)* ~ ")"
@@ -601,22 +603,26 @@ expected_schema_column = {
 // ============================================================================
 // FETCH Statement
 // ============================================================================
-// Syntax: FETCH ALL <mode> [DRY RUN] | FETCH <pack> <mode> [DRY RUN]
+// Syntax: FETCH ALL <mode> [DRY RUN] [VERBOSE] | FETCH <pack> <mode> [DRY RUN] [VERBOSE]
 // Examples:
-//   FETCH base ADD            -- fetch from base pack sources (add mode)
-//   FETCH users ADD           -- fetch from 'users' pack sources
-//   FETCH ALL ADD             -- fetch from all sources
-//   FETCH ALL UPDATE          -- fetch all with update mode
-//   FETCH users SYNC          -- fetch from 'users' with sync mode
-//   FETCH base ADD DRY RUN    -- dry run: show what would change without executing
-//   FETCH ALL SYNC DRY RUN   -- dry run for all sources in sync mode
+//   FETCH base ADD               -- fetch from base pack sources (add mode)
+//   FETCH users ADD              -- fetch from 'users' pack sources
+//   FETCH ALL ADD                -- fetch from all sources
+//   FETCH ALL UPDATE             -- fetch all with update mode
+//   FETCH users SYNC             -- fetch from 'users' with sync mode
+//   FETCH base ADD DRY RUN       -- dry run: show what would change without executing
+//   FETCH ALL SYNC DRY RUN       -- dry run for all sources in sync mode
+//   FETCH ALL ADD VERBOSE        -- emit one row per file (location, action, version, num_rows)
+//   FETCH ALL SYNC DRY RUN VERBOSE -- per-file preview of a sync
 fetch_stmt = {
-    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ fetch_dry_run?
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ fetch_dry_run? ~ fetch_verbose?
 }
 
 fetch_mode = { ^"add" | ^"update" | ^"sync" }
 
 fetch_dry_run = { ^"dry" ~ ^"run" }
+
+fetch_verbose = { ^"verbose" }
 
 // ============================================================================
 // DROP JOIN Statement

@@ -587,6 +587,7 @@ fn bench_http_connector(c: &mut Criterion) {
                                     "http",
                                     std::collections::HashMap::from([("url".to_string(), url)]),
                                     None,
+                                    true,
                                 )
                                 .await
                                 .expect("create_source");
@@ -632,6 +633,7 @@ fn bench_http_connector(c: &mut Criterion) {
                                     "http",
                                     std::collections::HashMap::from([("url".to_string(), url)]),
                                     None,
+                                    true,
                                 )
                                 .await
                                 .expect("create_source");
@@ -663,6 +665,7 @@ fn bench_http_connector_query(c: &mut Criterion) {
                 "http",
                 std::collections::HashMap::from([("url".to_string(), url)]),
                 None,
+                true,
             )
             .await
             .expect("create_source");

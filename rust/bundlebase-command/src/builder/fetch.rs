@@ -29,6 +29,9 @@ pub struct FetchCommand {
     pub mode: SyncMode,
     /// If true, only compute what would change without actually executing
     pub dry_run: bool,
+    /// If true, return one row per Add/Replace/Remove action instead of a
+    /// per-source summary.
+    pub verbose: bool,
 }
 
 impl FetchCommand {
@@ -38,6 +41,7 @@ impl FetchCommand {
             pack,
             mode,
             dry_run: false,
+            verbose: false,
         }
     }
 
@@ -47,6 +51,7 @@ impl FetchCommand {
             pack,
             mode,
             dry_run,
+            verbose: false,
         }
     }
 }
@@ -60,6 +65,7 @@ impl CommandParsing for FetchCommand {
         let mut pack = None;
         let mut mode = None;
         let mut dry_run = false;
+        let mut verbose = false;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -72,6 +78,9 @@ impl CommandParsing for FetchCommand {
                 Rule::fetch_dry_run => {
                     dry_run = true;
                 }
+                Rule::fetch_verbose => {
+                    verbose = true;
+                }
                 _ => {}
             }
         }
@@ -80,33 +89,35 @@ impl CommandParsing for FetchCommand {
             pack.ok_or_else(|| BundlebaseError::from("FETCH statement missing pack name"))?;
         let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH statement missing mode"))?;
 
-        Ok(FetchCommand::new_with_dry_run(pack, mode, dry_run))
+        let mut cmd = FetchCommand::new_with_dry_run(pack, mode, dry_run);
+        cmd.verbose = verbose;
+        Ok(cmd)
     }
 
     fn to_statement(&self) -> String {
+        let mut out = format!("FETCH {} {}", quote_identifier(&self.pack), self.mode);
         if self.dry_run {
-            format!(
-                "FETCH {} {} DRY RUN",
-                quote_identifier(&self.pack),
-                self.mode
-            )
-        } else {
-            format!("FETCH {} {}", quote_identifier(&self.pack), self.mode)
+            out.push_str(" DRY RUN");
         }
+        if self.verbose {
+            out.push_str(" VERBOSE");
+        }
+        out
     }
 }
 
 impl BundleBuilderCommand for FetchCommand {
-    type Output = Vec<FetchResults>;
+    type Output = bundlebase_common::command_response::FetchOutput;
 
     async fn execute(
         self: Box<Self>,
         builder: &BundleBuilder,
-    ) -> Result<Vec<FetchResults>, BundlebaseError> {
+    ) -> Result<bundlebase_common::command_response::FetchOutput, BundlebaseError> {
         let pack_name = self.pack.clone();
         let pack_id = builder.resolve_pack_id(Some(&self.pack))?;
 
         let mode = self.mode;
+        let verbose = self.verbose;
 
         let sources = builder.bundle().get_sources_for_pack(&pack_id);
         if sources.is_empty() {
@@ -121,7 +132,11 @@ impl BundleBuilderCommand for FetchCommand {
             results.push(result);
         }
 
-        Ok(results)
+        Ok(if verbose {
+            bundlebase_common::command_response::FetchOutput::Verbose(results)
+        } else {
+            bundlebase_common::command_response::FetchOutput::Summary(results)
+        })
     }
 }
 
@@ -132,6 +147,9 @@ pub struct FetchAllCommand {
     pub mode: SyncMode,
     /// If true, only compute what would change without actually executing
     pub dry_run: bool,
+    /// If true, return one row per Add/Replace/Remove action instead of a
+    /// per-source summary.
+    pub verbose: bool,
 }
 
 impl FetchAllCommand {
@@ -140,12 +158,17 @@ impl FetchAllCommand {
         Self {
             mode,
             dry_run: false,
+            verbose: false,
         }
     }
 
     /// Create a new FetchAllCommand with dry_run flag.
     pub fn new_with_dry_run(mode: SyncMode, dry_run: bool) -> Self {
-        Self { mode, dry_run }
+        Self {
+            mode,
+            dry_run,
+            verbose: false,
+        }
     }
 }
 
@@ -157,6 +180,7 @@ impl CommandParsing for FetchAllCommand {
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut mode = None;
         let mut dry_run = false;
+        let mut verbose = false;
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::fetch_mode => {
@@ -165,32 +189,41 @@ impl CommandParsing for FetchAllCommand {
                 Rule::fetch_dry_run => {
                     dry_run = true;
                 }
+                Rule::fetch_verbose => {
+                    verbose = true;
+                }
                 _ => {}
             }
         }
 
         let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH ALL statement missing mode"))?;
 
-        Ok(FetchAllCommand::new_with_dry_run(mode, dry_run))
+        let mut cmd = FetchAllCommand::new_with_dry_run(mode, dry_run);
+        cmd.verbose = verbose;
+        Ok(cmd)
     }
 
     fn to_statement(&self) -> String {
+        let mut out = format!("FETCH ALL {}", self.mode);
         if self.dry_run {
-            format!("FETCH ALL {} DRY RUN", self.mode)
-        } else {
-            format!("FETCH ALL {}", self.mode)
+            out.push_str(" DRY RUN");
         }
+        if self.verbose {
+            out.push_str(" VERBOSE");
+        }
+        out
     }
 }
 
 impl BundleBuilderCommand for FetchAllCommand {
-    type Output = Vec<FetchResults>;
+    type Output = bundlebase_common::command_response::FetchOutput;
 
     async fn execute(
         self: Box<Self>,
         builder: &BundleBuilder,
-    ) -> Result<Vec<FetchResults>, BundlebaseError> {
+    ) -> Result<bundlebase_common::command_response::FetchOutput, BundlebaseError> {
         let mode = self.mode;
+        let verbose = self.verbose;
 
         // Collect sources with their pack info to avoid borrow issues
         let sources_with_packs: Vec<_> = builder
@@ -215,7 +248,11 @@ impl BundleBuilderCommand for FetchAllCommand {
             results.push(result);
         }
 
-        Ok(results)
+        Ok(if verbose {
+            bundlebase_common::command_response::FetchOutput::Verbose(results)
+        } else {
+            bundlebase_common::command_response::FetchOutput::Summary(results)
+        })
     }
 }
 
@@ -243,19 +280,72 @@ async fn fetch_from_source(
         })
         .unwrap_or((None, None));
     let connector = source.connector().to_string();
-    let source_url = source.args().get("url").cloned().unwrap_or_default();
 
-    // Skip rows_before: full scan is too expensive for large bundles
-    let rows_before: u64 = 0;
+    // `rows_before` is the row count attached to this source *now* — sum of
+    // num_rows on every block whose source_info points at our source_id. This
+    // walks blocks (cheap), not rows (expensive). Returns None if any block
+    // belonging to the source lacks num_rows metadata, so the caller can tell
+    // "actually 0 rows" apart from "I don't know".
+    let rows_before: Option<u64> = sum_source_rows(&builder.bundle(), &source_id);
 
     let actions = source.fetch(builder, mode, dry_run).await?;
 
+    // Capture (version, num_rows) for every Remove/Replace target *before* any
+    // ops are applied — once Phase 4 detaches a block we can't look it up.
+    let removed_metadata = remove_action_metadata(&builder.bundle(), &source_id, &actions);
+
     // Dry run: report what would change without materializing data or applying ops.
     if dry_run {
-        let mut results =
-            FetchResults::from_actions(connector, source_url, pack_name.to_string(), actions);
+        // Estimate rows_after from the actions:
+        //   + num_rows on each Add (declared by the connector — None = unknown)
+        //   + num_rows on each Replace's new data
+        //   - num_rows on each Replace's existing block (we have these)
+        //   - num_rows on each Remove's existing block
+        // If *any* contribution is unknown (Add/Replace with num_rows=None,
+        // or rows_before itself was unknown), rows_after is reported as None
+        // so the user sees blank instead of a misleading number.
+        let mut delta: i64 = 0;
+        let mut estimate_complete = rows_before.is_some();
+        for action in &actions {
+            match action {
+                FetchAction::Add(data) => match data.num_rows {
+                    Some(n) => delta = delta.saturating_add(n as i64),
+                    None => estimate_complete = false,
+                },
+                FetchAction::Replace { old_source_location, data } => {
+                    match data.num_rows {
+                        Some(n) => delta = delta.saturating_add(n as i64),
+                        None => estimate_complete = false,
+                    }
+                    delta = delta.saturating_sub(rows_for_source_location(
+                        &builder.bundle(),
+                        &source_id,
+                        old_source_location,
+                    ) as i64);
+                }
+                FetchAction::Remove { source_location } => {
+                    delta = delta.saturating_sub(rows_for_source_location(
+                        &builder.bundle(),
+                        &source_id,
+                        source_location,
+                    ) as i64);
+                }
+            }
+        }
+        let mut results = FetchResults::from_actions(
+            connector,
+            source_id,
+            pack_name.to_string(),
+            actions,
+            &removed_metadata,
+        );
         results.rows_before = rows_before;
-        results.rows_after = rows_before;
+        results.rows_after = if estimate_complete {
+            let after = (rows_before.unwrap_or(0) as i64).saturating_add(delta);
+            Some(if after < 0 { 0 } else { after as u64 })
+        } else {
+            None
+        };
         return Ok(results);
     }
 
@@ -441,18 +531,138 @@ async fn fetch_from_source(
 
     let processed_actions = actions;
 
-    // Skip rows_after: full scan is too expensive for large bundles
-    let rows_after: u64 = 0;
+    // `rows_after` is the row count attached to this source after all the
+    // Add/Replace/Remove ops above are applied. Sum num_rows over the bundle's
+    // current blocks for our source_id (post-apply state). `None` is faithfully
+    // propagated when any block lacks metadata.
+    let rows_after: Option<u64> = sum_source_rows(&builder.bundle(), &source_id);
 
     let mut results = FetchResults::from_actions(
         connector,
-        source_url,
+        source_id,
         pack_name.to_string(),
         processed_actions,
+        &removed_metadata,
     );
     results.rows_before = rows_before;
     results.rows_after = rows_after;
     Ok(results)
+}
+
+/// Build a `source_location → (version, num_rows)` map for every
+/// Replace/Remove target's *existing* block. Must be called before any of
+/// the actions are applied, because Phase 4 detaches blocks.
+fn remove_action_metadata(
+    bundle: &Bundle,
+    source_id: &ObjectId,
+    actions: &[FetchAction],
+) -> std::collections::HashMap<String, (String, Option<u64>)> {
+    let mut targets: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for action in actions {
+        match action {
+            FetchAction::Replace { old_source_location, .. } => {
+                targets.insert(old_source_location.as_str());
+            }
+            FetchAction::Remove { source_location } => {
+                targets.insert(source_location.as_str());
+            }
+            FetchAction::Add(_) => {}
+        }
+    }
+    if targets.is_empty() {
+        return std::collections::HashMap::new();
+    }
+
+    let mut out = std::collections::HashMap::new();
+    for (_pack_id, pack) in bundle.packs().iter() {
+        for block in pack.blocks() {
+            let Some(info) = block.source_info() else { continue };
+            if &info.id != source_id {
+                continue;
+            }
+            for bs in &info.batch_sources {
+                if targets.contains(bs.location.as_str()) {
+                    let num_rows = bs.num_rows.map(|n| n as u64).or_else(|| {
+                        // Batch block fallback: split block.num_rows evenly.
+                        block.num_rows().map(|n| {
+                            let denom = info.batch_sources.len().max(1) as u64;
+                            (n as u64) / denom
+                        })
+                    });
+                    out.insert(bs.location.clone(), (bs.version.clone(), num_rows));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Sum `num_rows` over every block whose `source_info` points at `source_id`.
+/// Returns `Some(total)` when every matching block declares its row count,
+/// `None` if any block lacks the metadata — so callers can distinguish
+/// "0 rows attached" from "I don't know how many rows are attached". Walks
+/// block metadata (cheap), not row data.
+fn sum_source_rows(bundle: &Bundle, source_id: &ObjectId) -> Option<u64> {
+    let mut total: u64 = 0;
+    let mut any_block = false;
+    for (_pack_id, pack) in bundle.packs().iter() {
+        for block in pack.blocks() {
+            if !block
+                .source_info()
+                .map(|info| &info.id == source_id)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            any_block = true;
+            match block.num_rows() {
+                Some(n) => total = total.saturating_add(n as u64),
+                None => return None,
+            }
+        }
+    }
+    // No blocks → known zero.
+    if !any_block {
+        return Some(0);
+    }
+    Some(total)
+}
+
+/// Sum `num_rows` over blocks for `source_id` whose `batch_sources` contain
+/// `source_location`. Used by dry-run to compute the rows that a Replace or
+/// Remove action would drop. Walks block metadata (cheap).
+fn rows_for_source_location(bundle: &Bundle, source_id: &ObjectId, source_location: &str) -> u64 {
+    let mut total: u64 = 0;
+    for (_pack_id, pack) in bundle.packs().iter() {
+        for block in pack.blocks() {
+            let Some(info) = block.source_info() else { continue };
+            if &info.id != source_id {
+                continue;
+            }
+            let matches = info
+                .batch_sources
+                .iter()
+                .any(|bs| bs.location == source_location);
+            if !matches {
+                continue;
+            }
+            // For batch blocks (multiple sources merged into one parquet) we
+            // ideally pro-rate by the per-source row count stored on
+            // BatchedSource — fall back to splitting evenly when missing.
+            let bs_rows: Option<u64> = info
+                .batch_sources
+                .iter()
+                .find(|bs| bs.location == source_location)
+                .and_then(|bs| bs.num_rows.map(|n| n as u64));
+            if let Some(n) = bs_rows {
+                total = total.saturating_add(n);
+            } else if let Some(block_total) = block.num_rows() {
+                let n_sources = info.batch_sources.len().max(1) as u64;
+                total = total.saturating_add(block_total as u64 / n_sources);
+            }
+        }
+    }
+    total
 }
 
 /// Resolve the final attach location and format for a fetched file.

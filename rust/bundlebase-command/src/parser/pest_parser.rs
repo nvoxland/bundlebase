@@ -18,17 +18,95 @@ use pest_derive::Parser;
 pub struct BundlebaseParser;
 
 /// Format a pest error into a user-friendly BundlebaseError.
+///
+/// Adds command-aware hints in front of pest's raw output: when the parser was
+/// expecting a `quoted_string` (or other recognizable token) and the input
+/// starts with a known bundlebase command keyword, prepend a one-line "what
+/// this command needs" message looked up from `available_commands()`. The
+/// pest detail block stays at the bottom for diagnostics.
 pub fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> BundlebaseError {
     let (line, col) = match &error.line_col {
         pest::error::LineColLocation::Pos((l, c)) => (*l, *c),
         pest::error::LineColLocation::Span((l, c), _) => (*l, *c),
     };
 
+    let hint = command_hint_for(&error, sql);
+    let hint_line = match hint {
+        Some(h) => format!("\n\nHint: {}", h),
+        None => String::new(),
+    };
+
     format!(
-        "Syntax error at line {}, column {}:\n{}\n\nSQL:\n{}",
-        line, col, error, sql
+        "Syntax error at line {}, column {}:\n{}{}\n\nSQL:\n{}",
+        line, col, error, hint_line, sql
     )
     .into()
+}
+
+/// Produce a command-specific hint when the pest error is "missing required
+/// token after the command keyword". Returns `Some(hint)` only when we can
+/// match the input to a known bundlebase command and the parser was expecting
+/// at least one of the tokens we know how to describe.
+fn command_hint_for(error: &pest::error::Error<Rule>, sql: &str) -> Option<String> {
+    let positives = match &error.variant {
+        pest::error::ErrorVariant::ParsingError { positives, .. } => positives,
+        _ => return None,
+    };
+    if positives.is_empty() {
+        return None;
+    }
+
+    // Translate the expected pest rule names into something a user understands.
+    let expected_label = describe_expected(positives);
+
+    // Look up the command's usage line — if we can identify the command from
+    // its first keyword. Two-word commands (e.g. `FETCH ALL`) need a fallback
+    // to the single-keyword form.
+    let trimmed = sql.trim();
+    let upper = trimmed.to_uppercase();
+    let cmds = available_commands();
+    let usage = cmds
+        .iter()
+        .filter(|(key, _)| upper.starts_with(*key))
+        .max_by_key(|(key, _)| key.len())
+        .map(|(_, usage)| *usage);
+
+    match (expected_label, usage) {
+        (Some(label), Some(usage)) => Some(format!(
+            "expected {} after the command keyword. Usage: {}",
+            label, usage
+        )),
+        (Some(label), None) => Some(format!("expected {}", label)),
+        (None, Some(usage)) => Some(format!("usage: {}", usage)),
+        (None, None) => None,
+    }
+}
+
+/// Map a list of expected pest rules into a single human-readable string.
+/// Returns `None` when none of the positives are ones we know how to phrase.
+fn describe_expected(positives: &[Rule]) -> Option<String> {
+    let mut labels: Vec<&'static str> = positives
+        .iter()
+        .filter_map(|rule| match rule {
+            Rule::quoted_string => Some("a quoted string (e.g. 'message' or $$message$$)"),
+            Rule::dotted_identifier => Some("a dotted name (e.g. acme.weather)"),
+            Rule::identifier => Some("an identifier"),
+            Rule::number => Some("a number"),
+            Rule::source_args => Some("a WITH (key = 'value', ...) clause"),
+            Rule::platform_map => Some("a platform map { 'os/arch' : '...', ... }"),
+            _ => None,
+        })
+        .collect();
+    labels.sort();
+    labels.dedup();
+    if labels.is_empty() {
+        None
+    } else if labels.len() == 1 {
+        Some(labels[0].to_string())
+    } else {
+        let last = labels.pop().unwrap();
+        Some(format!("{}, or {}", labels.join(", "), last))
+    }
 }
 
 /// Extract identifier content, stripping surrounding double quotes if present.

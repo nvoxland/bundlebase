@@ -16,7 +16,7 @@ use ::bundlebase::metrics::init_logging_metrics;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-use builder::{PyBundleBuilder, PyBundleStatus, PyChange, PyFetchResults, PyFetchedBlock};
+use builder::{PyBundleBuilder, PyBundleStatus, PyChange, PyFetchResults, PyFetchedSource};
 use bundle::{PyBundle, PyFileVerificationResult, PyVerificationResults};
 use bundle_config::{config_from_python, PyBundleConfig};
 use commit::PyCommit;
@@ -106,7 +106,7 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBundleBuilder>()?;
     m.add_class::<PyChange>()?;
     m.add_class::<PyBundleStatus>()?;
-    m.add_class::<PyFetchedBlock>()?;
+    m.add_class::<PyFetchedSource>()?;
     m.add_class::<PyFetchResults>()?;
     m.add_class::<PyBundleConfig>()?;
     m.add_class::<PySchema>()?;

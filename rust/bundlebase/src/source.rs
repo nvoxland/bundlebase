@@ -54,7 +54,7 @@ pub use crate::connector::plugin::WebScrapeConnector;
 pub use crate::connector::{
     format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, Connector,
     ConnectorRegistry, ConnectorSignature, DiscoveredLocation, FetchAction, FetchResults,
-    FetchedBlock, MaterializedData, SourceData,
+    FetchedSource, MaterializedData, SourceData,
 };
 pub use fetch::orchestrate_fetch;
 // Internal helpers used by bundlebase-command's builder. Public so

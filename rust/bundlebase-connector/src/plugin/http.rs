@@ -269,6 +269,7 @@ impl Connector for HttpConnector {
             must_copy: false,
             format,
             version: head_info.version,
+            num_rows: None,
         }])
     }
 
@@ -1059,6 +1060,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "v1".to_string(),
+            num_rows: None,
         };
         let config = crate::test_utils::test_config();
 
@@ -1078,6 +1080,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "unknown".to_string(),
+            num_rows: None,
         };
         let mut args = HashMap::new();
         args.insert("method".to_string(), "POST".to_string());
@@ -1098,6 +1101,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "v1".to_string(),
+            num_rows: None,
         };
         let mut args = HashMap::new();
         args.insert(
@@ -1158,6 +1162,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "unknown".to_string(),
+            num_rows: None,
         };
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/query", server.uri()));
@@ -1184,6 +1189,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "unknown".to_string(),
+            num_rows: None,
         };
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
@@ -1205,6 +1211,7 @@ mod tests {
             must_copy: false,
             format: SourceFormat::Csv,
             version: "v1".to_string(),
+            num_rows: None,
         };
         let config = crate::test_utils::test_config();
 

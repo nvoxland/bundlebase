@@ -1,4 +1,4 @@
-use arrow::array::{RecordBatch, StringArray};
+use arrow::array::{ListBuilder, RecordBatch, StringArray, StringBuilder, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use bundlebase::bundle::{BundleFacade, DataBlock};
@@ -42,14 +42,29 @@ impl BundleBlocksTable {
     }
 
     fn table_schema() -> SchemaRef {
+        // `source_locations` and `source_versions` are *parallel lists* — one
+        // entry per `BatchedSource` on the block, indexed the same way. With
+        // `MIN BATCH` a single bundle block can carry many source entries, so
+        // we faithfully expose all of them rather than picking arbitrarily.
+        // `source_count` is the list length, surfaced as its own column for
+        // quick scanning / filtering without unnesting.
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("version", DataType::Utf8, false),
             Field::new("pack_id", DataType::Utf8, false),
             Field::new("pack_name", DataType::Utf8, false),
             Field::new("source_id", DataType::Utf8, true),
-            Field::new("source_location", DataType::Utf8, true),
-            Field::new("source_version", DataType::Utf8, true),
+            Field::new("source_count", DataType::UInt64, false),
+            Field::new(
+                "source_locations",
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                true,
+            ),
+            Field::new(
+                "source_versions",
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                true,
+            ),
         ]))
     }
 
@@ -77,26 +92,33 @@ impl BundleBlocksTable {
             .iter()
             .map(|(b, _, _)| b.source_info().map(|si| si.id.to_string()))
             .collect();
-        let source_locations: Vec<Option<&str>> = blocks
-            .iter()
-            .map(|(b, _, _)| {
-                b.source_info().and_then(|si| {
-                    si.batch_sources
-                        .first()
-                        .map(|source| source.location.as_str())
-                })
-            })
-            .collect();
-        let source_versions: Vec<Option<&str>> = blocks
-            .iter()
-            .map(|(b, _, _)| {
-                b.source_info().and_then(|si| {
-                    si.batch_sources
-                        .first()
-                        .map(|source| source.version.as_str())
-                })
-            })
-            .collect();
+
+        // `source_count` plus parallel List<Utf8> columns for locations and
+        // versions. Blocks with no `source_info` get `count = 0` and NULL
+        // lists; blocks with a SourceInfo always emit a list (possibly empty).
+        let mut source_counts: Vec<u64> = Vec::with_capacity(blocks.len());
+        let mut location_builder: ListBuilder<StringBuilder> =
+            ListBuilder::new(StringBuilder::new());
+        let mut version_builder: ListBuilder<StringBuilder> =
+            ListBuilder::new(StringBuilder::new());
+        for (block, _, _) in &blocks {
+            match block.source_info() {
+                Some(info) => {
+                    source_counts.push(info.batch_sources.len() as u64);
+                    for bs in &info.batch_sources {
+                        location_builder.values().append_value(&bs.location);
+                        version_builder.values().append_value(&bs.version);
+                    }
+                    location_builder.append(true);
+                    version_builder.append(true);
+                }
+                None => {
+                    source_counts.push(0);
+                    location_builder.append(false); // NULL list
+                    version_builder.append(false);
+                }
+            }
+        }
 
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
@@ -114,8 +136,9 @@ impl BundleBlocksTable {
                 Arc::new(StringArray::from(
                     source_ids.iter().map(|s| s.as_deref()).collect::<Vec<_>>(),
                 )),
-                Arc::new(StringArray::from(source_locations)),
-                Arc::new(StringArray::from(source_versions)),
+                Arc::new(UInt64Array::from(source_counts)),
+                Arc::new(location_builder.finish()),
+                Arc::new(version_builder.finish()),
             ],
         )?;
 

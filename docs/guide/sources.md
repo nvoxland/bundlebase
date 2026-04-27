@@ -9,6 +9,8 @@ The source workflow has two steps:
 1. **Define a source** with `CREATE SOURCE` - Specifies where to look for files
 2. **Fetch new files** with `FETCH` - Discovers and attaches any new files found
 
+`CREATE SOURCE` runs an implicit `FETCH base ADD` by default, so the new source is populated immediately. Pass `fetch=False` (Python) or add `NO FETCH` (SQL) to skip that step — useful when shipping an empty bundle whose recipients fetch their own data.
+
 ## Basic Usage
 
 === "Async API"
@@ -652,15 +654,17 @@ Each `FetchResults` object contains:
 | Property | Type | Description |
 |----------|------|-------------|
 | `connector` | `str` | Connector name (e.g., "remote_dir") |
-| `source_url` | `str` | Source URL |
+| `source_id` | `str` | Stable identifier for this source — pass to `DESCRIBE SOURCE` for full configuration |
 | `pack` | `str` | Pack name ("base" or join name) |
-| `added` | `list[FetchedBlock]` | Blocks that were newly added |
-| `replaced` | `list[FetchedBlock]` | Blocks that were replaced (updated) |
-| `removed` | `list[str]` | Source locations of blocks that were removed |
+| `added` | `list[FetchedSource]` | Source locations newly added (one entry per `DiscoveredLocation`, *not* per bundle block) |
+| `replaced` | `list[FetchedSource]` | Source locations whose content changed and was re-attached |
+| `removed` | `list[str]` | Source locations no longer reported by the connector and detached |
+
+These lists are an *upper bound* on the resulting block delta — `MIN BATCH` may merge several added/replaced source locations into a single bundle block.
 
 Methods:
 
-- `total_count()` - Total number of changes (added + replaced + removed)
+- `total_count()` - Total number of source-location changes (added + replaced + removed)
 - `is_empty()` - Returns `True` if no changes were made
 
 ## Sources with Joins

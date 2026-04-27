@@ -106,6 +106,7 @@ type Location struct {
     MustCopy bool   `json:"must_copy"`
     Format   string `json:"format"`
     Version  string `json:"version"`
+    NumRows  *int64 `json:"num_rows"`
 }
 ```
 
@@ -115,6 +116,7 @@ type Location struct {
 | `MustCopy` | `bool` | `false` (zero value) | Whether the data must be copied into the bundle |
 | `Format` | `string` | `""` (zero value) | File format |
 | `Version` | `string` | `""` (zero value) | Version string for change detection |
+| `NumRows` | `*int64` | `nil` (zero value) | Optional row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest lookup); leave `nil` when counting would require fully parsing the file — bundlebase preserves `nil` distinct from `0` so users can tell "no rows" from "I don't know". |
 
 ### StableUrl
 
@@ -264,7 +266,7 @@ func TestDiscover(t *testing.T) {
 func TestDataReturnsArrow(t *testing.T) {
     input := makeRequest("data", map[string]interface{}{
         "location": map[string]interface{}{
-            "location": "data.parquet", "must_copy": true, "format": "parquet", "version": "v1",
+            "location": "data.parquet", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": nil,
         },
     }, 1) + makeRequest("shutdown", nil, 2)
 

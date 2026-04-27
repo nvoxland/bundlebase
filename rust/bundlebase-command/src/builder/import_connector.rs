@@ -301,6 +301,31 @@ impl BundleBuilderCommand for ImportConnectorCommand {
         }
         let n_entries = entries.len();
 
+        // FFI shared libraries can't be `dlopen`-ed from inside an archive —
+        // the OS dynamic linker only loads from real filesystem paths. Reject
+        // FFI imports into a tar (or other archive-backed) bundle up front
+        // with an actionable message rather than letting verification, or
+        // worse, the recipient's `FETCH`, fail with a cryptic dlopen error.
+        let data_dir_url = builder.data_dir().url().clone();
+        let data_dir_scheme = data_dir_url.scheme().to_string();
+        let data_dir_is_archive = data_dir_scheme.starts_with("tar+");
+        if data_dir_is_archive {
+            for (_, from_str) in &entries {
+                if from_str.starts_with("ffi::") || from_str.starts_with("lib::") {
+                    return Err(format!(
+                        "Cannot IMPORT CONNECTOR with an `ffi::` runtime into a {} bundle: \
+                        shared libraries can't be loaded from inside an archive. \
+                        Build the bundle as a directory first, then package it with \
+                        EXPORT TAR (or `tar` on the filesystem). Recipients of the tar \
+                        must extract it before running FETCH. \
+                        (data_dir = {})",
+                        data_dir_scheme, data_dir_url
+                    )
+                    .into());
+                }
+            }
+        }
+
         // Per-entry: parse runtime, validate, copy into bundle, verify.
         let mut prepared: Vec<(Platform, UdfRuntime)> = Vec::with_capacity(n_entries);
         for (platform, from_str) in entries {

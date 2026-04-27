@@ -30,6 +30,11 @@ pub struct CreateSourceCommand {
     pub min_batch: Option<String>,
     /// Optional expected schema: list of (column_name, type_name) pairs.
     pub expected_schema: Option<Vec<(String, String)>>,
+    /// Whether CREATE SOURCE should run an implicit FETCH after defining the
+    /// source. Defaults to true (matching SQL behavior). Set to false to
+    /// commit an "empty" bundle whose recipients fetch their own data —
+    /// either via the API directly or via the SQL `NO FETCH` clause.
+    pub fetch: bool,
 }
 
 impl CreateSourceCommand {
@@ -49,6 +54,7 @@ impl CreateSourceCommand {
             save_as,
             min_batch,
             expected_schema: None,
+            fetch: true,
         }
     }
 
@@ -130,6 +136,8 @@ impl CommandParsing for CreateSourceCommand {
         let mut save_as = None;
         let mut min_batch = None;
         let mut expected_schema: Option<Vec<(String, String)>> = None;
+        let mut no_fetch = false;
+        let mut explicit_fetch = false;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -186,6 +194,16 @@ impl CommandParsing for CreateSourceCommand {
                 Rule::min_batch_value => {
                     min_batch = Some(inner_pair.as_str().to_string());
                 }
+                Rule::no_fetch_clause => {
+                    no_fetch = true;
+                }
+                Rule::fetch_clause => {
+                    // Bare FETCH is the explicit opposite of NO FETCH; it
+                    // matches the default behavior. Accept it so SQL authors
+                    // can be unambiguous; conflict with NO FETCH is rejected
+                    // after the loop so order doesn't matter.
+                    explicit_fetch = true;
+                }
                 Rule::expected_schema_clause => {
                     let mut cols = Vec::new();
                     for col_pair in inner_pair.into_inner() {
@@ -239,6 +257,10 @@ impl CommandParsing for CreateSourceCommand {
             return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
         }
 
+        if no_fetch && explicit_fetch {
+            return Err("CREATE SOURCE: cannot specify both FETCH and NO FETCH".into());
+        }
+
         // Inject parser-extracted save_as into args so new() sees it. new() removes it again.
         if let Some(ref s) = save_as {
             args.insert("save_as".to_string(), s.clone());
@@ -246,6 +268,7 @@ impl CommandParsing for CreateSourceCommand {
         let mut cmd = CreateSourceCommand::new(connector, args, pack);
         cmd.min_batch = min_batch;
         cmd.expected_schema = expected_schema;
+        cmd.fetch = !no_fetch;
         Ok(cmd)
     }
 
@@ -267,6 +290,8 @@ impl CommandParsing for CreateSourceCommand {
             None => String::new(),
         };
 
+        let fetch_part = if self.fetch { "" } else { " NO FETCH" };
+
         let schema_part = match &self.expected_schema {
             Some(cols) if !cols.is_empty() => {
                 let cols_str = cols
@@ -283,8 +308,13 @@ impl CommandParsing for CreateSourceCommand {
 
         if self.args.is_empty() {
             return format!(
-                "CREATE SOURCE{} USING {}{}{}{}",
-                pack_part, self.connector, save_as_part, min_batch_part, schema_part
+                "CREATE SOURCE{} USING {}{}{}{}{}",
+                pack_part,
+                self.connector,
+                save_as_part,
+                min_batch_part,
+                fetch_part,
+                schema_part
             );
         }
 
@@ -296,8 +326,14 @@ impl CommandParsing for CreateSourceCommand {
         args_str.sort();
         let args_joined = args_str.join(", ");
         format!(
-            "CREATE SOURCE{} USING {} WITH ({}){}{}{}",
-            pack_part, self.connector, args_joined, save_as_part, min_batch_part, schema_part
+            "CREATE SOURCE{} USING {} WITH ({}){}{}{}{}",
+            pack_part,
+            self.connector,
+            args_joined,
+            save_as_part,
+            min_batch_part,
+            fetch_part,
+            schema_part
         )
     }
 }
@@ -339,6 +375,15 @@ impl BundleBuilderCommand for CreateSourceCommand {
         op.min_batch_bytes = min_batch_bytes;
 
         builder.apply_operation(op.into()).await?;
+
+        // CREATE SOURCE normally runs an implicit FETCH. Skip it when the
+        // SQL author opted out with `NO FETCH` (or `fetch=false` via the API).
+        if !self.fetch {
+            return Ok(format!(
+                "Created source: {}. (NO FETCH — no data attached.)",
+                connector_name
+            ));
+        }
 
         // Automatically fetch from the newly created source
         let source = builder
@@ -795,6 +840,67 @@ mod parsing_tests {
                     Some(r#"{"key": "it's a value"}"#)
                 );
             }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_no_fetch_clause() {
+        let input = "CREATE SOURCE USING acme.weather NO FETCH";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.connector, "acme.weather");
+                assert!(!c.fetch);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_explicit_fetch_clause_matches_default() {
+        let input = "CREATE SOURCE USING acme.weather FETCH";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.connector, "acme.weather");
+                assert!(c.fetch);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_and_no_fetch_conflict() {
+        for sql in [
+            "CREATE SOURCE USING acme.weather FETCH NO FETCH",
+            "CREATE SOURCE USING acme.weather NO FETCH FETCH",
+        ] {
+            let err = parse_command(sql).unwrap_err();
+            assert!(
+                err.to_string().contains("cannot specify both"),
+                "got: {} (input: {})",
+                err,
+                sql
+            );
+        }
+    }
+
+    #[test]
+    fn test_round_trip_no_fetch() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        let mut cmd = CreateSourceCommand::new("remote_dir", args, None);
+        cmd.fetch = false;
+        let stmt = cmd.to_statement();
+        assert!(
+            stmt.contains("NO FETCH"),
+            "expected NO FETCH in {}",
+            stmt
+        );
+        let parsed = parse_command(&stmt).unwrap();
+        match parsed {
+            BundleCommand::CreateSource(c) => assert!(!c.fetch),
             _ => panic!("Expected CreateSource variant"),
         }
     }

@@ -1566,13 +1566,13 @@ impl BundleFacade for BundleBuilder {
         self.bundle.view(identifier).await
     }
 
-    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError> {
+    async fn export_tar(&self, tar_path: &str, gzip: bool) -> Result<String, BundlebaseError> {
         // Check for uncommitted changes
         if !self.status().is_empty() {
             return Err("Cannot export tar with uncommitted changes. Please commit first.".into());
         }
 
-        self.bundle.export_tar(tar_path).await
+        self.bundle.export_tar(tar_path, gzip).await
     }
 
     fn status_changes(&self) -> Vec<BundleChange> {

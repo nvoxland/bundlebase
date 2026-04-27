@@ -167,7 +167,7 @@ IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so'
     WITH (platform = 'linux/amd64', src = './weather-source.zip');
 ```
 
-The archive is copied into the bundle's content-addressed data directory and travels with empty exports. Recipients can extract it with [`EXPORT SOURCE`](#export-source). Multi-platform `IMPORT CONNECTOR` shares a single source archive across every platform entry.
+The archive is copied into the bundle's content-addressed data directory and travels with empty exports. Recipients can extract it with [`EXPORT SOURCE`](../../sql-reference/index.md#export-source). Multi-platform `IMPORT CONNECTOR` shares a single source archive across every platform entry.
 
 ---
 
@@ -486,6 +486,7 @@ A `Location` represents a discovered data file. Every SDK provides this type wit
 | `must_copy` | bool | `true` | Whether the data must be copied into the bundle |
 | `format` | string | `"parquet"` | File format hint |
 | `version` | string | `""` | Version string for change detection |
+| `num_rows` | int \| null | `null` | Optional row count used by `FETCH ... DRY RUN` to report expected row deltas without reading the data. Set when the connector can determine it cheaply (Parquet footer, manifest); set to `null` when counting would require fully parsing the data. `null` is preserved distinct from `0` in `FETCH` output. |
 
 ### StableUrl
 
@@ -650,11 +651,13 @@ The `args` map passed to `discover`, `data`, and `stable_url` may contain reserv
 
 Request params: `{"attached_locations": ["loc1", ...], ...extra_args}`
 
-Response: `{"locations": [{"location": "...", "must_copy": true, "format": "parquet", "version": "v1"}, ...]}`
+Response: `{"locations": [{"location": "...", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": 1234}, ...]}`
+
+`num_rows` must be present (integer or JSON `null`) — see the [Location](#location) field reference.
 
 **`data`** — Returns data for a location.
 
-Request params: `{"location": {"location": "...", "must_copy": true, "format": "...", "version": "..."}, ...extra_args}`
+Request params: `{"location": {"location": "...", "must_copy": true, "format": "...", "version": "...", "num_rows": null}, ...extra_args}`
 
 Response: `{"ok": true}` followed by a length-prefixed Arrow IPC frame.
 

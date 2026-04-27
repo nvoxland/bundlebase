@@ -109,14 +109,16 @@ int32_t bundlebase_stable_url(const char* location_json, const char* args_json,
 ```json
 {
   "locations": [
-    {"location": "file.parquet", "must_copy": true, "format": "parquet", "version": "v1"}
+    {"location": "file.parquet", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": 1234}
   ]
 }
 ```
 
+`num_rows` is **required** on every location — set it to a non-negative integer when the connector can determine the row count cheaply (Parquet readers can read it from the footer; sources with a manifest can look it up), or to JSON `null` when counting would require fully parsing the data. `null` is faithfully preserved through to `FETCH ... DRY RUN`'s `rows_after` column so users can tell "0 rows" from "I don't know yet". A missing `num_rows` key is treated as a connector bug and rejected — declare it explicitly even when unknown.
+
 **data location_json:**
 ```json
-{"location": "file.parquet", "must_copy": true, "format": "parquet", "version": "v1"}
+{"location": "file.parquet", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": 1234}
 ```
 
 **data args_json:**

@@ -1018,8 +1018,8 @@ async fn test_bundle_blocks_table_schema() {
     let schema = df.schema();
     assert_eq!(
         schema.fields().len(),
-        7,
-        "bundle_info.blocks should have 7 columns"
+        8,
+        "bundle_info.blocks should have 8 columns"
     );
 
     let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
@@ -1031,8 +1031,9 @@ async fn test_bundle_blocks_table_schema() {
             "pack_id",
             "pack_name",
             "source_id",
-            "source_location",
-            "source_version"
+            "source_count",
+            "source_locations",
+            "source_versions"
         ]
     );
 }

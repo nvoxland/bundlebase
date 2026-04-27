@@ -174,6 +174,26 @@ fn parse_struct_fields(fields_str: &str) -> Result<Fields, BundlebaseError> {
     Ok(Fields::from(fields))
 }
 
+/// Pick a common Arrow `DataType` that can losslessly hold values of `a` and `b`.
+///
+/// Used wherever multiple blocks contributing to one logical column may have
+/// chosen different-but-compatible physical types (e.g. one parquet writer
+/// produced `Utf8`, another produced `Utf8View`). Falls back to `a` (the
+/// first/existing type) when no obvious widening applies — that matches the
+/// historical "first wins" behavior.
+pub fn widen_type(a: &DataType, b: &DataType) -> DataType {
+    use DataType::*;
+    match (a, b) {
+        // String family: prefer Utf8View, then LargeUtf8, then Utf8.
+        (Utf8View, _) | (_, Utf8View) => Utf8View,
+        (LargeUtf8, Utf8) | (Utf8, LargeUtf8) => LargeUtf8,
+        // Binary family: same ordering as strings.
+        (BinaryView, _) | (_, BinaryView) => BinaryView,
+        (LargeBinary, Binary) | (Binary, LargeBinary) => LargeBinary,
+        _ => a.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

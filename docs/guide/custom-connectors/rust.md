@@ -121,9 +121,10 @@ Return a stable URL for the given location. Default returns `Ok(None)`.
 ```rust
 pub struct Location {
     pub location: String,
-    pub must_copy: bool,    // default: true
-    pub format: String,     // default: "parquet"
-    pub version: String,    // default: ""
+    pub must_copy: bool,        // default: true
+    pub format: String,         // default: "parquet"
+    pub version: String,        // default: ""
+    pub num_rows: Option<u64>,  // default: None
 }
 ```
 
@@ -133,6 +134,7 @@ pub struct Location {
 | `must_copy` | `bool` | `true` | Whether the data must be copied into the bundle |
 | `format` | `String` | `"parquet"` | File format |
 | `version` | `String` | `""` | Version string for change detection |
+| `num_rows` | `Option<u64>` | `None` | Row count for `FETCH ... DRY RUN` accounting. `Some(n)` when known cheaply (e.g. Parquet footer); `None` when counting would require fully parsing the data — bundlebase preserves the distinction in its output. |
 
 Convenience constructor: `Location::new("path")` sets defaults for all other fields.
 

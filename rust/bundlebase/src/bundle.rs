@@ -1675,14 +1675,24 @@ impl BundleFacade for Bundle {
             .collect()
     }
 
-    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError> {
+    async fn export_tar(&self, tar_path: &str, gzip: bool) -> Result<String, BundlebaseError> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
         use futures::StreamExt;
         use std::fs::File;
         use tar::{Builder, Header};
 
         let tar_file = File::create(tar_path)
             .map_err(|e| format!("Failed to create tar file '{}': {}", tar_path, e))?;
-        let mut builder = Builder::new(tar_file);
+        // When `gzip = true`, wrap the file in a GzEncoder so tar bytes stream
+        // through gzip on the way to disk. The encoder is unwrapped at the end
+        // and explicitly `finish()`-ed so any final compressed block lands on
+        // disk before we report success.
+        let mut builder = if gzip {
+            Builder::new(WriteEither::Gz(GzEncoder::new(tar_file, Compression::default())))
+        } else {
+            Builder::new(WriteEither::Plain(tar_file))
+        };
 
         // Get all files from the bundle's data_dir
         let data_dir = self.data_dir();
@@ -1779,6 +1789,17 @@ impl BundleFacade for Bundle {
         builder
             .finish()
             .map_err(|e| format!("Failed to finalize tar archive: {}", e))?;
+
+        // Recover the underlying writer from the tar Builder; for the gzip
+        // case explicitly finish the encoder so its trailing block flushes.
+        let writer = builder
+            .into_inner()
+            .map_err(|e| format!("Failed to flush tar archive: {}", e))?;
+        if let WriteEither::Gz(encoder) = writer {
+            encoder
+                .finish()
+                .map_err(|e| format!("Failed to finalize gzip stream: {}", e))?;
+        }
 
         info!("Exported bundle to tar archive: {}", tar_path);
         Ok(format!("Exported bundle to {}", tar_path))
@@ -1991,6 +2012,32 @@ impl Clone for DataFrameHolder {
     fn clone(&self) -> Self {
         Self {
             dataframe: Arc::clone(&self.dataframe),
+        }
+    }
+}
+
+/// Writer enum used by `Bundle::export_tar` so the tar `Builder` can target
+/// either a plain file (no compression) or a gzip-encoded file with one
+/// concrete type. The `Gz` arm holds the encoder so the caller can call
+/// `finish()` after the tar footer is written, ensuring trailing compressed
+/// bytes flush to disk before we return success.
+enum WriteEither {
+    Plain(std::fs::File),
+    Gz(flate2::write::GzEncoder<std::fs::File>),
+}
+
+impl std::io::Write for WriteEither {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            WriteEither::Plain(f) => f.write(buf),
+            WriteEither::Gz(g) => g.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            WriteEither::Plain(f) => f.flush(),
+            WriteEither::Gz(g) => g.flush(),
         }
     }
 }

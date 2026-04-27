@@ -118,7 +118,7 @@ pub trait BundleFacade: Send + Sync {
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError>;
 
     /// Exports the bundle's data directory to an uncompressed tar archive.
-    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError>;
+    async fn export_tar(&self, tar_path: &str, gzip: bool) -> Result<String, BundlebaseError>;
 
     /// Returns uncommitted changes (empty for Bundle, populated for BundleBuilder)
     fn status_changes(&self) -> Vec<BundleChange>;

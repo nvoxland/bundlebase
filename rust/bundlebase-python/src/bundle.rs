@@ -683,11 +683,17 @@ impl PyBundle {
             .collect()
     }
 
-    fn export_tar<'py>(&self, tar_path: &str, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (tar_path, *, gzip=false))]
+    fn export_tar<'py>(
+        &self,
+        tar_path: &str,
+        gzip: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let tar_path = tar_path.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.export_tar(&tar_path).await.map_err(|e| {
+            inner.export_tar(&tar_path, gzip).await.map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Failed to export to tar '{}': {}",
                     tar_path, e

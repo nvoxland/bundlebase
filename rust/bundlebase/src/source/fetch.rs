@@ -442,7 +442,7 @@ pub async fn orchestrate_fetch(
         discovered.iter().map(|d| d.location.clone()).collect();
 
     let progress = ProgressScope::new(
-        &format!("Processing {} discovered files", discovered.len()),
+        &format!("Processing {} discovered locations", discovered.len()),
         Some(discovered.len() as u64),
     );
 
@@ -485,6 +485,7 @@ pub async fn orchestrate_fetch(
                     source_url: String::new(),
                     hash: None,
                     version: location.version.clone(),
+                    num_rows: location.num_rows,
                 }
             } else {
                 let data =
@@ -496,6 +497,7 @@ pub async fn orchestrate_fetch(
                     source_url: data.source_url,
                     hash: data.hash,
                     version: location.version.clone(),
+                    num_rows: location.num_rows,
                 }
             };
             Ok(match kind {

@@ -264,7 +264,9 @@ If the operation was committed before the hang (e.g., an auto-commit source crea
 ```
 mcp__bundlebase__query(bundle="data", sql="FETCH base ADD DRY RUN")
 ```
-Dry run shows what *would* be fetched without making changes. If it shows 0 new files, the data was already fetched.
+Dry run shows what *would* be fetched without making changes. If it shows 0 new files, the data was already fetched. Add `VERBOSE` (`FETCH base ADD DRY RUN VERBOSE`) to see one row per pending Add/Replace/Remove with the connector-reported `location`, `version`, and `num_rows` — useful for diagnosing why a SYNC plans the changes it does.
+
+The default summary table columns are: `pack`, `connector`, `source_id`, `source_locations_added`, `source_locations_modified`, `source_locations_removed`, `rows_before`, `rows_after`. The `source_locations_*` counts are per-`DiscoveredLocation`, *not* per bundle block — `MIN BATCH` may merge several into one batch block, so treat them as an upper bound on the resulting block delta. `rows_*` may show `NULL` when the connector did not declare row counts during discovery — distinct from a real `0`.
 
 **Step 4 — If the MCP server itself is unresponsive**, close and reopen the bundle:
 ```
@@ -585,7 +587,7 @@ This is not an issue in MCP mode — another reason to prefer MCP for complex qu
 | Materialize huge datasets in memory                | Crashes on large data                                                                                                           | Use `to_pandas()` / `to_polars()` which stream internally |
 | Skip commits during exploration                    | Lost history, can't undo mistakes                                                                                               | Commit at every meaningful step                           |
 | Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later                                                                                              | Always set both when creating a bundle                    |
-| Run FETCH after CREATE SOURCE for initial load     | CREATE SOURCE auto-fetches on creation — no separate FETCH needed for the first load                                            | Use FETCH later only to pick up new/changed data          |
+| Run FETCH after CREATE SOURCE for initial load     | CREATE SOURCE auto-fetches on creation — no separate FETCH needed for the first load. Pass `fetch=False` (or `NO FETCH` in SQL) only when you intentionally want an empty bundle whose recipients will fetch their own data. | Use FETCH later only to pick up new/changed data          |
 | Download data then ATTACH separately               | Directly downloading loses the history of where the data came from. Only use ATTACH for data that already existed on the system | `CREATE SOURCE USING http WITH (url = ...)                |
 
 ## Bundle References (`bundle://`)
@@ -1010,7 +1012,7 @@ Other stored report commands:
 
 ## Fetching External Data with Connectors
 
-Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE (auto-fetches on creation) → query/transform. You only FETCH again later to pick up new data.
+Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE (auto-fetches on creation) → query/transform. You only FETCH again later to pick up new data. To define a source without the implicit fetch (e.g. when shipping an empty/structure-only bundle that recipients will populate themselves), pass `fetch=False` in Python or add `NO FETCH` in SQL.
 
 **Do NOT use curl, wget, or requests to download data files.** Use bundlebase connectors instead — they handle downloading, format detection, versioning, and caching automatically.
 
@@ -1311,6 +1313,8 @@ bundlebase build --bundle ./analysis "EXPORT EMPTY TO './shared/empty.tar'"
 ```
 
 An empty bundle contains sources, always-update/always-delete rules, column renames/casts, joins, and views — but no attached data files. The `EXPECTED SCHEMA` is preserved so column operations resolve correctly before any data is fetched.
+
+For Python callers, the equivalent is `bundle.export_empty(path)`. To package any directory bundle as a single file for distribution, use `bundle.export_tar(path, gzip=True)` — `gzip=True` writes a gzipped tar (`.tar.gz`); the default is uncompressed. Note: bundles that ship FFI shared libraries (`ffi::` connectors) must be extracted before `FETCH` because `dlopen` can't load from inside an archive.
 
 ## Multi-platform Custom Connectors
 

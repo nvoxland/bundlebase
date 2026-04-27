@@ -9,11 +9,24 @@ import (
 )
 
 // Location represents a discovered data location returned from Discover().
+//
+// NumRows must be set explicitly. Set it to a *int64 pointing at the row
+// count when the connector can determine it cheaply (Parquet readers,
+// sources with row-count manifests, etc.) — `FETCH ... DRY RUN` uses it to
+// report the expected row delta without reading the data. Set it to nil
+// when counting would require fully parsing the file; bundlebase preserves
+// nil distinct from zero so the user can tell "0 rows" from "I don't know".
+//
+// The JSON field is non-omitempty: a connector that doesn't set NumRows
+// will serialize as `"num_rows": null`, and bundlebase requires the key to
+// be present so a missing key surfaces as a connector bug rather than
+// silently understating row deltas.
 type Location struct {
 	Location string `json:"location"`
 	MustCopy bool   `json:"must_copy"`
 	Format   string `json:"format"`
 	Version  string `json:"version"`
+	NumRows  *int64 `json:"num_rows"`
 }
 
 // StableUrl represents a stable URL for a data location.

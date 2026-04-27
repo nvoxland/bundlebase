@@ -22,11 +22,11 @@ use crate::builder::{
     CreateReportCommand, CreateSourceCommand, DeleteCommand, DetachBlockCommand,
     DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropColumnCommand, DropConnectorCommand,
     DropFunctionCommand, DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand,
-    FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand,
-    JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand, ReindexCommand,
-    RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand, RenameJoinCommand,
-    RenameViewCommand, ReplaceBlockCommand, SaveConfigCommand, SetDescriptionCommand,
-    SetNameCommand, VerifyDataCommand,
+    ExportEmptyCommand, FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand,
+    ImportFunctionCommand, JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand,
+    ReindexCommand, RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand,
+    RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, SaveConfigCommand,
+    SetDescriptionCommand, SetNameCommand, VerifyDataCommand,
 };
 use crate::BundleBuilderCommand;
 
@@ -42,6 +42,18 @@ async fn exec_cmd<C: BundleBuilderCommand + 'static>(
     builder
         .run_command(description, Box::new(cmd).execute(builder))
         .await
+}
+
+/// Strip the `FetchOutput` enum wrapper for callers that just want the
+/// underlying per-source results (Python sync API, the `fetch()` /
+/// `fetch_all()` ext-trait methods, etc.).
+fn unwrap_fetch_output(
+    out: bundlebase_common::command_response::FetchOutput,
+) -> Vec<FetchResults> {
+    match out {
+        bundlebase_common::command_response::FetchOutput::Summary(rows)
+        | bundlebase_common::command_response::FetchOutput::Verbose(rows) => rows,
+    }
 }
 
 /// Extension trait that adds command-based convenience methods to `BundleBuilder`.
@@ -73,20 +85,28 @@ pub trait BundleBuilderExt {
         new_location: &str,
     ) -> Result<&Self, BundlebaseError>;
 
-    /// Create a data source for a pack.
+    /// Create a data source for a pack. When `fetch` is true (the default
+    /// behavior of the SQL command), an implicit FETCH runs immediately
+    /// after the source is defined; pass `false` to skip it.
     async fn create_source(
         &self,
         connector: &str,
         args: HashMap<String, String>,
         pack: Option<&str>,
+        fetch: bool,
     ) -> Result<&Self, BundlebaseError>;
 
     /// Load a named connector (persisted).
+    ///
+    /// `src` is an optional path to a source archive (`WITH (src = '...')`).
+    /// When set, the archive is copied into the bundle and recoverable via
+    /// `EXPORT SOURCE`.
     async fn import_connector(
         &self,
         name: &str,
         from: &str,
         platform: &str,
+        src: Option<&str>,
     ) -> Result<&Self, BundlebaseError>;
 
     /// Rename a connector to a new dotted name.
@@ -110,6 +130,11 @@ pub trait BundleBuilderExt {
 
     /// Fetch from all defined sources - discover and attach new files.
     async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError>;
+
+    /// Export this bundle's *structure* (sources, indexes, views, column ops,
+    /// expected schema) to a new empty bundle at `path` — no attached data.
+    /// Equivalent to the SQL `EXPORT EMPTY TO '<path>'` command.
+    async fn export_empty(&self, path: &str) -> Result<&Self, BundlebaseError>;
 
     /// Create a view from a SQL statement.
     async fn create_view(
@@ -279,12 +304,11 @@ impl BundleBuilderExt for BundleBuilder {
         connector: &str,
         args: HashMap<String, String>,
         pack: Option<&str>,
+        fetch: bool,
     ) -> Result<&Self, BundlebaseError> {
-        exec_cmd(
-            self,
-            CreateSourceCommand::new(connector, args, pack.map(|s| s.to_string())),
-        )
-        .await?;
+        let mut cmd = CreateSourceCommand::new(connector, args, pack.map(|s| s.to_string()));
+        cmd.fetch = fetch;
+        exec_cmd(self, cmd).await?;
         Ok(self)
     }
 
@@ -293,9 +317,12 @@ impl BundleBuilderExt for BundleBuilder {
         name: &str,
         from: &str,
         platform: &str,
+        src: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         let platform: Platform = platform.parse()?;
-        exec_cmd(self, ImportConnectorCommand::new(name, from, platform)).await?;
+        let cmd = ImportConnectorCommand::new(name, from, platform)
+            .with_src(src.map(|s| s.to_string()));
+        exec_cmd(self, cmd).await?;
         Ok(self)
     }
 
@@ -323,11 +350,24 @@ impl BundleBuilderExt for BundleBuilder {
         pack: &str,
         mode: SyncMode,
     ) -> Result<Vec<FetchResults>, BundlebaseError> {
-        exec_cmd(self, FetchCommand::new(pack.to_string(), mode)).await
+        let out = exec_cmd(self, FetchCommand::new(pack.to_string(), mode)).await?;
+        Ok(unwrap_fetch_output(out))
     }
 
     async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
-        exec_cmd(self, FetchAllCommand::new(mode)).await
+        let out = exec_cmd(self, FetchAllCommand::new(mode)).await?;
+        Ok(unwrap_fetch_output(out))
+    }
+
+    async fn export_empty(&self, path: &str) -> Result<&Self, BundlebaseError> {
+        exec_cmd(
+            self,
+            ExportEmptyCommand {
+                path: path.to_string(),
+            },
+        )
+        .await?;
+        Ok(self)
     }
 
     async fn create_view(
@@ -639,8 +679,11 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         connector: &str,
         args: HashMap<String, String>,
         pack: Option<&str>,
+        fetch: bool,
     ) -> Result<&Self, BundlebaseError> {
-        (**self).create_source(connector, args, pack).await?;
+        (**self)
+            .create_source(connector, args, pack, fetch)
+            .await?;
         Ok(self)
     }
     async fn import_connector(
@@ -648,8 +691,11 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         name: &str,
         from: &str,
         platform: &str,
+        src: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
-        (**self).import_connector(name, from, platform).await?;
+        (**self)
+            .import_connector(name, from, platform, src)
+            .await?;
         Ok(self)
     }
     async fn rename_connector(
@@ -677,6 +723,10 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
         (**self).fetch_all(mode).await
+    }
+    async fn export_empty(&self, path: &str) -> Result<&Self, BundlebaseError> {
+        (**self).export_empty(path).await?;
+        Ok(self)
     }
     async fn create_view(
         &self,

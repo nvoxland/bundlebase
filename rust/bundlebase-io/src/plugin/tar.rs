@@ -89,16 +89,32 @@ impl TarObjectStore {
 
     /// Builds the index by scanning through the tar file.
     /// This is called lazily on the first access and cached.
+    ///
+    /// A missing tar file is treated as an empty archive — this matches the
+    /// "create new tar bundle" path where `BundleBuilder::create()` runs an
+    /// existence check on the META directory before any file has been written.
     fn build_index(&self) -> ObjectStoreResult<()> {
         // Double-check locking pattern
         if self.indexed.load(Ordering::Acquire) {
             return Ok(());
         }
 
-        let file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?;
+        let file = match File::open(&*self.tar_path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Treat as empty archive; the file will be created on first write.
+                let mut index = self.index.write();
+                index.entries = HashMap::new();
+                self.indexed.store(true, Ordering::Release);
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(object_store::Error::Generic {
+                    store: "TarObjectStore",
+                    source: Box::new(e),
+                })
+            }
+        };
 
         let mut archive = Archive::new(file);
         let mut entries = HashMap::new();
@@ -1348,6 +1364,48 @@ mod tests {
     use tempfile::NamedTempFile;
 
     // TarObjectStore tests
+
+    #[tokio::test]
+    async fn test_tar_store_head_on_missing_tar_returns_not_found() {
+        // When the tar file doesn't exist yet (e.g. fresh BundleBuilder::create
+        // into a tar+file:// URL), HEAD on any entry must return NotFound rather
+        // than the underlying ENOENT — otherwise BundleBuilder's "is there
+        // already a bundle here?" check fails before any file is written.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let tar_path = temp_dir.path().join("does-not-exist.tar");
+        assert!(!tar_path.exists());
+
+        let store = TarObjectStore::new(tar_path).unwrap();
+        let err = store
+            .head(&ObjectPath::from("anything"))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, object_store::Error::NotFound { .. }),
+            "expected NotFound, got {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_first_put_creates_tar() {
+        // First write into a not-yet-existing tar path should create the file.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let tar_path = temp_dir.path().join("brand-new.tar");
+        let store = TarObjectStore::new(tar_path.clone()).unwrap();
+
+        store
+            .put(
+                &ObjectPath::from("greeting.txt"),
+                PutPayload::from_bytes(Bytes::from_static(b"hi")),
+            )
+            .await
+            .unwrap();
+
+        assert!(tar_path.exists(), "tar file should have been created");
+        let result = store.get(&ObjectPath::from("greeting.txt")).await.unwrap();
+        assert_eq!(result.bytes().await.unwrap(), Bytes::from_static(b"hi"));
+    }
 
     #[tokio::test]
     async fn test_tar_store_write_and_read() {

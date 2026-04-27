@@ -804,9 +804,14 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def create_source(
-        self, connector: str, args: Dict[str, str], pack: str = "base",
+        self,
+        connector: str,
+        args: Dict[str, str],
+        pack: str = "base",
         save_as: str = None,
         min_batch: str = None,
+        *,
+        fetch: bool = True,
     ) -> "SyncBundleBuilder":
         """Create a data source for a pack.
 
@@ -826,6 +831,9 @@ class SyncBundleBuilder(SyncBundle):
                 When set, small files are merged
                 into larger blocks until the threshold is reached, reducing
                 per-file overhead.
+            fetch: Run the implicit FETCH that normally follows source
+                definition. Set to ``False`` to ship an "empty" bundle whose
+                recipients fetch their own data (default: True).
 
         Returns:
             Self for fluent chaining
@@ -835,13 +843,19 @@ class SyncBundleBuilder(SyncBundle):
             merged_args["save_as"] = save_as
         if min_batch is not None:
             merged_args["min_batch"] = str(min_batch)
-        coro = _call_original_method(self._async, "create_source", connector, merged_args, pack)
+        coro = _call_original_method(
+            self._async, "create_source", connector, merged_args, pack, fetch=fetch
+        )
         self._async = _loop_manager.run_sync(coro)
         return self
 
     def import_connector(
-        self, name: str, from_: str,
-        platform: str = "*/*"
+        self,
+        name: str,
+        from_: str,
+        platform: str = "*/*",
+        *,
+        src: str | None = None,
     ) -> "SyncBundleBuilder":
         """Load a named connector with logic (persisted).
 
@@ -853,12 +867,14 @@ class SyncBundleBuilder(SyncBundle):
             name: Dot-separated connector name (e.g., "acme.weather")
             from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
+            src: Optional path to a source archive (zip) bundled alongside
+                the connector. Recoverable later via ``EXPORT SOURCE``.
 
         Returns:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "import_connector", name, from_, platform
+            self._async, "import_connector", name, from_, platform, src=src
         )
         self._async = _loop_manager.run_sync(coro)
         return self
@@ -1043,7 +1059,9 @@ class SyncBundleBuilder(SyncBundle):
 
         Returns:
             List of FetchResults, one for each source in the pack.
-            Each result contains details about blocks added, replaced, and removed.
+            Each result lists the source locations that were added, modified,
+            or removed (one entry per ``DiscoveredLocation`` — not per bundle
+            block, since ``MIN BATCH`` may merge several into one).
         """
         coro = _call_original_method(self._async, "fetch", pack, mode)
         return _loop_manager.run_sync(coro)
@@ -1269,6 +1287,48 @@ class SyncBundleBuilder(SyncBundle):
         """Commit changes to persistent storage."""
         coro = _call_original_method(self._async, "commit", message)
         return _loop_manager.run_sync(coro)
+
+    def export_tar(self, tar_path: str, *, gzip: bool = False) -> "SyncBundleBuilder":
+        """Export this bundle as a single ``.tar`` archive at ``tar_path``.
+
+        The directory bundle on disk is not modified; this writes a portable,
+        single-file copy. Note that **FFI connector binaries cannot be
+        ``dlopen``-ed from inside a tar** — recipients of a tar bundle that
+        contains FFI connectors must extract it (e.g. ``tar -xf bundle.tar``)
+        before fetching.
+
+        Args:
+            tar_path: Output path. Conventionally ``.tar`` for plain or
+                ``.tar.gz`` when ``gzip=True``.
+            gzip: When ``True``, stream the tar through a gzip encoder so the
+                output is a ``.tar.gz``. Default ``False`` (plain tar).
+
+        Returns:
+            Self for fluent chaining.
+        """
+        coro = _call_original_method(
+            self._async, "export_tar", tar_path, gzip=gzip
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def export_empty(self, path: str) -> "SyncBundleBuilder":
+        """Export this bundle's *structure* to a new empty bundle at ``path``.
+
+        Strips data-containing operations (ATTACH, DETACH, REPLACE, DELETE,
+        UPDATE, INDEX rows) but preserves sources, indexes, views, column
+        operations, and the EXPECTED SCHEMA on each CREATE SOURCE — so a
+        recipient can ``FETCH`` and immediately query / index the data.
+
+        Equivalent to the SQL ``EXPORT EMPTY TO '<path>'`` command. The
+        original bundle on disk is not modified.
+
+        Returns:
+            Self for fluent chaining.
+        """
+        coro = _call_original_method(self._async, "export_empty", path)
+        self._async = _loop_manager.run_sync(coro)
+        return self
 
 
 # ======================== Factory Functions ========================

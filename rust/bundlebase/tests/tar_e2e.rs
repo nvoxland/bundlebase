@@ -28,7 +28,7 @@ async fn test_export_and_reopen_tar() {
     bundle.commit("Initial data").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Verify tar file exists
     assert!(tar_path.exists(), "Tar file should be created");
@@ -61,7 +61,7 @@ async fn test_commit_to_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Open tar and make changes
     let opened_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
@@ -103,7 +103,7 @@ async fn test_multiple_commits_to_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Make multiple commits to the tar file
     for i in 2..=5 {
@@ -149,7 +149,7 @@ async fn test_tar_preserves_metadata() {
     bundle.commit("Initial commit").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Open from tar and verify metadata
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
@@ -178,7 +178,7 @@ async fn test_create_index_in_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Open tar and create index
     let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
@@ -228,7 +228,7 @@ async fn test_tar_query_equivalence() {
 
     // Export to tar and query
     mem_bundle
-        .export_tar(tar_path.to_str().unwrap())
+        .export_tar(tar_path.to_str().unwrap(), false)
         .await
         .unwrap();
 
@@ -266,7 +266,7 @@ async fn test_export_from_bundle() {
     let bundle = Bundle::open(memory_url.as_str(), None).await.unwrap();
 
     // Export should work from Bundle
-    let result = bundle.export_tar(tar_path.to_str().unwrap()).await;
+    let result = bundle.export_tar(tar_path.to_str().unwrap(), false).await;
     assert!(result.is_ok(), "Should be able to export from Bundle");
 
     // Verify tar file was created
@@ -297,7 +297,7 @@ async fn test_export_from_builder_no_changes() {
     builder.commit("Initial data").await.unwrap();
 
     // Export should work when there are no uncommitted changes
-    let result = builder.export_tar(tar_path.to_str().unwrap()).await;
+    let result = builder.export_tar(tar_path.to_str().unwrap(), false).await;
     assert!(
         result.is_ok(),
         "Should be able to export from BundleBuilder with no uncommitted changes"
@@ -325,7 +325,7 @@ async fn test_export_from_builder_with_uncommitted_changes() {
     // Note: NOT committing here
 
     // Export should fail with uncommitted changes
-    let result = builder.export_tar(tar_path.to_str().unwrap()).await;
+    let result = builder.export_tar(tar_path.to_str().unwrap(), false).await;
     assert!(
         result.is_err(),
         "Should NOT be able to export with uncommitted changes"
@@ -361,7 +361,7 @@ async fn test_tar_file_listing() {
     bundle.commit("v1").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap()).await.unwrap();
+    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
 
     // Open tar and list files
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)

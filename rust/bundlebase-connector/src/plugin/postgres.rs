@@ -616,6 +616,7 @@ impl Connector for PostgresConnector {
                 must_copy: true,
                 format: SourceFormat::Parquet,
                 version: p.version,
+                num_rows: None,
             })
             .collect())
     }

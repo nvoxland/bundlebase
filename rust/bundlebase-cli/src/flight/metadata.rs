@@ -326,8 +326,25 @@ fn get_table_schema(
             arrow::datatypes::Field::new("pack_id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("pack_name", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("source_id", arrow::datatypes::DataType::Utf8, true),
-            arrow::datatypes::Field::new("source_location", arrow::datatypes::DataType::Utf8, true),
-            arrow::datatypes::Field::new("source_version", arrow::datatypes::DataType::Utf8, true),
+            arrow::datatypes::Field::new("source_count", arrow::datatypes::DataType::UInt64, false),
+            arrow::datatypes::Field::new(
+                "source_locations",
+                arrow::datatypes::DataType::List(Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    arrow::datatypes::DataType::Utf8,
+                    true,
+                ))),
+                true,
+            ),
+            arrow::datatypes::Field::new(
+                "source_versions",
+                arrow::datatypes::DataType::List(Arc::new(arrow::datatypes::Field::new(
+                    "item",
+                    arrow::datatypes::DataType::Utf8,
+                    true,
+                ))),
+                true,
+            ),
         ]))
     } else {
         Arc::new(Schema::empty())

@@ -392,13 +392,28 @@ See [Custom Connectors](../guide/custom-connectors/index.md) for details.
 
 ### CREATE SOURCE
 
-Defines a source for automatic file discovery.
+Defines a source for automatic file discovery. **By default, `CREATE SOURCE` runs an implicit `FETCH base ADD` after defining the source so the new source is immediately populated.** Use `NO FETCH` to skip that step (useful for shipping an "empty" bundle whose recipients fetch their own data); use bare `FETCH` to make the default behavior explicit.
 
 ```sql
-CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>] [MIN BATCH <size>]
+CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>] [MIN BATCH <size>] [FETCH | NO FETCH]
 ```
 
 Use `MIN BATCH` with a human-readable size such as `15M` or `3G` when you want small fetched files merged into larger parquet batches.
+
+**Examples:**
+
+```sql
+-- Default: fetch immediately
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv')
+
+-- Define the source but skip the implicit fetch — recipients run FETCH themselves
+CREATE SOURCE USING acme.weather NO FETCH
+
+-- Equivalent to the default, but explicit
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') FETCH
+```
+
+`FETCH` and `NO FETCH` cannot both appear on the same statement.
 
 See [Data Sources](../guide/sources.md) for details.
 
@@ -407,11 +422,35 @@ See [Data Sources](../guide/sources.md) for details.
 Discovers and attaches new files from defined sources.
 
 ```sql
-FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]
-FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]
+FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE]
+FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE]
 ```
 
-The optional `DRY RUN` modifier shows what would be added, updated, or removed without actually executing any changes. This is useful for previewing the effect of a fetch before committing to it.
+`DRY RUN` previews what would be added, replaced, or removed without executing any changes.
+
+`VERBOSE` switches the output table from a per-source summary to a row per Add/Replace/Remove action — useful for spotting exactly which files / partitions a fetch will touch. Combine the two (`DRY RUN VERBOSE`) for a per-file preview.
+
+**Output schemas:**
+
+Default (one row per source):
+
+```
+pack | connector | source_id | source_locations_added | source_locations_modified | source_locations_removed | rows_before | rows_after
+```
+
+`source_id` is a stable identifier; pass it to `DESCRIBE SOURCE` to see the source's full configuration.
+
+The `source_locations_*` counts are **per-connector-location**, *not* per bundle block. With `MIN BATCH` (the default for `SAVE AS AUTO`/`PARQUET`, threshold 1 GiB), small files get merged into fewer batch blocks at fetch time, so the actual block count after fetch can be smaller than these numbers. Treat them as an upper bound; use `VERBOSE` for per-location detail.
+
+`rows_before`/`rows_after` are nullable — `NULL` means "unknown" (the connector did not declare `num_rows` for at least one Add/Replace location), distinct from a known zero.
+
+`VERBOSE` (one row per action):
+
+```
+pack | connector | source_id | action | location | version | num_rows
+```
+
+`action` is `add`, `replace`, or `remove`. `version` is the connector-reported version string for the new (Add/Replace) or existing (Remove) location. `num_rows` is `NULL` when the connector did not declare it.
 
 **Examples:**
 
@@ -424,6 +463,9 @@ FETCH ALL SYNC DRY RUN
 
 -- Execute the fetch (no DRY RUN)
 FETCH base ADD
+
+-- Per-file breakdown of a sync
+FETCH ALL SYNC DRY RUN VERBOSE
 ```
 
 See [Data Sources](../guide/sources.md) for details.

@@ -64,6 +64,7 @@ impl IndexedValue {
             ScalarValue::Utf8(Some(v)) | ScalarValue::LargeUtf8(Some(v)) => {
                 Ok(IndexedValue::Utf8(v.clone()))
             }
+            ScalarValue::Utf8View(Some(v)) => Ok(IndexedValue::Utf8(v.clone())),
             ScalarValue::Boolean(Some(v)) => Ok(IndexedValue::Boolean(*v)),
             ScalarValue::TimestampNanosecond(Some(v), _)
             | ScalarValue::TimestampMicrosecond(Some(v), _)
@@ -83,6 +84,8 @@ impl IndexedValue {
             (IndexedValue::Float64(v), DataType::Float64) => ScalarValue::Float64(Some(v.0)),
             (IndexedValue::Float64(v), DataType::Float32) => ScalarValue::Float32(Some(v.0 as f32)),
             (IndexedValue::Utf8(v), DataType::Utf8) => ScalarValue::Utf8(Some(v.clone())),
+            (IndexedValue::Utf8(v), DataType::LargeUtf8) => ScalarValue::LargeUtf8(Some(v.clone())),
+            (IndexedValue::Utf8(v), DataType::Utf8View) => ScalarValue::Utf8View(Some(v.clone())),
             (IndexedValue::Boolean(v), DataType::Boolean) => ScalarValue::Boolean(Some(*v)),
             (IndexedValue::Timestamp(v), DataType::Timestamp(_, _)) => {
                 ScalarValue::TimestampNanosecond(Some(*v), None)

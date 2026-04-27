@@ -185,17 +185,32 @@ impl CommandResponse for usize {
 }
 
 /// Implement CommandResponse for Vec<FetchResults> to allow fetch result outputs.
+///
+/// Schema is one row per source: `pack` (the differentiator users care about),
+/// then `connector`, then `source_id` (stable ID for `DESCRIBE SOURCE`), then
+/// the change counts and row totals.
 impl CommandResponse for Vec<crate::connector::FetchResults> {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
-            Field::new("connector", DataType::Utf8, false),
-            Field::new("source_url", DataType::Utf8, false),
             Field::new("pack", DataType::Utf8, false),
-            Field::new("added_count", DataType::UInt64, false),
-            Field::new("replaced_count", DataType::UInt64, false),
-            Field::new("removed_count", DataType::UInt64, false),
-            Field::new("rows_before", DataType::UInt64, false),
-            Field::new("rows_after", DataType::UInt64, false),
+            Field::new("connector", DataType::Utf8, false),
+            Field::new("source_id", DataType::Utf8, false),
+            // Counts of `DiscoveredLocation`s the connector reported as
+            // changed — *not* a count of bundle blocks. For sources where
+            // `MIN BATCH` would merge small files (the default for
+            // SAVE AS AUTO/PARQUET), the actual block count after fetch can
+            // be smaller (multiple locations collapsed into one batch block).
+            // One source location can never split into multiple blocks, so
+            // these are an *upper bound* on the resulting block delta.
+            Field::new("source_locations_added", DataType::UInt64, false),
+            Field::new("source_locations_modified", DataType::UInt64, false),
+            Field::new("source_locations_removed", DataType::UInt64, false),
+            // Nullable: a NULL means "unknown" (the connector didn't declare
+            // num_rows for at least one Add/Replace location), distinct from
+            // a known zero. Renderers should display NULL as blank rather
+            // than 0 to preserve that distinction.
+            Field::new("rows_before", DataType::UInt64, true),
+            Field::new("rows_after", DataType::UInt64, true),
         ]))
     }
 
@@ -204,50 +219,54 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let pack: ArrayRef = Arc::new(StringArray::from(
+            self.iter().map(|r| r.pack.as_str()).collect::<Vec<_>>(),
+        ));
         let connector: ArrayRef = Arc::new(StringArray::from(
             self.iter()
                 .map(|r| r.connector.as_str())
                 .collect::<Vec<_>>(),
         ));
-        let source_url: ArrayRef = Arc::new(StringArray::from(
+        let source_id: ArrayRef = Arc::new(StringArray::from(
             self.iter()
-                .map(|r| r.source_url.as_str())
+                .map(|r| r.source_id.to_string())
                 .collect::<Vec<_>>(),
         ));
-        let pack: ArrayRef = Arc::new(StringArray::from(
-            self.iter().map(|r| r.pack.as_str()).collect::<Vec<_>>(),
-        ));
-        let added_count: ArrayRef = Arc::new(UInt64Array::from(
+        let source_locations_added: ArrayRef = Arc::new(UInt64Array::from(
             self.iter()
                 .map(|r| r.added.len() as u64)
                 .collect::<Vec<_>>(),
         ));
-        let replaced_count: ArrayRef = Arc::new(UInt64Array::from(
+        let source_locations_modified: ArrayRef = Arc::new(UInt64Array::from(
             self.iter()
                 .map(|r| r.replaced.len() as u64)
                 .collect::<Vec<_>>(),
         ));
-        let removed_count: ArrayRef = Arc::new(UInt64Array::from(
+        let source_locations_removed: ArrayRef = Arc::new(UInt64Array::from(
             self.iter()
                 .map(|r| r.removed.len() as u64)
                 .collect::<Vec<_>>(),
         ));
         let rows_before: ArrayRef = Arc::new(UInt64Array::from(
-            self.iter().map(|r| r.rows_before).collect::<Vec<_>>(),
+            self.iter()
+                .map(|r| r.rows_before)
+                .collect::<Vec<Option<u64>>>(),
         ));
         let rows_after: ArrayRef = Arc::new(UInt64Array::from(
-            self.iter().map(|r| r.rows_after).collect::<Vec<_>>(),
+            self.iter()
+                .map(|r| r.rows_after)
+                .collect::<Vec<Option<u64>>>(),
         ));
 
         let batch = RecordBatch::try_new(
             Self::schema(),
             vec![
-                connector,
-                source_url,
                 pack,
-                added_count,
-                replaced_count,
-                removed_count,
+                connector,
+                source_id,
+                source_locations_added,
+                source_locations_modified,
+                source_locations_removed,
                 rows_before,
                 rows_after,
             ],
@@ -257,6 +276,142 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
     }
 
     impl_dyn_command_response!(Vec<crate::connector::FetchResults>);
+}
+
+/// Output of `FETCH ... VERBOSE`: one row per Add/Replace/Remove action
+/// instead of the per-source summary. Wraps `Vec<FetchResults>`; the schema
+/// flattens each result's added/replaced/removed lists into rows.
+pub struct VerboseFetchOutput(pub Vec<crate::connector::FetchResults>);
+
+/// Sum type for `FETCH` output — `Summary` for the per-source rollup (the
+/// default) and `Verbose` for the per-action breakdown emitted by
+/// `FETCH ... VERBOSE`. `dyn_schema` and `into_stream` dispatch to whichever
+/// variant the command produced, so the renderer picks the right table shape
+/// at runtime.
+pub enum FetchOutput {
+    Summary(Vec<crate::connector::FetchResults>),
+    Verbose(Vec<crate::connector::FetchResults>),
+}
+
+impl CommandResponse for FetchOutput {
+    fn schema() -> SchemaRef {
+        // Trait requires a static; the summary schema is the default.
+        // Real callers use `dyn_schema()` which dispatches per variant.
+        <Vec<crate::connector::FetchResults> as CommandResponse>::schema()
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn dyn_schema(&self) -> SchemaRef {
+        match self {
+            FetchOutput::Summary(_) => {
+                <Vec<crate::connector::FetchResults> as CommandResponse>::schema()
+            }
+            FetchOutput::Verbose(_) => <VerboseFetchOutput as CommandResponse>::schema(),
+        }
+    }
+
+    fn dyn_output_shape(&self) -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        match *self {
+            FetchOutput::Summary(rows) => Box::new(rows).into_stream(),
+            FetchOutput::Verbose(rows) => Box::new(VerboseFetchOutput(rows)).into_stream(),
+        }
+    }
+}
+
+impl CommandResponse for VerboseFetchOutput {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("pack", DataType::Utf8, false),
+            Field::new("connector", DataType::Utf8, false),
+            Field::new("source_id", DataType::Utf8, false),
+            // "add" | "replace" | "remove"
+            Field::new("action", DataType::Utf8, false),
+            // The connector-reported source_location for this action.
+            Field::new("location", DataType::Utf8, false),
+            // The connector-reported version for the new (Add/Replace) or
+            // existing (Remove) location.
+            Field::new("version", DataType::Utf8, false),
+            // num_rows declared by the connector (Add/Replace) or recorded on
+            // the existing block (Remove). NULL = unknown.
+            Field::new("num_rows", DataType::UInt64, true),
+        ]))
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let mut packs: Vec<String> = Vec::new();
+        let mut connectors: Vec<String> = Vec::new();
+        let mut source_ids: Vec<String> = Vec::new();
+        let mut actions: Vec<String> = Vec::new();
+        let mut locations: Vec<String> = Vec::new();
+        let mut versions: Vec<String> = Vec::new();
+        let mut nums: Vec<Option<u64>> = Vec::new();
+
+        for r in &self.0 {
+            for b in &r.added {
+                packs.push(r.pack.clone());
+                connectors.push(r.connector.clone());
+                source_ids.push(r.source_id.to_string());
+                actions.push("add".to_string());
+                locations.push(b.source_location.clone());
+                versions.push(b.version.clone());
+                nums.push(b.num_rows);
+            }
+            for b in &r.replaced {
+                packs.push(r.pack.clone());
+                connectors.push(r.connector.clone());
+                source_ids.push(r.source_id.to_string());
+                actions.push("replace".to_string());
+                locations.push(b.source_location.clone());
+                versions.push(b.version.clone());
+                nums.push(b.num_rows);
+            }
+            for b in &r.removed {
+                packs.push(r.pack.clone());
+                connectors.push(r.connector.clone());
+                source_ids.push(r.source_id.to_string());
+                actions.push("remove".to_string());
+                locations.push(b.source_location.clone());
+                versions.push(b.version.clone());
+                nums.push(b.num_rows);
+            }
+        }
+
+        let pack_arr: ArrayRef = Arc::new(StringArray::from(packs));
+        let connector_arr: ArrayRef = Arc::new(StringArray::from(connectors));
+        let source_id_arr: ArrayRef = Arc::new(StringArray::from(source_ids));
+        let action_arr: ArrayRef = Arc::new(StringArray::from(actions));
+        let location_arr: ArrayRef = Arc::new(StringArray::from(locations));
+        let version_arr: ArrayRef = Arc::new(StringArray::from(versions));
+        let num_arr: ArrayRef = Arc::new(UInt64Array::from(nums));
+
+        let batch = RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                pack_arr,
+                connector_arr,
+                source_id_arr,
+                action_arr,
+                location_arr,
+                version_arr,
+                num_arr,
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
+    }
+
+    impl_dyn_command_response!(VerboseFetchOutput);
 }
 
 /// Implement CommandResponse for SendableRecordBatchStream so that
