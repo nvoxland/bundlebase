@@ -269,6 +269,19 @@ pub fn split_statements(input: &str) -> Result<Vec<&str>, BundlebaseError> {
     Ok(statements)
 }
 
+/// Returns true when `input` parses as one or more `;`-terminated statements
+/// with no trailing partial statement, no unterminated string, and no
+/// unterminated dollar-quoted block.
+///
+/// Used by the REPL to decide whether [Enter] should submit the buffer or
+/// drop down to a continuation line. Callers that already pass complete
+/// statements (Python, Flight, MCP) don't need this — they can keep using
+/// `split_statements` / `parse` directly.
+pub fn is_input_complete(input: &str) -> bool {
+    use pest::Parser;
+    BundlebaseParser::parse(Rule::repl_complete, input).is_ok()
+}
+
 /// Returns a map of command names to their syntax descriptions.
 ///
 /// This delegates to `BundleCommand::available_commands()` which is auto-generated
@@ -307,6 +320,47 @@ mod tests {
         assert!(map.len() > 20);
         assert!(map.contains_key("FILTER"));
         assert!(map.contains_key("ATTACH"));
+    }
+
+    #[test]
+    fn test_is_input_complete() {
+        // Single statement with trailing semi → complete
+        assert!(is_input_complete("SELECT 1;"));
+        assert!(is_input_complete("SELECT 1;\n"));
+        assert!(is_input_complete("  SELECT 1 ;  "));
+
+        // Multi-line statement, terminated → complete
+        assert!(is_input_complete(
+            "SELECT *\nFROM bundle\nWHERE x = 1\nGROUP BY y;"
+        ));
+
+        // Multiple statements → complete
+        assert!(is_input_complete("SELECT 1; SELECT 2;"));
+
+        // Missing trailing semi → incomplete (REPL keeps prompting)
+        assert!(!is_input_complete("SELECT 1"));
+        assert!(!is_input_complete("SELECT *\nFROM bundle"));
+        assert!(!is_input_complete("SELECT 1;\nSELECT 2"));
+
+        // Semicolon inside a single-quoted string is NOT a terminator
+        assert!(!is_input_complete("SELECT 'a;b'"));
+        assert!(is_input_complete("SELECT 'a;b';"));
+
+        // Unterminated string → incomplete
+        assert!(!is_input_complete("SELECT 'unterminated"));
+
+        // Dollar-quoted block with `;` inside is one statement
+        assert!(is_input_complete("COMMIT $$ hello; world $$;"));
+        assert!(!is_input_complete("COMMIT $$ hello; world $$"));
+
+        // Unterminated `$$` opener → incomplete (the wildcard branch refuses
+        // to swallow `$$`, forcing it through `quoted_string` which needs a
+        // balanced closer).
+        assert!(!is_input_complete("COMMIT $$ hello;"));
+        assert!(!is_input_complete("COMMIT $$ hello\nworld"));
+
+        // Empty input → not complete (validator short-circuits this case)
+        assert!(!is_input_complete(""));
     }
 
     #[test]

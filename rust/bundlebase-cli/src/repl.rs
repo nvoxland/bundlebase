@@ -17,10 +17,31 @@ use bundlebase_common::BundlebaseError;
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
 use json_formatter::format_stream_json;
+use bundlebase_command::parser::is_input_complete;
 use reedline::{
     default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
-    Reedline, Signal,
+    Reedline, Signal, ValidationResult, Validator,
 };
+
+/// Reedline validator: a SQL/command buffer is "complete" only when every
+/// statement ends in `;` (outside of any quoted string). Slash commands and
+/// `:` shortcuts are single-line, so they're always complete. An empty buffer
+/// is also complete — pressing Enter on a blank prompt should re-display it.
+struct SqlStatementValidator;
+
+impl Validator for SqlStatementValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('/') {
+            return ValidationResult::Complete;
+        }
+        if is_input_complete(line) {
+            ValidationResult::Complete
+        } else {
+            ValidationResult::Incomplete
+        }
+    }
+}
 use std::sync::Arc;
 use stream_formatter::format_stream;
 use tracing::{error, info};
@@ -166,6 +187,7 @@ pub async fn start(
     let mut line_editor = Reedline::create()
         .with_history(history)
         .with_completer(completer)
+        .with_validator(Box::new(SqlStatementValidator))
         .with_edit_mode(Box::new(Emacs::new(default_emacs_keybindings())));
 
     let prompt = DefaultPrompt {

@@ -38,7 +38,19 @@ statement = { SOI ~ (
 // Respects single-quoted strings so semicolons inside quotes are not treated as delimiters.
 // This rule is used by the CLI for batch execution; the core library uses `statement` for single commands.
 multi_statement = { SOI ~ statement_text ~ (";" ~ statement_text)* ~ ";"? ~ EOI }
-statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
+// The `!"$$"` exclusion stops the wildcard branch from silently absorbing an
+// unmatched `$$` opener. A bare `$$` is never legal outside a `dollar_quoted`
+// block, so requiring it to take the `quoted_string` branch (which needs a
+// balanced closer) lets us detect unterminated dollar-quotes for the REPL
+// completeness check, instead of treating the next stray `;` as a terminator.
+statement_text  = { (quoted_string | !(";" | EOI | "$$") ~ ANY)+ }
+
+// REPL completeness probe: input is complete only when every statement ends in `;`
+// (with `;` *outside* any quoted_string — `quoted_string` is atomic, so a `;` inside
+// `'...'`, `"..."`, or `$tag$...$tag$` is consumed as part of the literal and does
+// not terminate). An unterminated string or a missing trailing `;` makes this rule
+// fail, which the REPL treats as "keep prompting on a new line."
+repl_complete = { SOI ~ (statement_text ~ ";")+ ~ WHITESPACE* ~ EOI }
 
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
