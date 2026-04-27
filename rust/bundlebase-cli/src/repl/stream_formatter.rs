@@ -44,14 +44,14 @@ pub async fn format_stream(
     }
 
     if batches.is_empty() {
-        return Ok(String::new());
+        return Ok("(0 rows)".to_string());
     }
 
     // Calculate total rows
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
 
     if total_rows == 0 {
-        return Ok(String::new());
+        return Ok("(0 rows)".to_string());
     }
 
     // Get schema from first batch
@@ -155,6 +155,24 @@ mod tests {
         assert!(result.contains("Alice"));
         assert!(result.contains("Bob"));
         assert!(result.contains("Charlie"));
+    }
+
+    fn create_empty_stream() -> SendableRecordBatchStream {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let stream = futures::stream::iter(Vec::new());
+        Box::pin(RecordBatchStreamAdapter::new(schema, stream))
+    }
+
+    #[tokio::test]
+    async fn test_format_zero_rows_shows_feedback() {
+        // A query that returns no rows must still produce visible output, so
+        // the user can tell the query actually ran. Returning an empty string
+        // makes the REPL look frozen — see the "pasted SQL doesn't execute"
+        // bug report.
+        let result = format_stream(create_empty_stream(), Some(OutputShape::Table), None)
+            .await
+            .unwrap();
+        assert_eq!(result, "(0 rows)");
     }
 
     #[tokio::test]
