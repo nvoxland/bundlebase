@@ -469,6 +469,127 @@ async fn test_update_csv() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// DELETE → COMMIT → REOPEN must persist the row exclusion via the
+/// tombstone file path: `commit()` writes a `.tomb`, the manifest
+/// records a `DeleteOp`, and on `Bundle::open` the op replays
+/// `add_deleted_rows` onto each `DataBlock` so `DataBlock::scan`'s
+/// `DeletedRowFilterDataSource` keeps them out of every query.
+#[tokio::test]
+async fn test_delete_persists_across_reopen() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    let initial = builder.num_rows().await?;
+
+    builder.delete("salary > 200000").await?;
+    let after_session = builder.num_rows().await?;
+    assert!(
+        after_session < initial,
+        "delete should reduce row count in-session"
+    );
+    builder.commit("delete high salaries").await?;
+
+    // Reopen and verify deletes still apply (the FilterOp from the
+    // session is also persisted, but we want the assertion to fail if
+    // either side stops working — so probe a query whose answer can
+    // only come out right when the tombstone is consulted at scan).
+    let bundle = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    assert_eq!(
+        bundle.num_rows().await?,
+        after_session,
+        "row count must match across reopen"
+    );
+    let leaked = query_count(
+        bundle.as_ref(),
+        "SELECT COUNT(*) as cnt FROM bundle WHERE salary > 200000",
+    )
+    .await;
+    assert_eq!(
+        leaked, 0,
+        "tombstoned rows must not surface in queries after reopen"
+    );
+
+    // Manifest sanity-check: exactly one delete op recorded with the
+    // original where clause and a non-empty tombstone filename.
+    let (yaml, _commit, _url) = common::latest_commit(data_dir.as_ref())
+        .await?
+        .expect("commit must be persisted");
+    assert!(
+        yaml.contains("type: delete"),
+        "manifest should contain a delete op:\n{}",
+        yaml
+    );
+    assert!(
+        yaml.contains("salary > 200000"),
+        "delete op should echo its where clause:\n{}",
+        yaml
+    );
+    assert!(
+        yaml.contains(".tomb"),
+        "delete op should reference a tombstone file:\n{}",
+        yaml
+    );
+
+    Ok(())
+}
+
+/// Sequential DELETEs across separate commits must accumulate — every
+/// reopen replays each `DeleteOp::apply` in order and `add_deleted_rows`
+/// on `DataBlock` is additive (not a replacement). Catches a regression
+/// where the second commit's tombstone would clobber the first.
+#[tokio::test]
+async fn test_delete_across_multiple_commits() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    let initial = builder.num_rows().await?;
+
+    builder.delete("salary > 200000").await?;
+    let after_first = builder.num_rows().await?;
+    assert!(after_first < initial);
+    builder.commit("delete high salaries").await?;
+
+    // Reopen and run the second delete from a fresh builder so we're
+    // exercising the persistence path, not just the in-session FilterOp.
+    let opened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let builder2 = opened.extend(None).await?;
+    let reopened_count = builder2.num_rows().await?;
+    assert_eq!(reopened_count, after_first, "first delete must persist");
+
+    builder2.delete("salary < 50000").await?;
+    let after_second = builder2.num_rows().await?;
+    assert!(after_second < after_first);
+    builder2.commit("delete low salaries").await?;
+
+    // Reopen one more time and assert both populations are gone.
+    let final_bundle = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    assert_eq!(
+        final_bundle.num_rows().await?,
+        after_second,
+        "both deletes should still apply after second reopen"
+    );
+    let high = query_count(
+        final_bundle.as_ref(),
+        "SELECT COUNT(*) as cnt FROM bundle WHERE salary > 200000",
+    )
+    .await;
+    let low = query_count(
+        final_bundle.as_ref(),
+        "SELECT COUNT(*) as cnt FROM bundle WHERE salary < 50000",
+    )
+    .await;
+    assert_eq!(high, 0, "first commit's deletes must survive");
+    assert_eq!(low, 0, "second commit's deletes must survive");
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_update_after_rename() -> Result<(), BundlebaseError> {
     init();
