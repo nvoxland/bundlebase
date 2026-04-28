@@ -80,11 +80,11 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 
 #### Available Commands
 
-**Data**: ATTACH, DETACH, REPLACE, FILTER, UPDATE, DELETE, ALWAYS DELETE, DROP ALWAYS DELETE, IMPORT JOIN
+**Data**: ATTACH [NO INDEX], DETACH, REPLACE, FILTER, UPDATE, DELETE, ALWAYS DELETE, DROP ALWAYS DELETE, IMPORT JOIN
 **Schema**: JOIN, DROP JOIN, RENAME JOIN, ADD COLUMN, DROP COLUMN, RENAME COLUMN, CAST COLUMN, CREATE VIEW, DROP VIEW, RENAME VIEW
-**Sources**: IMPORT [TEMP] FUNCTION, IMPORT [TEMP] CONNECTOR, DROP/RENAME [TEMP] FUNCTION/CONNECTOR, CREATE SOURCE [... FETCH | NO FETCH] (auto-fetches by default; `NO FETCH` ships an empty bundle), FETCH [DRY RUN] [VERBOSE] (VERBOSE = one row per file), FETCH ALL [DRY RUN] [VERBOSE], DESCRIBE FUNCTION, DESCRIBE CONNECTOR
+**Sources**: IMPORT [TEMP] FUNCTION, IMPORT [TEMP] CONNECTOR, DROP/RENAME [TEMP] FUNCTION/CONNECTOR, CREATE SOURCE [... FETCH | NO FETCH] (auto-fetches by default; `NO FETCH` ships an empty bundle), FETCH [DRY RUN] [VERBOSE] [NO INDEX] (VERBOSE = one row per file; NO INDEX skips post-fetch reindex), FETCH ALL [DRY RUN] [VERBOSE] [NO INDEX], DESCRIBE FUNCTION, DESCRIBE CONNECTOR
 **Data Profiling**: DESCRIBE DATA IN col1 [AS type], col2 [AS type], ... (returns min/max/avg/nulls/top values/invalid values per column)
-**Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX
+**Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX (indexes are auto-refreshed after every ATTACH/REPLACE/FETCH unless `NO INDEX` is given; run REINDEX explicitly when bulk-loading with NO INDEX)
 **Version Control**: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
 **Metadata**: SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG
 **Export**: EXPORT DATA TO '<path>' <sql> (formats: .csv, .jsonl) | EXPORT EMPTY TO '<path>' (structure only, no data)

@@ -589,6 +589,7 @@ This is not an issue in MCP mode — another reason to prefer MCP for complex qu
 | Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later                                                                                              | Always set both when creating a bundle                    |
 | Run FETCH after CREATE SOURCE for initial load     | CREATE SOURCE auto-fetches on creation — no separate FETCH needed for the first load. Pass `fetch=False` (or `NO FETCH` in SQL) only when you intentionally want an empty bundle whose recipients will fetch their own data. | Use FETCH later only to pick up new/changed data          |
 | Download data then ATTACH separately               | Directly downloading loses the history of where the data came from. Only use ATTACH for data that already existed on the system | `CREATE SOURCE USING http WITH (url = ...)                |
+| Run REINDEX after every ATTACH/FETCH               | Indexes are auto-refreshed in the same change as the ATTACH/REPLACE/FETCH — REINDEX is a no-op afterwards                       | Only use REINDEX when you bulk-loaded with `NO INDEX`     |
 
 ## Bundle References (`bundle://`)
 
@@ -828,8 +829,12 @@ bundlebase extend --bundle ./data "CREATE TEXT INDEX ON description"
 # Rebuild a specific index
 bundlebase extend --bundle ./data "REBUILD INDEX ON customer_id"
 
-# Rebuild all indexes
+# Rebuild all indexes — only needed when ATTACH/FETCH was run with NO INDEX,
+# since by default every ATTACH/REPLACE/FETCH auto-refreshes the indexes.
 bundlebase extend --bundle ./data "REINDEX"
+
+# Bulk-load multiple files, defer the index rebuild to one REINDEX at the end
+bundlebase extend --bundle ./data "ATTACH 'jan.parquet' NO INDEX; ATTACH 'feb.parquet' NO INDEX; REINDEX"
 
 # Drop an index
 bundlebase extend --bundle ./data "DROP INDEX customer_id"

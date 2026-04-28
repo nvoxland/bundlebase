@@ -116,6 +116,23 @@ You can attach the query output of another committed bundle using a `bundle://` 
 !!! note
     Only JSON Lines format (one JSON object per line) can be directly attached. For arbitrary JSON files — including API responses with wrapper objects, nested structures, or JSON arrays — use a connector (`CREATE SOURCE USING http`, `remote_dir`, etc.) with `json_record_path`. The connector transforms and copies the data into the bundle as Parquet. See [Sources: JSON Options](sources.md#json-options).
 
+## Index Refresh
+
+Each `ATTACH` automatically refreshes every defined index against the
+new block before the change lands, so queries see the new rows through
+the index immediately. When bulk-loading many files in a row, suppress
+that per-file rebuild and run [`REINDEX`](indexing.md#reindex) once at
+the end:
+
+```sql
+ATTACH 'jan.parquet' NO INDEX;
+ATTACH 'feb.parquet' NO INDEX;
+ATTACH 'mar.parquet' NO INDEX;
+REINDEX;
+```
+
+The same `NO INDEX` flag is available on `FETCH` and `FETCH ALL`.
+
 ## Column Types
 
 **CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.

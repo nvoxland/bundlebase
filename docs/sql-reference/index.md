@@ -40,8 +40,13 @@ Commands that change bundle data content.
 Adds a data file to the bundle. Supports CSV, TSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
 
 ```sql
-ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
+ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)] [NO INDEX]
 ```
+
+By default, every defined index is automatically refreshed against the new
+block(s) before the change lands, so queries see them immediately. Add
+`NO INDEX` to skip that step — useful when bulk-loading many files where
+you'd rather rebuild once at the end with [`REINDEX`](#reindex).
 
 **Examples:**
 
@@ -54,6 +59,12 @@ ATTACH 'bundle:///path/to/other/bundle'
 
 -- Attach a remote bundle
 ATTACH 'bundle+s3://bucket/path/to/bundle'
+
+-- Bulk load: skip per-file index rebuild, then refresh once at the end
+ATTACH 'jan.parquet' NO INDEX;
+ATTACH 'feb.parquet' NO INDEX;
+ATTACH 'mar.parquet' NO INDEX;
+REINDEX;
 ```
 
 See [Attaching Data](../guide/attaching.md) for details.
@@ -422,13 +433,21 @@ See [Data Sources](../guide/sources.md) for details.
 Discovers and attaches new files from defined sources.
 
 ```sql
-FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE]
-FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE]
+FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE] [NO INDEX]
+FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE] [NO INDEX]
 ```
 
 `DRY RUN` previews what would be added, replaced, or removed without executing any changes.
 
 `VERBOSE` switches the output table from a per-source summary to a row per Add/Replace/Remove action — useful for spotting exactly which files / partitions a fetch will touch. Combine the two (`DRY RUN VERBOSE`) for a per-file preview.
+
+`NO INDEX` skips the automatic index refresh that normally runs after a
+fetch. Use it when you want to defer the rebuild until you've finished
+several fetches in a row, then run [`REINDEX`](#reindex) once at the end.
+Indexes built before the fetch remain on disk untouched until you do —
+queries that hit only the previously-indexed blocks still use the index;
+queries that need data from the freshly-fetched blocks fall back to
+scanning until you reindex.
 
 **Output schemas:**
 
@@ -685,7 +704,10 @@ See [Indexing](../guide/indexing.md) for details.
 
 ### REINDEX
 
-Rebuilds all indexes, or a specific one.
+Rebuilds every defined index against the current set of blocks. Indexes
+are normally refreshed automatically after `ATTACH`, `REPLACE`, and
+`FETCH`; you only need to run `REINDEX` explicitly when those commands
+were issued with `NO INDEX`.
 
 ```sql
 REINDEX

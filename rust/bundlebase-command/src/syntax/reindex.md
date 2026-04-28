@@ -1,4 +1,7 @@
-Rebuild all indexes in the bundle. Use this after significant data changes to ensure all indexes are current.
+Rebuild all indexes in the bundle against the current set of blocks. Indexes
+are normally refreshed automatically after every ATTACH, REPLACE, and FETCH;
+you only need to run REINDEX explicitly after using `NO INDEX` to suppress
+that auto-refresh.
 
 ### Examples
 
