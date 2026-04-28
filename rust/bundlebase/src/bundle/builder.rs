@@ -318,13 +318,16 @@ impl BundleBuilder {
             pending_update_wheres: RwLock::new(Vec::new()),
         });
 
-        // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
-        // This overwrites the Bundle-facade providers registered by empty_internal(),
-        // so bundle_info tables show uncommitted changes from BundleBuilder.
-        crate::catalog::register_schema_providers(
-            &builder.bundle.ctx,
-            Arc::downgrade(&builder) as Weak<dyn BundleFacade>,
-        )?;
+        // Re-register schema providers and the search() UDTF with BundleBuilder as
+        // facade (using Weak to avoid Arc cycle). This overwrites the Bundle-facade
+        // registrations from empty_internal(), so bundle_info tables and search()
+        // see uncommitted changes from BundleBuilder.
+        let facade_weak = Arc::downgrade(&builder) as Weak<dyn BundleFacade>;
+        crate::catalog::register_schema_providers(&builder.bundle.ctx, facade_weak.clone())?;
+        builder.bundle.ctx.register_udtf(
+            "search",
+            Arc::new(crate::index::SearchTableFunction::new(facade_weak)),
+        );
 
         Ok(builder)
     }
@@ -370,13 +373,19 @@ impl BundleBuilder {
             pending_update_wheres: RwLock::new(Vec::new()),
         });
 
-        // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
-        // This overwrites the Bundle-facade providers registered by Bundle::open(),
-        // so bundle_info tables show uncommitted changes from BundleBuilder.
-        crate::catalog::register_schema_providers(
-            &builder.bundle.ctx,
-            Arc::downgrade(&builder) as Weak<dyn BundleFacade>,
-        )?;
+        // Re-register schema providers and the search() UDTF with BundleBuilder as
+        // facade (using Weak to avoid Arc cycle). This overwrites the Bundle-facade
+        // registrations from Bundle::open(), so bundle_info tables and search()
+        // see uncommitted changes from BundleBuilder. The search() UDTF re-registration
+        // is also load-bearing on its own: Bundle::open()'s weak ref points at the
+        // original Arc<Bundle>, which is dropped after extend() clones the Bundle into
+        // a new Arc — without this re-registration the upgrade fails at query time.
+        let facade_weak = Arc::downgrade(&builder) as Weak<dyn BundleFacade>;
+        crate::catalog::register_schema_providers(&builder.bundle.ctx, facade_weak.clone())?;
+        builder.bundle.ctx.register_udtf(
+            "search",
+            Arc::new(crate::index::SearchTableFunction::new(facade_weak)),
+        );
 
         Ok(builder)
     }

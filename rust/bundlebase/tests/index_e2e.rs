@@ -681,6 +681,54 @@ async fn test_search_single_column() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// Mimics the CLI REPL/Execute path: `Bundle::open(...)` followed by `.extend()`
+/// to get a BundleBuilder. Previously the `search()` UDTF was registered with
+/// a Weak<Bundle> on the original Arc<Bundle>; after `.extend()` cloned the
+/// Bundle into a new Arc and dropped the original, the weak ref failed to
+/// upgrade and search() returned "Bundle has been dropped".
+#[tokio::test]
+async fn test_search_after_open_extend() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("Text index created").await?;
+    drop(bundle);
+
+    // Mimic the REPL/Execute path
+    let opened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let builder = opened.extend(None).await?;
+
+    let stream = builder
+        .query(
+            "SELECT \"Index\", \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() after open+extend should return matching rows, got 0"
+    );
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_search_no_results() -> Result<(), BundlebaseError> {
     init();
