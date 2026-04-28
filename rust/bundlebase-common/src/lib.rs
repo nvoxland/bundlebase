@@ -73,8 +73,13 @@ mod format_version_tests {
 
     #[test]
     fn test_format_version_from_cargo() {
+        // Pin the parsed format version to whatever Cargo.toml currently
+        // declares — ensures `format_version()` keeps tracking the
+        // workspace version rather than drifting silently.
+        let cargo_version = env!("CARGO_PKG_VERSION");
+        let (expected_major, expected_minor) = parse_format_version(cargo_version);
         let (major, minor) = format_version();
-        assert_eq!(major, 0);
-        assert_eq!(minor, 9);
+        assert_eq!(major, expected_major);
+        assert_eq!(minor, expected_minor);
     }
 }

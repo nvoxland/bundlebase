@@ -4,7 +4,6 @@ use crate::builder::update::SetAssignment;
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropAlwaysUpdateOp;
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 

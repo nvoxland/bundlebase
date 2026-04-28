@@ -34,12 +34,14 @@ impl Connector for TestSource {
                 must_copy: true,
                 format: "parquet".into(),
                 version: "v1".into(),
+                num_rows: Some(3),
             },
             Location {
                 location: "test_file_2.parquet".into(),
                 must_copy: true,
                 format: "parquet".into(),
                 version: "v1".into(),
+                num_rows: Some(2),
             },
         ])
     }

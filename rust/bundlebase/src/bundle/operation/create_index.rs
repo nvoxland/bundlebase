@@ -76,8 +76,15 @@ impl Operation for CreateIndexOp {
             bundle_schema.columns().values().map(|s| s.as_str()).collect();
 
         if self.index_type.is_inverted() {
-            // Validate all columns exist and are string types
+            // Validate all columns exist and (for physical columns) are
+            // string-typed. Computed columns added via ADD COLUMN aren't
+            // in `physical_schema` because their type isn't known until
+            // operations are applied; their string-ness is checked at
+            // index-build time by `build_computed_text_index`.
             for (col, col_id) in columns.iter().zip(self.column_ids.iter()) {
+                if bundle_schema.is_computed(col_id) {
+                    continue;
+                }
                 let field = physical_ids
                     .iter()
                     .position(|id| id == col_id)

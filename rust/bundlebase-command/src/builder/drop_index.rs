@@ -3,7 +3,6 @@
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::bundle_schema;
 use bundlebase::bundle::operation::DropIndexOp;
 use bundlebase::BundleBuilder;
 use bundlebase::BundleFacade;

@@ -769,8 +769,8 @@ mod tests {
     #[test]
     fn test_parse_discover_json() {
         let json = r#"{"locations": [
-            {"location": "file1.parquet", "must_copy": true, "format": "parquet", "version": "v1"},
-            {"location": "file2.csv", "must_copy": false, "format": "csv"}
+            {"location": "file1.parquet", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": 100},
+            {"location": "file2.csv", "must_copy": false, "format": "csv", "num_rows": null}
         ]}"#;
         let locations = parse_discover_json(json).expect("should parse");
         assert_eq!(locations.len(), 2);

@@ -158,12 +158,14 @@ mod tests {
                     must_copy: true,
                     format: "parquet".into(),
                     version: "v1".into(),
+                    num_rows: None,
                 },
                 Location {
                     location: "file2.parquet".into(),
                     must_copy: true,
                     format: "parquet".into(),
                     version: "v1".into(),
+                    num_rows: None,
                 },
             ])
         }

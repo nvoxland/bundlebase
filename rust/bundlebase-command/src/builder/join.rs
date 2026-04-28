@@ -5,7 +5,6 @@ use crate::parser::{extract_string_content, parse_join_type};
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AttachBlockOp, CreateJoinOp};
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase::JoinTypeOption;
 use bundlebase_common::BundlebaseError;
@@ -127,7 +126,6 @@ impl BundleBuilderCommand for JoinCommand {
         // Note: join expressions reference columns from both the base pack and the join pack.
         // At this point only base pack columns are known; join pack columns will be added
         // to the translation at dataframe_join time.
-        let bundle_schema = builder.bundle_schema();
         let translated_expression = builder.translate_sql(&self.expression);
 
         // Step 1: Create a new pack with join metadata (stored with internal name names)

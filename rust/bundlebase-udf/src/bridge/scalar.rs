@@ -115,9 +115,10 @@ impl ScalarFunction {
     }
 
     /// Replace the DataFusion-visible name. Used by `FunctionRegistry` to
-    /// register UDFs under their stable internal `fn_<id>` name while the
-    /// inner `overloads` keep their original user-visible `NamespacedName`
-    /// for IPC bridge wire compatibility.
+    /// register UDFs under their stable internal `fn_<id>` name. The inner
+    /// `overloads` keep their original user-visible `NamespacedName`
+    /// because IPC/FFI dispatch passes the bare symbol name from
+    /// `entry.name.name` to the subprocess, not the wrapper's name.
     pub fn with_name(mut self, name: String) -> Self {
         self.name = name;
         self

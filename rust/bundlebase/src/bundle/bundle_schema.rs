@@ -362,18 +362,14 @@ impl BundleSchema {
 
     // --- SQL translation ---
 
-    /// Build a reverse map of user-visible name → internal name.
-    fn name_to_internal_name_map(&self) -> HashMap<String, String> {
+    /// Build a reverse map of user-visible column name → `col_<id>`.
+    /// `BundleBuilder::translate_sql` merges this with the analogous
+    /// function-name map from `FunctionRegistry`.
+    pub fn name_to_internal_name_map(&self) -> HashMap<String, String> {
         self.columns
             .iter()
             .map(|(id, user_name)| (user_name.clone(), generate_internal_name(id)))
             .collect()
-    }
-
-    /// Public alias of the column name map for callers that compose it with
-    /// other translations (e.g. UDF names).
-    pub fn name_to_internal_name_map_for_translate(&self) -> HashMap<String, String> {
-        self.name_to_internal_name_map()
     }
 
     /// Translate user-visible column names in a SQL fragment to stable internal names.

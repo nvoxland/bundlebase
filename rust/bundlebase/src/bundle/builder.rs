@@ -1443,7 +1443,7 @@ impl BundleBuilder {
     /// reference user-imported functions; the column-only call is fine
     /// when the fragment is column-only by construction.
     pub fn translate_sql(&self, sql: &str) -> String {
-        let mut name_map = self.bundle_schema().name_to_internal_name_map_for_translate();
+        let mut name_map = self.bundle_schema().name_to_internal_name_map();
         let fn_map = self
             .bundle
             .function_registry()

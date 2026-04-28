@@ -12,12 +12,16 @@ class Location:
         must_copy: Whether the data must be copied into the bundle (default True).
         format: File format (default "parquet").
         version: Version string for change detection (default "").
+        num_rows: Row count for this location, or None if unknown. The Rust
+            connector parser requires this field to be present (use ``None``
+            for "unknown"); the wire form serializes ``None`` as JSON null.
     """
 
     location: str
     must_copy: bool = True
     format: str = "parquet"
     version: str = ""
+    num_rows: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -25,6 +29,7 @@ class Location:
             "must_copy": self.must_copy,
             "format": self.format,
             "version": self.version,
+            "num_rows": self.num_rows,
         }
 
     @classmethod
@@ -34,6 +39,7 @@ class Location:
             must_copy=d.get("must_copy", True),
             format=d.get("format", "parquet"),
             version=d.get("version", ""),
+            num_rows=d.get("num_rows"),
         )
 
 

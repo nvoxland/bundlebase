@@ -5,7 +5,6 @@
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AlwaysDeleteOp, FilterOp};
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use tracing::debug;
@@ -59,7 +58,6 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column names to stable internal name references
-        let bundle_schema = builder.bundle_schema();
         let where_clause = builder.translate_sql(&self.where_clause);
 
         // 1. Immediately delete matching rows (same as regular DELETE)

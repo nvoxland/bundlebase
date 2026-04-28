@@ -10,6 +10,11 @@ pub struct Location {
     pub format: String,
     #[serde(default)]
     pub version: String,
+    /// Row count for this location, or `None` when unknown. Always
+    /// serialized (as integer or JSON null) — the Rust connector parser
+    /// requires the field to be present.
+    #[serde(default)]
+    pub num_rows: Option<u64>,
 }
 
 fn default_must_copy() -> bool {
@@ -27,6 +32,7 @@ impl Location {
             must_copy: true,
             format: "parquet".to_string(),
             version: String::new(),
+            num_rows: None,
         }
     }
 }
