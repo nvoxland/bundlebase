@@ -735,6 +735,85 @@ async fn test_auto_reindex_after_attach() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// Regression test for the block_ref-collision bug:
+/// when an index is built incrementally across multiple `IndexedBlocks`
+/// entries (CREATE INDEX → ATTACH → auto-reindex), each entry assigns
+/// local block_ref values starting at 0. The search code used to key
+/// score_map by `RowId.as_u64()` and walk all entries with overwriting
+/// inserts into block_id_to_ref, so:
+///   - rows whose row_number matched in entry #1 but not entry #2 still
+///     got pushed as hits when streaming the entry #2 block (false
+///     positives with the wrong content),
+///   - hits could be reported with scores stolen from a different entry.
+///
+/// We force this by attaching `customers-0-100.csv` (rows 1, 6, 27, 32,
+/// 34, 63 contain "Group") and then `customers-101-150.csv` (rows 7, 19,
+/// 30, 34, 39, 47 contain "Group") as two independent indexed entries.
+/// After the fix every returned Company must contain "group" — no
+/// company without it should leak through.
+#[tokio::test]
+async fn test_search_no_block_ref_collision_across_indexed_blocks_entries(
+) -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("first block + index").await?;
+
+    // Auto-reindex builds a SECOND IndexedBlocks entry covering the new block.
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+    bundle.commit("second block").await?;
+
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert_eq!(
+        num_rows, 12,
+        "expected exactly 12 'Group' matches across the two blocks (6 + 6); \
+         a higher count indicates collision-driven false positives"
+    );
+
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Company should be StringArray");
+        for i in 0..companies.len() {
+            let v = companies.value(i);
+            assert!(
+                v.to_lowercase().contains("group"),
+                "every returned row must contain 'group' (got {:?}) — \
+                 false positive points at block_ref collision",
+                v
+            );
+        }
+    }
+
+    Ok(())
+}
+
 /// `ATTACH … NO INDEX` opts out of the auto-reindex hook for that change,
 /// leaving existing indexes stale until the user runs an explicit `REINDEX`.
 #[tokio::test]

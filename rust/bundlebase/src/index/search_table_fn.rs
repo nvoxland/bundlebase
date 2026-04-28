@@ -315,34 +315,106 @@ impl TableProvider for SearchResultTableProvider {
         let output_schema = self.output_schema();
         let rewritten_query = self.rewrite_query_fields(&self.query);
 
-        // Step 1: Load text indexes and execute search across all indexed blocks
+        // Step 1: Identify which IndexedBlocks entry covers each currently-active
+        // block, build a unified block_ref namespace, and translate per-entry
+        // local block_refs into it.
+        //
+        // Each IndexedBlocks entry was built independently and assigns
+        // local block_ref values 0..N over its own `blocks()` list. With
+        // multiple entries (the normal state after the auto-reindex hook),
+        // those local refs collide across entries — an entry-#1 hit at
+        // (local_ref=0, row=5) packs to the same RowId.as_u64() as an
+        // entry-#2 hit at (local_ref=0, row=5). Translating into a unified
+        // namespace via RowId::with_block_ref makes score_map keys
+        // unambiguous and lets the streaming side in `open()` look hits up
+        // by the unified ref it's already using.
         let all_indexed_blocks = self.index_def.all_indexed_blocks();
-
         if all_indexed_blocks.is_empty() {
             return self.empty_exec(&output_schema, projection);
         }
 
-        // Build a map from BlockId -> block_ref (u16) preserving the order from index building.
-        // During index building, blocks are assigned sequential ObjectIdAlias values (0, 1, 2, ...)
-        // based on their position. We must use the same mapping here so that RowId block_refs match.
-        // NOTE: If multiple IndexedBlocks entries exist (from incremental indexing), block_refs
-        // could collide across entries. This works correctly when all blocks are in a single
-        // IndexedBlocks entry (the common case after reindex).
+        // Active (block_id, version) set for any column this index covers.
+        // A multi-column index needs a block to be active for ALL its
+        // columns; using the first column is sufficient because the index
+        // is only built when every indexed column is present in the block.
+        let first_col_id = self.index_def.column_ids().first().ok_or_else(|| {
+            DataFusionError::Internal("Index definition has no columns".to_string())
+        })?;
+        let active_blocks: Vec<(BlockId, String)> =
+            self.bundle_schema.blocks_for_column(first_col_id);
+
+        // For each (block_id, version), find the IndexedBlocks entry that
+        // covers it AND remember the entry's local_ref for that block.
+        //
+        // We walk entries newest-first so that if a block was reindexed
+        // (e.g. after REPLACE), we pick the most recent entry's coverage.
+        struct PerEntry {
+            indexed_blocks: Arc<bundlebase_common::IndexedBlocks>,
+            /// local_ref (position in entry.blocks()) → unified_ref (u16)
+            local_to_unified: HashMap<u16, u16>,
+        }
+        let mut per_entry: Vec<PerEntry> = Vec::new();
+        let mut entry_idx_by_path: HashMap<String, usize> = HashMap::new();
         let mut block_id_to_ref: HashMap<BlockId, u16> = HashMap::new();
-        for indexed_blocks in &all_indexed_blocks {
-            for (ref_idx, vb) in indexed_blocks.blocks().iter().enumerate() {
-                block_id_to_ref.insert(vb.block, ref_idx as u16);
-            }
+        let mut next_unified_ref: u16 = 0;
+
+        for (block_id, version) in &active_blocks {
+            let vb = bundlebase_common::VersionedBlockId::new(*block_id, version.clone());
+            let Some(entry) = self.index_def.indexed_blocks(&vb) else {
+                // Block isn't covered by any IndexedBlocks entry — fall
+                // through; the streaming side won't include it because no
+                // unified_ref is assigned, and a query that needs it will
+                // simply miss it (matching today's behaviour for unindexed
+                // blocks).
+                continue;
+            };
+            let blocks = entry.blocks();
+            let local_ref = blocks
+                .iter()
+                .position(|b| &b.block == block_id && &b.version == version)
+                .ok_or_else(|| {
+                    DataFusionError::Internal(format!(
+                        "indexed_blocks() returned an entry that does not contain block {:?}@{}",
+                        block_id, version
+                    ))
+                })? as u16;
+
+            // Assign a fresh unified_ref to this block (each unique BlockId
+            // gets exactly one, regardless of how many entries cover it).
+            let unified_ref = *block_id_to_ref.entry(*block_id).or_insert_with(|| {
+                let r = next_unified_ref;
+                next_unified_ref = next_unified_ref.checked_add(1).expect(
+                    "block_ref namespace exhausted (>65535 active blocks per index)",
+                );
+                r
+            });
+
+            let path = entry.path().to_string();
+            let idx = *entry_idx_by_path.entry(path).or_insert_with(|| {
+                per_entry.push(PerEntry {
+                    indexed_blocks: entry.clone(),
+                    local_to_unified: HashMap::new(),
+                });
+                per_entry.len() - 1
+            });
+            per_entry[idx].local_to_unified.insert(local_ref, unified_ref);
         }
 
-        // Collect (row_id, score) pairs from all indexed blocks
+        if per_entry.is_empty() {
+            return self.empty_exec(&output_schema, projection);
+        }
+
+        // Step 2: Run tantivy on each entry that actually covers an active
+        // block; translate hits into the unified namespace. Entries whose
+        // every block has been superseded simply aren't loaded — that's
+        // the per-entry skip-load mentioned in the plan.
         let mut row_id_scores: Vec<(RowId, f64)> = Vec::new();
         // Default to 10,000 results when no SQL LIMIT is specified.
         // This prevents unbounded result sets for broad search terms.
         let search_limit = limit.unwrap_or(10000);
 
-        for indexed_blocks in &all_indexed_blocks {
-            let index_path = indexed_blocks.path();
+        for entry in &per_entry {
+            let index_path = entry.indexed_blocks.path();
 
             let index_file =
                 ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())
@@ -364,7 +436,16 @@ impl TableProvider for SearchResultTableProvider {
                 .map_err(|e| DataFusionError::External(e))?;
 
             for result in results {
-                row_id_scores.push((result.row_id, result.score as f64));
+                let local_ref = result.row_id.block_ref().as_u16();
+                // Hits whose block is covered here at a version no longer
+                // active are silently dropped: their local_ref isn't in
+                // local_to_unified.
+                if let Some(&unified_ref) = entry.local_to_unified.get(&local_ref) {
+                    let unified_row_id = result
+                        .row_id
+                        .with_block_ref(ObjectIdAlias::from(unified_ref));
+                    row_id_scores.push((unified_row_id, result.score as f64));
+                }
             }
         }
 
