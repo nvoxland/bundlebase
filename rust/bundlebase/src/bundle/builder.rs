@@ -1277,6 +1277,10 @@ impl BundleBuilder {
         match result {
             Ok(_) => {
                 if !is_nested {
+                    if let Err(e) = self.auto_reindex_if_attach_or_replace().await {
+                        self.in_progress_change.write().take();
+                        return Err(e);
+                    }
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
@@ -1345,6 +1349,10 @@ impl BundleBuilder {
             Ok(_) => {
                 debug!("Command succeeded: {}", description);
                 if !is_nested {
+                    if let Err(e) = self.auto_reindex_if_attach_or_replace().await {
+                        self.in_progress_change.write().take();
+                        return Err(e);
+                    }
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
@@ -1394,6 +1402,33 @@ impl BundleBuilder {
             .function_registry()
             .write()
             .drop_temp(name, platform.as_ref())
+    }
+
+    /// If the still-open in-progress change contains any AttachBlock or
+    /// ReplaceBlock op AND the bundle has at least one index defined, run
+    /// `reindex_internal` so the new IndexBlocksOp(s) ride into the same
+    /// change. Called once per user-facing command at the outermost
+    /// finalize point of `do_change` / `run_command` — never mid-command.
+    async fn auto_reindex_if_attach_or_replace(&self) -> Result<(), BundlebaseError> {
+        let needs = self
+            .in_progress_change
+            .read()
+            .as_ref()
+            .is_some_and(|c| {
+                c.operations.iter().any(|op| {
+                    matches!(
+                        op,
+                        AnyOperation::AttachBlock(_) | AnyOperation::ReplaceBlock(_)
+                    )
+                })
+            });
+        if !needs {
+            return Ok(());
+        }
+        if self.bundle.indexes.read().is_empty() {
+            return Ok(());
+        }
+        self.reindex_internal().await
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.

@@ -681,6 +681,60 @@ async fn test_search_single_column() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// Verify that ATTACH after a text index has been defined automatically rebuilds
+/// the index so the new rows are immediately searchable, with no explicit REINDEX.
+/// Mirrors the claude-history failure mode: an empty bundle ships with the text
+/// index *definition* and no IndexBlocksOp; FETCH/ATTACH used to record only
+/// AttachBlockOp, leaving search_text_idx empty. The hook in do_change/run_command
+/// should fold an IndexBlocksOp into the same change.
+#[tokio::test]
+async fn test_auto_reindex_after_attach() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    // Create the text index first (no data yet → IndexedBlocks is empty).
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("init schema + index").await?;
+
+    // Now attach a fresh copy as a separate block. Without auto-reindex, the
+    // new block is unindexed and search() should miss its rows.
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    // customers-0-100.csv has 6 "Group" rows; customers-101-150.csv has 6
+    // more. Without auto-reindex, only the first block is searchable and
+    // we get ~6. With auto-reindex, both blocks are searchable.
+    assert!(
+        num_rows >= 12,
+        "search() should hit BOTH attached blocks after auto-reindex; got {} rows (expected ≥12)",
+        num_rows
+    );
+
+    Ok(())
+}
+
 /// Mimics the CLI REPL/Execute path: `Bundle::open(...)` followed by `.extend()`
 /// to get a BundleBuilder. Previously the `search()` UDTF was registered with
 /// a Weak<Bundle> on the original Arc<Bundle>; after `.extend()` cloned the
