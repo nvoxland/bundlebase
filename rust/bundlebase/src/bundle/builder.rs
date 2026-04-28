@@ -1281,6 +1281,7 @@ impl BundleBuilder {
                         self.in_progress_change.write().take();
                         return Err(e);
                     }
+                    self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
@@ -1353,6 +1354,7 @@ impl BundleBuilder {
                         self.in_progress_change.write().take();
                         return Err(e);
                     }
+                    self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
@@ -1439,6 +1441,72 @@ impl BundleBuilder {
     pub fn suppress_auto_reindex_for_current_change(&self) {
         if let Some(change) = self.in_progress_change.write().as_mut() {
             change.suppress_auto_reindex = true;
+        }
+    }
+
+    /// Drop `IndexedBlocks` entries from each `IndexDefinition` whose blocks
+    /// are no longer at their current version. Called at the outermost
+    /// finalize point of `do_change` / `run_command` when the just-completed
+    /// change contains a block-version-changing op (AttachBlock,
+    /// ReplaceBlock, DetachBlock). Without this, the runtime
+    /// `Vec<Arc<IndexedBlocks>>` grows unboundedly with commit history.
+    ///
+    /// The on-disk index files are NOT deleted — older manifests still
+    /// reference them, so opening the bundle pinned to a previous version
+    /// continues to find the matching index data.
+    fn prune_stale_index_entries_if_block_versions_changed(&self) {
+        // Combine committed bundle ops + completed pending changes + the
+        // still-open in-progress change. The latter is critical because
+        // the just-applied AttachBlock/ReplaceBlock/DetachBlock lives
+        // there and won't reach `status` until after this method returns.
+        let mut all_ops: Vec<AnyOperation> = self.bundle.operations.read().clone();
+        all_ops.extend(self.status().operations().into_iter());
+        let in_progress = self.in_progress_change.read();
+        let in_progress_ops: &[AnyOperation] = in_progress
+            .as_ref()
+            .map(|c| c.operations.as_slice())
+            .unwrap_or(&[]);
+        let touched = in_progress_ops.iter().any(|op| {
+            matches!(
+                op,
+                AnyOperation::AttachBlock(_)
+                    | AnyOperation::ReplaceBlock(_)
+                    | AnyOperation::DetachBlock(_)
+            )
+        });
+        if !touched {
+            return;
+        }
+        all_ops.extend(in_progress_ops.iter().cloned());
+        drop(in_progress);
+
+        let indexes = self.bundle.indexes.read().clone();
+        if indexes.is_empty() {
+            return;
+        }
+
+        // Walk every block-affecting op once to derive the current
+        // (BlockId → version) map. We can't use BundleSchema for this
+        // because BundleSchema::resolved doesn't process DetachBlock —
+        // it only tracks columns, not block lifecycle.
+        let mut current_versions: HashMap<BlockId, String> = HashMap::new();
+        for op in &all_ops {
+            match op {
+                AnyOperation::AttachBlock(attach) => {
+                    current_versions.insert(attach.id, attach.version.clone());
+                }
+                AnyOperation::ReplaceBlock(replace) => {
+                    current_versions.insert(replace.id, replace.new_version.clone());
+                }
+                AnyOperation::DetachBlock(detach) => {
+                    current_versions.remove(&detach.id);
+                }
+                _ => {}
+            }
+        }
+
+        for index_def in &indexes {
+            index_def.prune_stale_blocks(&current_versions);
         }
     }
 

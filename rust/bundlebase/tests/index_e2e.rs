@@ -735,6 +735,70 @@ async fn test_auto_reindex_after_attach() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// `IndexedBlocks` entries should be pruned from the runtime list once
+/// the blocks they cover are no longer at their current version. Without
+/// this, the runtime `Vec<Arc<IndexedBlocks>>` grows with commit history
+/// even though older entries are useless.
+#[tokio::test]
+async fn test_prune_stale_indexed_blocks_after_detach() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("first block + index").await?;
+    let count_after_first = bundle
+        .indexes()
+        .iter()
+        .find(|i| i.name() == "company_search")
+        .expect("index defined")
+        .all_indexed_blocks()
+        .len();
+    assert_eq!(count_after_first, 1, "one IndexedBlocks entry after CREATE INDEX");
+
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+    bundle.commit("second block").await?;
+    let count_after_second = bundle
+        .indexes()
+        .iter()
+        .find(|i| i.name() == "company_search")
+        .expect("index defined")
+        .all_indexed_blocks()
+        .len();
+    assert_eq!(count_after_second, 2, "second attach adds another IndexedBlocks entry");
+
+    // Detach the first block. The IndexedBlocks entry covering it should
+    // be pruned since its sole VersionedBlockId is no longer current.
+    let detach_path = test_datafile("customers-0-100.csv");
+    bundle.detach_block(&detach_path).await?;
+    bundle.commit("detach first block").await?;
+    let count_after_detach = bundle
+        .indexes()
+        .iter()
+        .find(|i| i.name() == "company_search")
+        .expect("index defined")
+        .all_indexed_blocks()
+        .len();
+    assert_eq!(
+        count_after_detach, 1,
+        "stale IndexedBlocks entry covering the detached block should have been pruned"
+    );
+
+    Ok(())
+}
+
 /// Regression test for the block_ref-collision bug:
 /// when an index is built incrementally across multiple `IndexedBlocks`
 /// entries (CREATE INDEX → ATTACH → auto-reindex), each entry assigns
