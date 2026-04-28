@@ -128,7 +128,7 @@ impl BundleBuilderCommand for JoinCommand {
         // At this point only base pack columns are known; join pack columns will be added
         // to the translation at dataframe_join time.
         let bundle_schema = builder.bundle_schema();
-        let translated_expression = bundle_schema.translate_sql(&self.expression);
+        let translated_expression = builder.translate_sql(&self.expression);
 
         // Step 1: Create a new pack with join metadata (stored with internal name names)
         let join_pack_id = ObjectId::generate();

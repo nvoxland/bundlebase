@@ -370,54 +370,19 @@ impl BundleSchema {
             .collect()
     }
 
+    /// Public alias of the column name map for callers that compose it with
+    /// other translations (e.g. UDF names).
+    pub fn name_to_internal_name_map_for_translate(&self) -> HashMap<String, String> {
+        self.name_to_internal_name_map()
+    }
+
     /// Translate user-visible column names in a SQL fragment to stable internal names.
     ///
     /// Uses word-boundary matching: only replaces identifiers that appear as whole words
     /// (not inside other identifiers). Handles both bare and double-quoted identifiers.
     /// Longer names are replaced first to avoid partial matches.
     pub fn translate_sql(&self, sql: &str) -> String {
-        let name_map = self.name_to_internal_name_map();
-
-        // Sort by name length descending to avoid partial matches (e.g., "id" inside "identity")
-        let mut names: Vec<(&String, &String)> = name_map.iter().collect();
-        names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-
-        let mut result = sql.to_string();
-        for (user_name, internal_col_name) in names {
-            // Replace double-quoted identifiers: "name" → internal name
-            let quoted = format!("\"{}\"", user_name);
-            let quoted_replacement = format!("\"{}\"", internal_col_name);
-            result = result.replace(&quoted, &quoted_replacement);
-
-            // Replace bare identifiers using word-boundary matching
-            // A word boundary is: start of string, non-alphanumeric/underscore character
-            let mut new_result = String::with_capacity(result.len());
-            let name_bytes = user_name.as_bytes();
-            let result_bytes = result.as_bytes();
-            let mut i = 0;
-            while i < result_bytes.len() {
-                if i + name_bytes.len() <= result_bytes.len()
-                    && &result_bytes[i..i + name_bytes.len()] == name_bytes
-                {
-                    // Check left boundary: start of string or non-identifier char
-                    let left_ok = i == 0 || !is_ident_char(result_bytes[i - 1]);
-                    // Check right boundary: end of string or non-identifier char
-                    let right_ok = i + name_bytes.len() == result_bytes.len()
-                        || !is_ident_char(result_bytes[i + name_bytes.len()]);
-
-                    if left_ok && right_ok {
-                        new_result.push_str(internal_col_name);
-                        i += name_bytes.len();
-                        continue;
-                    }
-                }
-                new_result.push(result_bytes[i] as char);
-                i += 1;
-            }
-            result = new_result;
-        }
-
-        result
+        translate_identifiers_in_sql(sql, &self.name_to_internal_name_map())
     }
 
     /// Rename DataFrame columns from internal names to user-visible names.
@@ -448,6 +413,48 @@ impl Deref for BundleSchema {
 /// Return the stable internal column name for a ColumnId: `col_<hex_id>`.
 pub fn generate_internal_name(id: &ColumnId) -> String {
     format!("{}{}", INTERNAL_NAME_PREFIX, id)
+}
+
+/// Word-boundary identifier replacement. Used by both column-name and
+/// function-name SQL translation: walks `sql`, replaces every match of a
+/// key in `name_map` with its value, but only when the match is a whole
+/// identifier (not embedded in a longer identifier). Also rewrites
+/// double-quoted forms `"name"` → `"replacement"`. Longer names go first
+/// so substring matches don't fire (e.g. `id` inside `identity`).
+pub fn translate_identifiers_in_sql(sql: &str, name_map: &HashMap<String, String>) -> String {
+    let mut names: Vec<(&String, &String)> = name_map.iter().collect();
+    names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+    let mut result = sql.to_string();
+    for (user_name, internal_name) in names {
+        let quoted = format!("\"{}\"", user_name);
+        let quoted_replacement = format!("\"{}\"", internal_name);
+        result = result.replace(&quoted, &quoted_replacement);
+
+        let mut new_result = String::with_capacity(result.len());
+        let name_bytes = user_name.as_bytes();
+        let result_bytes = result.as_bytes();
+        let mut i = 0;
+        while i < result_bytes.len() {
+            if i + name_bytes.len() <= result_bytes.len()
+                && &result_bytes[i..i + name_bytes.len()] == name_bytes
+            {
+                let left_ok = i == 0 || !is_ident_char(result_bytes[i - 1]);
+                let right_ok = i + name_bytes.len() == result_bytes.len()
+                    || !is_ident_char(result_bytes[i + name_bytes.len()]);
+
+                if left_ok && right_ok {
+                    new_result.push_str(internal_name);
+                    i += name_bytes.len();
+                    continue;
+                }
+            }
+            new_result.push(result_bytes[i] as char);
+            i += 1;
+        }
+        result = new_result;
+    }
+    result
 }
 
 /// Parse a `col_<hex_id>` string back into a ColumnId.

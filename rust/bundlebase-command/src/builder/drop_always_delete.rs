@@ -52,8 +52,7 @@ impl BundleBuilderCommand for DropAlwaysDeleteCommand {
         // Translate user-visible column names to stable internal name references
         // so the WHERE clause matches the stored rule format.
         let translated = self.where_clause.as_ref().map(|wc| {
-            let bundle_schema = builder.bundle_schema();
-            bundle_schema.translate_sql(wc)
+                        builder.translate_sql(wc)
         });
 
         let op = DropAlwaysDeleteOp::new(translated.clone());

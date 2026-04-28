@@ -16,8 +16,8 @@ pub mod connector_entry {
 }
 pub mod function_entry {
     pub use bundlebase_udf::{
-        parse_function_name, validate_kind_consistency, FunctionEntry, FunctionKind,
-        FunctionRegistry,
+        internal_function_name, parse_function_name, validate_kind_consistency, FunctionEntry,
+        FunctionKind, FunctionRegistry,
     };
 }
 pub mod deleted_row_filter;

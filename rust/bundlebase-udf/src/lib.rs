@@ -16,7 +16,8 @@ pub use bridge::scalar::ScalarFunction;
 pub use bridge::version_function::VersionFunction;
 pub use connector_entry::{parse_connector_name, resolve_connector, ConnectorEntry};
 pub use function_entry::{
-    parse_function_name, validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry,
+    internal_function_name, parse_function_name, validate_kind_consistency, FunctionEntry,
+    FunctionKind, FunctionRegistry,
 };
 pub use runtime::{RuntimeType, UdfRuntime};
 

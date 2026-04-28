@@ -71,7 +71,7 @@ impl BundleBuilderCommand for CreateViewCommand {
 
         // Translate user-visible column names to stable internal name references
         let bundle_schema = builder.bundle_schema();
-        let translated_sql = bundle_schema.translate_sql(&self.sql);
+        let translated_sql = builder.translate_sql(&self.sql);
 
         let (op, _view_builder) = CreateViewOp::setup(&self.name, &translated_sql, builder).await?;
         builder.apply_operation(op.into()).await?;

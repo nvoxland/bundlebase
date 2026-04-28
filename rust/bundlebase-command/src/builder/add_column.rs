@@ -73,7 +73,7 @@ impl BundleBuilderCommand for AddColumnCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate column names in the expression to stable internal name references
         let bundle_schema = builder.bundle_schema();
-        let translated_expression = bundle_schema.translate_sql(&self.expression);
+        let translated_expression = builder.translate_sql(&self.expression);
 
         builder
             .apply_operation(AddColumnOp::setup(&self.name, &translated_expression).into())

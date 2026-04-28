@@ -113,6 +113,15 @@ impl ScalarFunction {
             subprocess_cache,
         })
     }
+
+    /// Replace the DataFusion-visible name. Used by `FunctionRegistry` to
+    /// register UDFs under their stable internal `fn_<id>` name while the
+    /// inner `overloads` keep their original user-visible `NamespacedName`
+    /// for IPC bridge wire compatibility.
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
 }
 
 impl ScalarUDFImpl for ScalarFunction {

@@ -109,6 +109,12 @@ impl AggregateFunction {
             subprocess_cache,
         })
     }
+
+    /// Replace the DataFusion-visible name. Mirrors `ScalarFunction::with_name`.
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
 }
 
 impl AggregateUDFImpl for AggregateFunction {

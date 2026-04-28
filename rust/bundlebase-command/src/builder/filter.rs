@@ -62,7 +62,7 @@ impl BundleBuilderCommand for FilterCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column names to stable internal name references
         let bundle_schema = builder.bundle_schema();
-        let translated_query = bundle_schema.translate_sql(&self.query);
+        let translated_query = builder.translate_sql(&self.query);
 
         builder
             .apply_operation(FilterOp::new(&translated_query, self.params.clone()).into())

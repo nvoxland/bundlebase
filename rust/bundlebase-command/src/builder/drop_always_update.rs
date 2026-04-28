@@ -93,8 +93,7 @@ impl BundleBuilderCommand for DropAlwaysUpdateCommand {
         // Translate user-visible column names to stable internal name references
         // so the rule text matches the stored rule format.
         let translated = self.rule_text.as_ref().map(|rt| {
-            let bundle_schema = builder.bundle_schema();
-            bundle_schema.translate_sql(rt)
+                        builder.translate_sql(rt)
         });
 
         let op = DropAlwaysUpdateOp::new(translated.clone());

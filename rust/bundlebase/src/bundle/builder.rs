@@ -1434,6 +1434,27 @@ impl BundleBuilder {
         self.reindex_internal().await
     }
 
+    /// Translate a user-visible SQL fragment to one DataFusion can run by
+    /// rewriting both column and function identifiers to their stable
+    /// internal names (`col_<id>` / `fn_<id>`). User-name → internal-name
+    /// mappings are pulled from the live `BundleSchema` and
+    /// `FunctionRegistry`. Use this in place of
+    /// `bundle_schema.translate_sql(...)` whenever the fragment may
+    /// reference user-imported functions; the column-only call is fine
+    /// when the fragment is column-only by construction.
+    pub fn translate_sql(&self, sql: &str) -> String {
+        let mut name_map = self.bundle_schema().name_to_internal_name_map_for_translate();
+        let fn_map = self
+            .bundle
+            .function_registry()
+            .read()
+            .name_to_internal_name();
+        for (k, v) in fn_map {
+            name_map.insert(k, v);
+        }
+        crate::bundle::bundle_schema::translate_identifiers_in_sql(sql, &name_map)
+    }
+
     /// Mark the in-progress change as opting out of the auto-reindex hook.
     /// Used by `ATTACH … NO INDEX` / `FETCH … NO INDEX` so the user can
     /// defer indexing until they explicitly run `REINDEX`. Silently no-ops

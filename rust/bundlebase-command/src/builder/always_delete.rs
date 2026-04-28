@@ -60,7 +60,7 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column names to stable internal name references
         let bundle_schema = builder.bundle_schema();
-        let where_clause = bundle_schema.translate_sql(&self.where_clause);
+        let where_clause = builder.translate_sql(&self.where_clause);
 
         // 1. Immediately delete matching rows (same as regular DELETE)
         let delete_rowids = builder.select_row_ids(&where_clause).await?;

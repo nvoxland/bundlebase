@@ -17,8 +17,20 @@ use datafusion::logical_expr::ScalarUDF;
 use datafusion::prelude::SessionContext;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+
+const INTERNAL_FUNCTION_PREFIX: &str = "fn_";
+
+/// Stable internal name for a registered UDF: `fn_<hex_id>`.
+///
+/// DataFusion sees only this name; user-visible names live in
+/// `FunctionRegistry::name_to_internal_id`. RENAME FUNCTION updates the
+/// map but leaves the DataFusion registration alone.
+pub fn internal_function_name(id: &ObjectId) -> String {
+    format!("{}{}", INTERNAL_FUNCTION_PREFIX, id)
+}
 
 /// Whether a function is scalar (row → row), aggregate (many rows → one result),
 /// or table-valued (returns a table).
@@ -91,6 +103,12 @@ pub struct FunctionEntry {
 #[derive(Clone)]
 pub struct FunctionRegistry {
     entries: Vec<FunctionEntry>,
+    /// Stable internal ObjectId per user-visible function name. The DataFusion
+    /// registration uses `fn_<id>`, so RENAME FUNCTION moves a key in this map
+    /// but never deregisters/re-registers the underlying composite UDF.
+    /// First registration of a name claims a fresh id (the first overload's
+    /// ObjectId); subsequent overloads of the same name reuse it.
+    name_to_internal_id: HashMap<String, ObjectId>,
     data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
     ctx: Arc<SessionContext>,
     subprocess_cache: SubprocessCache,
@@ -112,10 +130,24 @@ impl FunctionRegistry {
     ) -> Self {
         Self {
             entries: Vec::new(),
+            name_to_internal_id: HashMap::new(),
             data_dir,
             ctx,
             subprocess_cache,
         }
+    }
+
+    /// Stable internal ObjectId for a user-visible function name, if registered.
+    pub fn internal_id(&self, name: &str) -> Option<ObjectId> {
+        self.name_to_internal_id.get(name).copied()
+    }
+
+    /// Build a `user_name → fn_<id>` map for SQL translation.
+    pub fn name_to_internal_name(&self) -> HashMap<String, String> {
+        self.name_to_internal_id
+            .iter()
+            .map(|(name, id)| (name.clone(), internal_function_name(id)))
+            .collect()
     }
 
     /// Add a function entry to the registry without registering with DataFusion.
@@ -228,15 +260,31 @@ impl FunctionRegistry {
     }
 
     /// Resolve all overloads for a name and register them as a composite
-    /// DataFusion UDF/UDAF/UDTF using the registry's session context.
+    /// DataFusion UDF/UDAF/UDTF under the stable internal name `fn_<id>`.
     ///
-    /// Uses the registry's `data_dir` to resolve bundle-relative entrypoint paths
-    /// and `subprocess_cache` for IPC-based functions.
-    pub fn register_functions_for_name(&self, name: &str) -> Result<(), BundlebaseError> {
+    /// The internal id is assigned the first time a name is registered and
+    /// reused for every subsequent overload — so RENAME FUNCTION can move
+    /// the user-visible mapping without re-registering anything in
+    /// DataFusion. SQL translation at command time rewrites user-visible
+    /// names to `fn_<id>` before queries reach DataFusion.
+    ///
+    /// Uses the registry's `data_dir` to resolve bundle-relative entrypoint
+    /// paths and `subprocess_cache` for IPC-based functions.
+    pub fn register_functions_for_name(&mut self, name: &str) -> Result<(), BundlebaseError> {
         let overloads = self.resolve_all(name);
         if overloads.is_empty() {
+            // Name has no live entries; release its internal id slot.
+            self.name_to_internal_id.remove(name);
             return Ok(());
         }
+
+        // Reuse the existing internal id, or claim the first overload's
+        // ObjectId on first registration.
+        let internal_id = *self
+            .name_to_internal_id
+            .entry(name.to_string())
+            .or_insert_with(|| overloads[0].id);
+        let internal_name = internal_function_name(&internal_id);
 
         let data_dir = self.data_dir.read().clone();
 
@@ -254,8 +302,11 @@ impl FunctionRegistry {
         match kind {
             FunctionKind::Scalar => {
                 use crate::bridge::scalar::ScalarFunction;
-                let func =
-                    ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
+                let func = ScalarFunction::new_composite(
+                    overloads,
+                    Arc::clone(&self.subprocess_cache),
+                )?
+                .with_name(internal_name.clone());
                 self.ctx.register_udf(ScalarUDF::from(func));
             }
             FunctionKind::Aggregate => {
@@ -264,7 +315,8 @@ impl FunctionRegistry {
                 let agg = AggregateFunction::new_composite(
                     overloads,
                     Arc::clone(&self.subprocess_cache),
-                )?;
+                )?
+                .with_name(internal_name.clone());
                 self.ctx.register_udaf(AggregateUDF::from(agg));
             }
             FunctionKind::TableValued => {
@@ -394,10 +446,15 @@ impl FunctionRegistry {
 
     // --- Composite operations (mutate + register) ---
 
-    /// Deregister a function from DataFusion by name (both UDF and UDAF).
-    fn deregister(&self, name: &str) {
-        let _ = self.ctx.deregister_udf(name);
-        let _ = self.ctx.deregister_udaf(name);
+    /// Deregister the DataFusion UDF/UDAF for a user-visible name, if any.
+    /// Looks up the internal `fn_<id>` name from the registry's mapping —
+    /// the user-visible name is never seen by DataFusion directly.
+    fn deregister_by_user_name(&self, name: &str) {
+        if let Some(id) = self.name_to_internal_id.get(name) {
+            let internal = internal_function_name(id);
+            let _ = self.ctx.deregister_udf(&internal);
+            let _ = self.ctx.deregister_udaf(&internal);
+        }
     }
 
     /// Look up a function name from a set of entry IDs.
@@ -435,45 +492,65 @@ impl FunctionRegistry {
         self.register_functions_for_name(&name)
     }
 
-    /// Remove function entries by ID, deregister from DataFusion, and re-register remaining overloads.
+    /// Remove function entries by ID and re-register the remaining overloads
+    /// (under the SAME stable internal `fn_<id>`). If no overloads remain,
+    /// deregister the internal name and release its slot.
     pub fn drop_by_ids(&mut self, ids: &[ObjectId]) -> Result<(), BundlebaseError> {
         let name = self.name_for_ids(ids);
         self.remove_by_ids(ids);
 
         if let Some(name) = name {
-            self.deregister(&name);
-            self.register_functions_for_name(&name)?;
+            if self.resolve_all(&name).is_empty() {
+                self.deregister_by_user_name(&name);
+                self.name_to_internal_id.remove(&name);
+            } else {
+                self.register_functions_for_name(&name)?;
+            }
         }
         Ok(())
     }
 
-    /// Rename function entries by ID, deregister old name, and register under new name.
+    /// Rename function entries by ID. The DataFusion registration is keyed
+    /// off the stable internal `fn_<id>` and is left untouched — this is a
+    /// pure metadata move on `name_to_internal_id` plus updating the entry
+    /// `name` fields.
     pub fn rename_by_ids(
         &mut self,
         ids: &[ObjectId],
         new_name: &NamespacedName,
     ) -> Result<(), BundlebaseError> {
-        if let Some(old_name) = self.name_for_ids(ids) {
-            self.deregister(&old_name);
-        }
+        let old_name = self.name_for_ids(ids);
 
         self.rename_entries(ids, new_name);
-        self.register_functions_for_name(&new_name.to_string())
+
+        if let Some(old_name) = old_name {
+            if let Some(internal_id) = self.name_to_internal_id.remove(&old_name) {
+                self.name_to_internal_id
+                    .insert(new_name.to_string(), internal_id);
+            }
+        }
+        Ok(())
     }
 
-    /// Remove temporary function entries, deregister, and re-register remaining overloads.
+    /// Remove temporary function entries. If overloads remain for the name,
+    /// re-register the composite (same internal id); otherwise drop the slot.
     pub fn drop_temp(
         &mut self,
         name: &str,
         platform: Option<&Platform>,
     ) -> Result<usize, BundlebaseError> {
-        self.deregister(name);
         let removed = self.remove(name, platform, true);
-        self.register_functions_for_name(name)?;
+        if self.resolve_all(name).is_empty() {
+            self.deregister_by_user_name(name);
+            self.name_to_internal_id.remove(name);
+        } else {
+            self.register_functions_for_name(name)?;
+        }
         Ok(removed)
     }
 
-    /// Rename temporary function entries, with validation, deregistration, and re-registration.
+    /// Rename temporary function entries. Like `rename_by_ids`, this is a
+    /// metadata-only move — the DataFusion registration stays put.
     pub fn rename_temp(
         &mut self,
         old_name: &str,
@@ -502,9 +579,11 @@ impl FunctionRegistry {
             .into());
         }
 
-        self.deregister(old_name);
         self.rename_temp_entries(old_name, new_name);
-        self.register_functions_for_name(&new_name_str)
+        if let Some(internal_id) = self.name_to_internal_id.remove(old_name) {
+            self.name_to_internal_id.insert(new_name_str, internal_id);
+        }
+        Ok(())
     }
 }
 
@@ -1076,5 +1155,103 @@ mod tests {
         let names = reg.temporary_only_names();
         assert_eq!(names.len(), 1);
         assert!(names.contains(&"test.temp_only".to_string()));
+    }
+
+    // ==================== fn_<id> stable internal name tests ====================
+    use datafusion::execution::FunctionRegistry as DfFunctionRegistry;
+
+
+    /// `register_functions_for_name` should register the composite UDF in
+    /// DataFusion under `fn_<id>` rather than the user-visible name. The
+    /// id is the first overload's ObjectId and stays stable for the life
+    /// of the name.
+    #[test]
+    fn test_register_uses_fn_internal_name() {
+        let mut reg = test_registry();
+        let entry = make_entry("test.foo", "a", false);
+        let entry_id = entry.id;
+        reg.add_and_register(entry).expect("add_and_register");
+
+        // Internal id is the entry's ObjectId.
+        assert_eq!(reg.internal_id("test.foo"), Some(entry_id));
+
+        // DataFusion sees the function under fn_<id>, not under "test.foo".
+        let internal = internal_function_name(&entry_id);
+        let session = &reg.ctx;
+        assert!(
+            session.udf(&internal).is_ok(),
+            "udf '{}' should be registered with DataFusion",
+            internal
+        );
+        assert!(
+            session.udf("test.foo").is_err(),
+            "user-visible name should NOT be registered with DataFusion"
+        );
+    }
+
+    /// Multiple overloads of the same name share one stable `fn_<id>` —
+    /// the first overload's id wins; subsequent overloads do not get a
+    /// fresh DataFusion registration of their own.
+    #[test]
+    fn test_overloads_share_internal_id() {
+        let mut reg = test_registry();
+        let mut e1 = make_entry("test.foo", "int_logic", false);
+        e1.input_types = vec![DataType::Int64];
+        let id1 = e1.id;
+        reg.add_and_register(e1).expect("add e1");
+
+        let mut e2 = make_entry("test.foo", "str_logic", false);
+        e2.input_types = vec![DataType::Utf8];
+        reg.add_and_register(e2).expect("add e2");
+
+        assert_eq!(reg.internal_id("test.foo"), Some(id1));
+        // Composite registered exactly once under fn_<id1>.
+        assert!(reg.ctx.udf(&internal_function_name(&id1)).is_ok());
+    }
+
+    /// RENAME FUNCTION must be metadata-only: the DataFusion registration
+    /// keeps its `fn_<id>` name; only `name_to_internal_id` shifts the key
+    /// from old → new.
+    #[test]
+    fn test_rename_does_not_touch_datafusion() {
+        let mut reg = test_registry();
+        let entry = make_entry("test.foo", "a", false);
+        let entry_id = entry.id;
+        reg.add_and_register(entry).expect("add");
+
+        let internal = internal_function_name(&entry_id);
+        assert!(reg.ctx.udf(&internal).is_ok());
+
+        let new_name = NamespacedName::new("test", "bar");
+        reg.rename_by_ids(&[entry_id], &new_name).expect("rename");
+
+        // Internal id moved from foo → bar but DataFusion registration is
+        // still keyed by fn_<id>.
+        assert_eq!(reg.internal_id("test.foo"), None);
+        assert_eq!(reg.internal_id("test.bar"), Some(entry_id));
+        assert!(
+            reg.ctx.udf(&internal).is_ok(),
+            "fn_<id> registration should survive rename"
+        );
+    }
+
+    /// DROP of all overloads should release the `fn_<id>` slot AND
+    /// deregister it from DataFusion (otherwise an orphan UDF lingers).
+    #[test]
+    fn test_drop_all_releases_internal_id() {
+        let mut reg = test_registry();
+        let entry = make_entry("test.foo", "a", false);
+        let entry_id = entry.id;
+        reg.add_and_register(entry).expect("add");
+        let internal = internal_function_name(&entry_id);
+        assert!(reg.ctx.udf(&internal).is_ok());
+
+        reg.drop_by_ids(&[entry_id]).expect("drop");
+
+        assert_eq!(reg.internal_id("test.foo"), None);
+        assert!(
+            reg.ctx.udf(&internal).is_err(),
+            "fn_<id> registration must be deregistered when all overloads are dropped"
+        );
     }
 }

@@ -101,19 +101,19 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate user-visible column names to stable internal name references
+        // Translate user-visible column / function names to stable internal references
         let bundle_schema = builder.bundle_schema();
-        let where_clause = bundle_schema.translate_sql(&self.where_clause);
+        let where_clause = builder.translate_sql(&self.where_clause);
 
         let columns: Vec<String> = self
             .assignments
             .iter()
-            .map(|a| bundle_schema.translate_sql(&a.column))
+            .map(|a| builder.translate_sql(&a.column))
             .collect();
         let expressions: Vec<String> = self
             .assignments
             .iter()
-            .map(|a| bundle_schema.translate_sql(&a.expression))
+            .map(|a| builder.translate_sql(&a.expression))
             .collect();
 
         // Build set clause with internal name names
