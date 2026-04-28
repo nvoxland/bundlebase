@@ -16,6 +16,9 @@ pub struct AttachCommand {
     pub path: String,
     /// The pack to attach to (None or "base" for base pack, otherwise join name)
     pub pack: Option<String>,
+    /// When true, suppress the auto-reindex hook so existing indexes remain
+    /// stale until the user runs an explicit REINDEX.
+    pub no_index: bool,
 }
 
 impl AttachCommand {
@@ -24,7 +27,14 @@ impl AttachCommand {
         Self {
             path: path.into(),
             pack,
+            no_index: false,
         }
+    }
+
+    /// Builder helper: set the `NO INDEX` flag.
+    pub fn with_no_index(mut self, no_index: bool) -> Self {
+        self.no_index = no_index;
+        self
     }
 }
 
@@ -36,6 +46,7 @@ impl CommandParsing for AttachCommand {
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut path = None;
         let mut pack = None;
+        let mut no_index = false;
         let raw = pair.as_str().to_string();
 
         for inner_pair in pair.into_inner() {
@@ -50,6 +61,9 @@ impl CommandParsing for AttachCommand {
                     if pack.is_none() {
                         pack = Some(extract_identifier(&inner_pair));
                     }
+                }
+                Rule::no_index => {
+                    no_index = true;
                 }
                 _ => {}
             }
@@ -73,12 +87,12 @@ impl CommandParsing for AttachCommand {
         let path =
             path.ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
 
-        Ok(AttachCommand::new(path, pack))
+        Ok(AttachCommand::new(path, pack).with_no_index(no_index))
     }
 
     fn to_statement(&self) -> String {
         use crate::parser::escape_string;
-        match &self.pack {
+        let mut out = match &self.pack {
             Some(pack) if pack != "base" => {
                 format!(
                     "ATTACH {} TO {}",
@@ -87,7 +101,11 @@ impl CommandParsing for AttachCommand {
                 )
             }
             _ => format!("ATTACH {}", escape_string(&self.path)),
+        };
+        if self.no_index {
+            out.push_str(" NO INDEX");
         }
+        out
     }
 }
 
@@ -95,6 +113,9 @@ impl BundleBuilderCommand for AttachCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        if self.no_index {
+            builder.suppress_auto_reindex_for_current_change();
+        }
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
@@ -236,6 +257,39 @@ mod parsing_tests {
                 assert_eq!(c.path, "more_users.parquet");
                 assert_eq!(c.pack, Some("users".to_string()));
             }
+            _ => panic!("Expected Attach variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_attach_no_index() {
+        let cmd = parse_command("ATTACH 'data.parquet' NO INDEX").unwrap();
+        match cmd {
+            BundleCommand::Attach(c) => {
+                assert_eq!(c.path, "data.parquet");
+                assert!(c.no_index, "NO INDEX flag should be set");
+            }
+            _ => panic!("Expected Attach variant"),
+        }
+
+        let cmd = parse_command("ATTACH 'd.csv' TO users NO INDEX").unwrap();
+        match cmd {
+            BundleCommand::Attach(c) => {
+                assert_eq!(c.pack, Some("users".to_string()));
+                assert!(c.no_index);
+            }
+            _ => panic!("Expected Attach variant"),
+        }
+    }
+
+    #[test]
+    fn test_attach_no_index_round_trip() {
+        let cmd = AttachCommand::new("data.csv", None).with_no_index(true);
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "ATTACH 'data.csv' NO INDEX");
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Attach(c) => assert!(c.no_index),
             _ => panic!("Expected Attach variant"),
         }
     }

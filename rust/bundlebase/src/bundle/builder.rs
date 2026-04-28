@@ -1415,12 +1415,13 @@ impl BundleBuilder {
             .read()
             .as_ref()
             .is_some_and(|c| {
-                c.operations.iter().any(|op| {
-                    matches!(
-                        op,
-                        AnyOperation::AttachBlock(_) | AnyOperation::ReplaceBlock(_)
-                    )
-                })
+                !c.suppress_auto_reindex
+                    && c.operations.iter().any(|op| {
+                        matches!(
+                            op,
+                            AnyOperation::AttachBlock(_) | AnyOperation::ReplaceBlock(_)
+                        )
+                    })
             });
         if !needs {
             return Ok(());
@@ -1429,6 +1430,16 @@ impl BundleBuilder {
             return Ok(());
         }
         self.reindex_internal().await
+    }
+
+    /// Mark the in-progress change as opting out of the auto-reindex hook.
+    /// Used by `ATTACH … NO INDEX` / `FETCH … NO INDEX` so the user can
+    /// defer indexing until they explicitly run `REINDEX`. Silently no-ops
+    /// when called outside a change.
+    pub fn suppress_auto_reindex_for_current_change(&self) {
+        if let Some(change) = self.in_progress_change.write().as_mut() {
+            change.suppress_auto_reindex = true;
+        }
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.

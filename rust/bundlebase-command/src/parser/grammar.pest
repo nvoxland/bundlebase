@@ -385,8 +385,10 @@ filter_query = @{
 //   ATTACH 'data.csv' WITH (delimiter = ',', header = true)
 
 attach_stmt = {
-    ^"attach" ~ quoted_string ~ (^"to" ~ identifier)? ~ (^"with" ~ with_options)?
+    ^"attach" ~ quoted_string ~ (^"to" ~ identifier)? ~ (^"with" ~ with_options)? ~ no_index?
 }
+
+no_index = { ^"no" ~ ^"index" }
 
 with_options = {
     "(" ~ option_pair ~ ("," ~ option_pair)* ~ ")"
@@ -627,7 +629,7 @@ expected_schema_column = {
 //   FETCH ALL ADD VERBOSE        -- emit one row per file (location, action, version, num_rows)
 //   FETCH ALL SYNC DRY RUN VERBOSE -- per-file preview of a sync
 fetch_stmt = {
-    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ fetch_dry_run? ~ fetch_verbose?
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ fetch_dry_run? ~ fetch_verbose? ~ no_index?
 }
 
 fetch_mode = { ^"add" | ^"update" | ^"sync" }

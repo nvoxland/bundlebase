@@ -89,6 +89,7 @@ impl CreateViewOp {
                 id: Uuid::new_v4(),
                 description: format!("Define view '{}'", name),
                 operations: operations.clone(),
+                suppress_auto_reindex: false,
             }],
         };
 

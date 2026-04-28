@@ -113,6 +113,13 @@ pub struct BundleChange {
     pub id: Uuid,
     pub description: String,
     pub operations: Vec<AnyOperation>,
+    /// Runtime-only flag: when set, the auto-reindex hook in
+    /// `BundleBuilder::do_change` / `run_command` is skipped for this change
+    /// even if it contains AttachBlock/ReplaceBlock ops. Set by commands like
+    /// `ATTACH … NO INDEX` and `FETCH … NO INDEX` so users can defer
+    /// indexing until they're ready to run an explicit REINDEX.
+    #[serde(skip)]
+    pub suppress_auto_reindex: bool,
 }
 
 impl BundleChange {
@@ -121,6 +128,7 @@ impl BundleChange {
             id: Uuid::new_v4(),
             description: description.to_string(),
             operations: Vec::new(),
+            suppress_auto_reindex: false,
         }
     }
 }

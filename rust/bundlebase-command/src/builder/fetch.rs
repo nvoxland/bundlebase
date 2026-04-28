@@ -32,6 +32,9 @@ pub struct FetchCommand {
     /// If true, return one row per Add/Replace/Remove action instead of a
     /// per-source summary.
     pub verbose: bool,
+    /// When true, suppress the auto-reindex hook so existing indexes remain
+    /// stale until the user runs an explicit REINDEX.
+    pub no_index: bool,
 }
 
 impl FetchCommand {
@@ -42,6 +45,7 @@ impl FetchCommand {
             mode,
             dry_run: false,
             verbose: false,
+            no_index: false,
         }
     }
 
@@ -52,6 +56,7 @@ impl FetchCommand {
             mode,
             dry_run,
             verbose: false,
+            no_index: false,
         }
     }
 }
@@ -66,6 +71,7 @@ impl CommandParsing for FetchCommand {
         let mut mode = None;
         let mut dry_run = false;
         let mut verbose = false;
+        let mut no_index = false;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -81,6 +87,9 @@ impl CommandParsing for FetchCommand {
                 Rule::fetch_verbose => {
                     verbose = true;
                 }
+                Rule::no_index => {
+                    no_index = true;
+                }
                 _ => {}
             }
         }
@@ -91,6 +100,7 @@ impl CommandParsing for FetchCommand {
 
         let mut cmd = FetchCommand::new_with_dry_run(pack, mode, dry_run);
         cmd.verbose = verbose;
+        cmd.no_index = no_index;
         Ok(cmd)
     }
 
@@ -101,6 +111,9 @@ impl CommandParsing for FetchCommand {
         }
         if self.verbose {
             out.push_str(" VERBOSE");
+        }
+        if self.no_index {
+            out.push_str(" NO INDEX");
         }
         out
     }
@@ -113,6 +126,9 @@ impl BundleBuilderCommand for FetchCommand {
         self: Box<Self>,
         builder: &BundleBuilder,
     ) -> Result<bundlebase_common::command_response::FetchOutput, BundlebaseError> {
+        if self.no_index {
+            builder.suppress_auto_reindex_for_current_change();
+        }
         let pack_name = self.pack.clone();
         let pack_id = builder.resolve_pack_id(Some(&self.pack))?;
 
@@ -150,6 +166,9 @@ pub struct FetchAllCommand {
     /// If true, return one row per Add/Replace/Remove action instead of a
     /// per-source summary.
     pub verbose: bool,
+    /// When true, suppress the auto-reindex hook so existing indexes remain
+    /// stale until the user runs an explicit REINDEX.
+    pub no_index: bool,
 }
 
 impl FetchAllCommand {
@@ -159,6 +178,7 @@ impl FetchAllCommand {
             mode,
             dry_run: false,
             verbose: false,
+            no_index: false,
         }
     }
 
@@ -168,6 +188,7 @@ impl FetchAllCommand {
             mode,
             dry_run,
             verbose: false,
+            no_index: false,
         }
     }
 }
@@ -181,6 +202,7 @@ impl CommandParsing for FetchAllCommand {
         let mut mode = None;
         let mut dry_run = false;
         let mut verbose = false;
+        let mut no_index = false;
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::fetch_mode => {
@@ -192,6 +214,9 @@ impl CommandParsing for FetchAllCommand {
                 Rule::fetch_verbose => {
                     verbose = true;
                 }
+                Rule::no_index => {
+                    no_index = true;
+                }
                 _ => {}
             }
         }
@@ -200,6 +225,7 @@ impl CommandParsing for FetchAllCommand {
 
         let mut cmd = FetchAllCommand::new_with_dry_run(mode, dry_run);
         cmd.verbose = verbose;
+        cmd.no_index = no_index;
         Ok(cmd)
     }
 
@@ -210,6 +236,9 @@ impl CommandParsing for FetchAllCommand {
         }
         if self.verbose {
             out.push_str(" VERBOSE");
+        }
+        if self.no_index {
+            out.push_str(" NO INDEX");
         }
         out
     }
@@ -222,6 +251,9 @@ impl BundleBuilderCommand for FetchAllCommand {
         self: Box<Self>,
         builder: &BundleBuilder,
     ) -> Result<bundlebase_common::command_response::FetchOutput, BundlebaseError> {
+        if self.no_index {
+            builder.suppress_auto_reindex_for_current_change();
+        }
         let mode = self.mode;
         let verbose = self.verbose;
 
@@ -1456,6 +1488,46 @@ mod parsing_tests {
                 assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected FetchAll variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_no_index() {
+        let cmd = parse_command("FETCH base ADD NO INDEX").unwrap();
+        match cmd {
+            BundleCommand::Fetch(c) => {
+                assert_eq!(c.pack, "base");
+                assert!(c.no_index);
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+
+        let cmd = parse_command("FETCH ALL SYNC NO INDEX").unwrap();
+        match cmd {
+            BundleCommand::FetchAll(c) => assert!(c.no_index),
+            _ => panic!("Expected FetchAll variant"),
+        }
+
+        // NO INDEX combines with VERBOSE / DRY RUN
+        let cmd = parse_command("FETCH ALL ADD DRY RUN VERBOSE NO INDEX").unwrap();
+        match cmd {
+            BundleCommand::FetchAll(c) => {
+                assert!(c.dry_run);
+                assert!(c.verbose);
+                assert!(c.no_index);
+            }
+            _ => panic!("Expected FetchAll variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_fetch_no_index() {
+        let mut cmd = FetchCommand::new("base".to_string(), SyncMode::Add);
+        cmd.no_index = true;
+        assert_eq!(cmd.to_statement(), "FETCH base ADD NO INDEX");
+        match parse_command(&cmd.to_statement()).unwrap() {
+            BundleCommand::Fetch(c) => assert!(c.no_index),
+            _ => panic!("Expected Fetch variant"),
         }
     }
 

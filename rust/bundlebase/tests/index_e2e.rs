@@ -735,6 +735,72 @@ async fn test_auto_reindex_after_attach() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// `ATTACH … NO INDEX` opts out of the auto-reindex hook for that change,
+/// leaving existing indexes stale until the user runs an explicit `REINDEX`.
+#[tokio::test]
+async fn test_attach_no_index_suppresses_auto_reindex() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("init").await?;
+
+    // Second attach with NO INDEX: must NOT trigger auto-reindex.
+    let attach_sql = format!(
+        "ATTACH '{}' NO INDEX",
+        test_datafile("customers-101-150.csv")
+    );
+    let cmd = bundlebase_command::parser::parse_command(&attach_sql).expect("parse ATTACH");
+    cmd.execute(&bundle).await?;
+
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        num_rows, 6,
+        "search() should only see the originally-indexed block (6 rows); auto-reindex was \
+         supposed to be suppressed by NO INDEX, got {}",
+        num_rows
+    );
+
+    // Now run REINDEX explicitly — both blocks should be searchable.
+    let cmd = bundlebase_command::parser::parse_command("REINDEX").expect("parse REINDEX");
+    cmd.execute(&bundle).await?;
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert!(
+        num_rows >= 12,
+        "after explicit REINDEX both blocks should be searchable, got {}",
+        num_rows
+    );
+
+    Ok(())
+}
+
 /// Mimics the CLI REPL/Execute path: `Bundle::open(...)` followed by `.extend()`
 /// to get a BundleBuilder. Previously the `search()` UDTF was registered with
 /// a Weak<Bundle> on the original Arc<Bundle>; after `.extend()` cloned the
