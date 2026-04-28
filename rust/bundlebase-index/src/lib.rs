@@ -32,4 +32,4 @@ pub use index_definition::{
 pub use index_selector::IndexSelector;
 pub use index_trait::Index;
 pub use temp_dir::TempDirManager;
-pub use text_column_index::{TextIndex, TextIndexBuilder};
+pub use text_column_index::{search_unified, TextIndex, TextIndexBuilder, UnifiedSearchHit};

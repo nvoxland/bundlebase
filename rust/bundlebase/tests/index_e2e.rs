@@ -735,6 +735,128 @@ async fn test_auto_reindex_after_attach() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// BM25 scores must be computed against a unified corpus across all
+/// `IndexedBlocks` entries. We build two equivalent bundles holding the
+/// same documents: one with a SINGLE `IndexedBlocks` (index created after
+/// all data attached) and one with TWO entries (index created after csv1,
+/// then csv2 auto-reindexes into a separate entry). The same query
+/// against both should produce the same row set with the same `_score`
+/// per row — that's what "unified BM25" means.
+#[tokio::test]
+async fn test_bm25_unified_across_indexed_blocks_entries() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+
+    async fn search_scores(
+        bundle: &std::sync::Arc<bundlebase::BundleBuilder>,
+        query: &str,
+    ) -> Result<Vec<(String, f64)>, BundlebaseError> {
+        let stream = bundle
+            .query(
+                &format!(
+                    "SELECT \"Company\", _score FROM search('company_search', '{}') ORDER BY \"Company\"",
+                    query
+                ),
+                vec![],
+                None,
+            )
+            .await?;
+        let rs: Vec<RecordBatch> = stream.try_collect().await?;
+        let mut out = Vec::new();
+        for batch in &rs {
+            let companies = batch
+                .column_by_name("Company")
+                .expect("Company")
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("Company is StringArray");
+            let scores = batch
+                .column_by_name("_score")
+                .expect("_score")
+                .as_any()
+                .downcast_ref::<arrow::array::Float64Array>()
+                .expect("_score is Float64");
+            for i in 0..batch.num_rows() {
+                out.push((companies.value(i).to_string(), scores.value(i)));
+            }
+        }
+        Ok(out)
+    }
+
+    // Single-entry baseline: all data attached BEFORE creating the index,
+    // so create_index's reindex_internal builds one IndexedBlocks covering
+    // both blocks.
+    let dir_one = random_memory_dir();
+    let one = bundlebase::BundleBuilder::create(dir_one.url().as_str(), None).await?;
+    one.attach(test_datafile("customers-0-100.csv"), None).await?;
+    one.attach(test_datafile("customers-101-150.csv"), None).await?;
+    one.create_index(
+        &["Company"],
+        IndexType::text(TokenizerConfig::default()),
+        Some("company_search"),
+    )
+    .await?;
+    one.commit("single entry").await?;
+    let single = search_scores(&one, "Group").await?;
+
+    // Two-entry case: index created with only csv1 (entry #1), then csv2
+    // attached and auto-reindex creates entry #2.
+    let dir_two = random_memory_dir();
+    let two = bundlebase::BundleBuilder::create(dir_two.url().as_str(), None).await?;
+    two.attach(test_datafile("customers-0-100.csv"), None).await?;
+    two.create_index(
+        &["Company"],
+        IndexType::text(TokenizerConfig::default()),
+        Some("company_search"),
+    )
+    .await?;
+    two.commit("entry #1").await?;
+    two.attach(test_datafile("customers-101-150.csv"), None).await?;
+    two.commit("entry #2 via auto-reindex").await?;
+    let multi = search_scores(&two, "Group").await?;
+
+    // Sanity: both bundles have the same number of indexed blocks.
+    assert_eq!(single.len(), multi.len(), "row counts must match");
+    assert_eq!(
+        single.len(),
+        12,
+        "12 'Group' matches expected from the two CSVs"
+    );
+
+    // The two entry case must use multiple IndexedBlocks (otherwise this
+    // test isn't actually exercising the unification path).
+    let two_idx_entries = two
+        .indexes()
+        .iter()
+        .find(|i| i.name() == "company_search")
+        .expect("index defined")
+        .all_indexed_blocks()
+        .len();
+    assert_eq!(
+        two_idx_entries, 2,
+        "test setup expected 2 IndexedBlocks entries in the multi-entry case"
+    );
+
+    // Now the actual unified-BM25 assertion: every row's score must match
+    // between the single-entry and multi-entry cases. Without unification,
+    // entry #1 scored against its own corpus (~100 docs) and entry #2
+    // against its own (~50 docs); scores would diverge.
+    for ((c_single, s_single), (c_multi, s_multi)) in single.iter().zip(multi.iter()) {
+        assert_eq!(c_single, c_multi, "row order should match");
+        let delta = (s_single - s_multi).abs();
+        assert!(
+            delta < 1e-4,
+            "score for {} differs: single={} multi={} (delta {})",
+            c_single,
+            s_single,
+            s_multi,
+            delta
+        );
+    }
+
+    Ok(())
+}
+
 /// `IndexedBlocks` entries should be pruned from the runtime list once
 /// the blocks they cover are no longer at their current version. Without
 /// this, the runtime `Vec<Arc<IndexedBlocks>>` grows with commit history

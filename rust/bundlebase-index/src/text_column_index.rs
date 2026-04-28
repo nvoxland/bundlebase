@@ -511,6 +511,239 @@ impl TextIndex {
     }
 }
 
+/// A hit produced by `search_unified`, tagged with which input pass it came
+/// from so the caller can resolve the originating block_id without depending
+/// on tantivy segment IDs.
+#[derive(Debug, Clone)]
+pub struct UnifiedSearchHit {
+    /// Index into the `passes` slice passed to `search_unified`.
+    pub pass_idx: usize,
+    pub row_id: RowId,
+    pub score: f32,
+}
+
+/// Run a single BM25 query across multiple per-pass tar blobs as if they
+/// were one tantivy index, so corpus stats (term DF, total docs, avg doc
+/// length) are computed across the full active set rather than per-pass.
+///
+/// The on-disk format is unchanged — each pass is still its own tar with
+/// its own `meta.json`. We materialize a unified tantivy Index in a temp
+/// directory by:
+///   1. extracting every pass's tar files into one shared dir,
+///   2. reading each pass's `meta.json` and concatenating their `segments`
+///      lists into a single `IndexMeta`,
+///   3. opening that dir with `Index::open_in_dir`.
+///
+/// Tantivy assigns globally-unique UUIDs to its segment files, so file
+/// names don't collide across passes. The schema and `IndexSettings` are
+/// taken from the first pass — they're identical by construction (every
+/// pass for a given index uses the same columns + tokenizer).
+///
+/// Each returned `UnifiedSearchHit` carries the index of the pass that
+/// produced it, recovered via the unified `Searcher`'s segment readers.
+pub fn search_unified(
+    passes: &[Bytes],
+    query: &str,
+    limit: usize,
+) -> Result<Vec<UnifiedSearchHit>, BundlebaseError> {
+    use std::collections::HashMap;
+    use tar::Archive;
+
+    if passes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let unified_dir = TempDir::with_prefix("bundlebase_text_unified_").map_err(|e| {
+        BundlebaseError::from(format!("Failed to create unified temp dir: {}", e))
+    })?;
+    let unified_path = unified_dir.path();
+
+    // tantivy's IndexMeta is `Serialize` but not `Deserialize` (it uses a
+    // private `UntrackedIndexMeta` shadow type during open). We treat
+    // meta.json as opaque JSON: peel off each pass's `segments` array and
+    // concatenate, take `schema` / `index_settings` from the first pass
+    // (identical by construction for a given index), and use the max
+    // `opstamp`. tantivy will reparse on open.
+    let mut combined_segments: Vec<serde_json::Value> = Vec::new();
+    let mut max_opstamp: u64 = 0;
+    let mut template_meta: Option<serde_json::Value> = None;
+    // segment uuid → pass_idx; lets us map a hit's segment back to its
+    // source pass without depending on tantivy-internal state.
+    let mut seg_to_pass: HashMap<String, usize> = HashMap::new();
+
+    for (pass_idx, tar_bytes) in passes.iter().enumerate() {
+        let extract_dir = TempDir::new_in(unified_path).map_err(|e| {
+            BundlebaseError::from(format!("Failed to create per-pass temp dir: {}", e))
+        })?;
+        let extract_path = extract_dir.path();
+
+        Archive::new(tar_bytes.as_ref())
+            .unpack(extract_path)
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to extract pass {} tar: {}", pass_idx, e))
+            })?;
+
+        let meta_path = extract_path.join("meta.json");
+        let meta_str = std::fs::read_to_string(&meta_path).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to read meta.json for pass {}: {}",
+                pass_idx, e
+            ))
+        })?;
+        let meta_val: serde_json::Value = serde_json::from_str(&meta_str).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to parse meta.json for pass {}: {}",
+                pass_idx, e
+            ))
+        })?;
+
+        if let Some(segs) = meta_val.get("segments").and_then(|v| v.as_array()) {
+            for seg in segs {
+                if let Some(seg_id) = seg.get("segment_id").and_then(|v| v.as_str()) {
+                    let simple = seg_id.replace('-', "");
+                    seg_to_pass.insert(simple, pass_idx);
+                }
+                combined_segments.push(seg.clone());
+            }
+        }
+        if let Some(op) = meta_val.get("opstamp").and_then(|v| v.as_u64()) {
+            max_opstamp = max_opstamp.max(op);
+        }
+        if template_meta.is_none() {
+            template_meta = Some(meta_val);
+        }
+
+        // Move every segment file into the shared unified directory; skip
+        // per-pass metadata and any tantivy lock/managed bookkeeping
+        // (tantivy regenerates managed.json on open).
+        for entry in std::fs::read_dir(extract_path).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to read pass {} extract dir: {}",
+                pass_idx, e
+            ))
+        })? {
+            let entry = entry.map_err(|e| {
+                BundlebaseError::from(format!("Failed to read entry: {}", e))
+            })?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let fname = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| BundlebaseError::from("Invalid file name in extracted pass"))?
+                .to_string();
+            if matches!(
+                fname.as_str(),
+                "meta.json" | "_metadata.json" | ".managed.json"
+            ) || fname.starts_with('.')
+            {
+                continue;
+            }
+            let dest = unified_path.join(&fname);
+            std::fs::rename(&path, &dest).map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to move segment file {} into unified dir: {}",
+                    fname, e
+                ))
+            })?;
+        }
+    }
+
+    // Synthesize one unified meta.json reusing the first pass's schema /
+    // index_settings (identical by construction across passes).
+    let mut unified_meta = template_meta.expect("template_meta set when passes is non-empty");
+    if let Some(obj) = unified_meta.as_object_mut() {
+        obj.insert(
+            "segments".to_string(),
+            serde_json::Value::Array(combined_segments),
+        );
+        obj.insert(
+            "opstamp".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(max_opstamp)),
+        );
+        obj.remove("payload");
+    }
+    let unified_meta_str = serde_json::to_string(&unified_meta).map_err(|e| {
+        BundlebaseError::from(format!("Failed to serialize unified meta.json: {}", e))
+    })?;
+    std::fs::write(unified_path.join("meta.json"), unified_meta_str).map_err(|e| {
+        BundlebaseError::from(format!("Failed to write unified meta.json: {}", e))
+    })?;
+
+    let index = TantivyIndex::open_in_dir(unified_path).map_err(|e| {
+        BundlebaseError::from(format!("Failed to open unified index: {}", e))
+    })?;
+    TextIndex::register_tokenizers(&index)?;
+
+    let reader = index
+        .reader()
+        .map_err(|e| BundlebaseError::from(format!("Failed to create reader: {}", e)))?;
+    let searcher = reader.searcher();
+    let schema = index.schema();
+    let rowid_field = schema
+        .get_field(ROWID_FIELD)
+        .map_err(|e| BundlebaseError::from(format!("rowid field missing: {}", e)))?;
+
+    // Default search fields: every text field on the schema.
+    let default_fields: Vec<Field> = schema
+        .fields()
+        .filter_map(|(f, e)| {
+            if matches!(
+                e.field_type(),
+                tantivy::schema::FieldType::Str(_)
+            ) && schema.get_field_name(f) != ROWID_FIELD
+            {
+                Some(f)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if default_fields.is_empty() {
+        return Err(BundlebaseError::from(
+            "Unified index has no searchable text fields",
+        ));
+    }
+
+    let parser = QueryParser::for_index(&index, default_fields);
+    let parsed = parser.parse_query(query).map_err(|e| {
+        BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e))
+    })?;
+    let top_docs = searcher
+        .search(&parsed, &TopDocs::with_limit(limit))
+        .map_err(|e| BundlebaseError::from(format!("Search failed: {}", e)))?;
+
+    let mut hits = Vec::with_capacity(top_docs.len());
+    for (score, doc_address) in top_docs {
+        let segment_id = searcher
+            .segment_reader(doc_address.segment_ord)
+            .segment_id()
+            .uuid_string();
+        let pass_idx = *seg_to_pass.get(&segment_id).ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Unified search returned a hit from segment {} which doesn't belong to any pass",
+                segment_id
+            ))
+        })?;
+        let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| {
+            BundlebaseError::from(format!("Failed to retrieve document: {}", e))
+        })?;
+        if let Some(rowid_value) = doc.get_first(rowid_field) {
+            if let Some(rowid_u64) = rowid_value.as_u64() {
+                hits.push(UnifiedSearchHit {
+                    pass_idx,
+                    row_id: RowId::from(rowid_u64),
+                    score,
+                });
+            }
+        }
+    }
+
+    Ok(hits)
+}
+
 impl Index for TextIndex {
     fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         self.serialize()

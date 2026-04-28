@@ -1645,9 +1645,17 @@ impl BundleFacade for BundleBuilder {
     }
 
     fn operations(&self) -> Vec<AnyOperation> {
-        let mut ops = self.bundle.operations.read().clone();
-        ops.append(&mut self.status().operations().clone());
-        ops
+        // `BundleBuilder::apply_operation` writes to BOTH `bundle.operations`
+        // (eagerly, so queries see the new state) AND the in-progress change
+        // (so commit() can persist a structured changelog). After do_change /
+        // run_command finalize, the in-progress change moves into `status`.
+        // Status is therefore a *subset* of `bundle.operations` until commit()
+        // clears it. Returning the union double-counts every uncommitted op,
+        // which silently inflated BundleSchema's per-column block lists and
+        // caused reindex_internal to feed each block to the index builder
+        // twice (visible as 2× doc counts and 5% BM25 score drift before the
+        // unified-search work surfaced it).
+        self.bundle.operations.read().clone()
     }
 
     fn bundle_schema(&self) -> bundle_schema::BundleSchema {

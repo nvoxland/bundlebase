@@ -19,7 +19,6 @@ use crate::bundle::bundle_schema;
 use crate::bundle::{resolve_cast_ops, AnyOperation, BundleFacade, Operation, Pack};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::IndexDefinition;
-use crate::index::TextIndex;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadFile;
 use arrow::array::{Float64Array, RecordBatch, UInt64Array};
@@ -404,22 +403,22 @@ impl TableProvider for SearchResultTableProvider {
             return self.empty_exec(&output_schema, projection);
         }
 
-        // Step 2: Run tantivy on each entry that actually covers an active
-        // block; translate hits into the unified namespace. Entries whose
-        // every block has been superseded simply aren't loaded — that's
-        // the per-entry skip-load mentioned in the plan.
+        // Step 2: Load each pass's serialized tar bytes and run a SINGLE
+        // unified BM25 query across them all (corpus stats — term DF,
+        // total docs, avg doc length — computed across the union, not
+        // per-pass). Entries whose every block has been superseded simply
+        // aren't loaded.
         let mut row_id_scores: Vec<(RowId, f64)> = Vec::new();
-        // Default to 10,000 results when no SQL LIMIT is specified.
-        // This prevents unbounded result sets for broad search terms.
+        // Default to 10,000 results when no SQL LIMIT is specified. This
+        // prevents unbounded result sets for broad search terms.
         let search_limit = limit.unwrap_or(10000);
 
+        let mut pass_bytes: Vec<bytes::Bytes> = Vec::with_capacity(per_entry.len());
         for entry in &per_entry {
             let index_path = entry.indexed_blocks.path();
-
             let index_file =
                 ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())
                     .map_err(|e| DataFusionError::External(e))?;
-
             let index_bytes = index_file
                 .read_bytes()
                 .await
@@ -427,26 +426,25 @@ impl TableProvider for SearchResultTableProvider {
                 .ok_or_else(|| {
                     DataFusionError::Execution(format!("Text index file not found: {}", index_path))
                 })?;
+            pass_bytes.push(index_bytes);
+        }
 
-            let text_index =
-                TextIndex::deserialize(index_bytes).map_err(|e| DataFusionError::External(e))?;
+        let hits = bundlebase_index::search_unified(&pass_bytes, &rewritten_query, search_limit)
+            .map_err(|e| DataFusionError::External(e))?;
 
-            let results = text_index
-                .search(&rewritten_query, search_limit)
-                .map_err(|e| DataFusionError::External(e))?;
-
-            for result in results {
-                let local_ref = result.row_id.block_ref().as_u16();
-                // Hits whose block is covered here at a version no longer
-                // active are silently dropped: their local_ref isn't in
-                // local_to_unified.
-                if let Some(&unified_ref) = entry.local_to_unified.get(&local_ref) {
-                    let unified_row_id = result
-                        .row_id
-                        .with_block_ref(ObjectIdAlias::from(unified_ref));
-                    row_id_scores.push((unified_row_id, result.score as f64));
-                }
+        for hit in hits {
+            // hit.pass_idx indexes into per_entry, so we know exactly which
+            // IndexedBlocks (and therefore which local_to_unified map) the
+            // hit came from — no segment_id ↔ entry plumbing in the caller.
+            let entry = &per_entry[hit.pass_idx];
+            let local_ref = hit.row_id.block_ref().as_u16();
+            if let Some(&unified_ref) = entry.local_to_unified.get(&local_ref) {
+                let unified_row_id = hit.row_id.with_block_ref(ObjectIdAlias::from(unified_ref));
+                row_id_scores.push((unified_row_id, hit.score as f64));
             }
+            // Hits whose block is covered here at a version no longer
+            // active are silently dropped: their local_ref isn't in
+            // local_to_unified.
         }
 
         if row_id_scores.is_empty() {
