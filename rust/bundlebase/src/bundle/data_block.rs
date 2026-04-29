@@ -683,7 +683,7 @@ impl TableProvider for DataBlock {
                 let timer = OperationTimer::start(OperationCategory::Index, "lookup")
                     .with_label("column", &best.filter.column);
 
-                log::info!(
+                log::debug!(
                     "Selected index on column '{}' with selectivity {:.1}% (best among {} candidates)",
                     best.filter.column,
                     best.selectivity * 100.0,
