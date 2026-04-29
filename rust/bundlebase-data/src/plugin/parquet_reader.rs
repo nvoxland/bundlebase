@@ -429,7 +429,7 @@ impl DataReader for ParquetDataReader {
         &self,
         block_ref: ObjectIdAlias,
         _ctx: Arc<SessionContext>,
-        _projection: Option<&Vec<usize>>,
+        projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
         // Get object store components
         let store = self.inner.file().store();
@@ -437,9 +437,25 @@ impl DataReader for ParquetDataReader {
 
         // Create async Parquet reader
         let object_reader = ParquetObjectReader::new(store, path);
-        let builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+        let mut builder = ParquetRecordBatchStreamBuilder::new(object_reader)
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
+
+        // Honor the caller's projection by translating the *Arrow* column
+        // indices it gave us into a Parquet `ProjectionMask`. Without this
+        // the indexer's `Some(vec![col_idx])` was silently discarded, so
+        // `batch.column(0)` carried whatever happened to be the first
+        // column in the file — not the column the index was supposed to
+        // cover. That's how the claude-history bundle ended up with an
+        // inverted index full of `agent_id` data labelled `search_text`.
+        if let Some(cols) = projection {
+            let parquet_schema = builder.parquet_schema();
+            let mask = datafusion::parquet::arrow::ProjectionMask::roots(
+                parquet_schema,
+                cols.iter().copied(),
+            );
+            builder = builder.with_projection(mask);
+        }
 
         let inner_stream = builder
             .build()
@@ -857,6 +873,80 @@ mod tests {
             bytes
         );
 
+        Ok(())
+    }
+
+    /// Regression for the FTS-empty-on-real-bundle bug: index_blocks.rs
+    /// hands a 1-element projection to `extract_rowids_stream` (column index
+    /// of the column being indexed) and then reads `batch.column(0)`,
+    /// expecting that to be the projected column. Before the fix the
+    /// projection was a leading-underscore parameter — silently discarded —
+    /// so the indexer fed `batch.column(0)` (whatever the *first* column of
+    /// the parquet was) into the inverted index instead of `search_text`.
+    /// On the public claude-history bundle that means hundreds of thousands
+    /// of `agent_id` strings ended up in the index labelled as `search_text`,
+    /// so every FTS query returned 0 hits.
+    #[tokio::test]
+    async fn test_extract_rowids_stream_honors_projection() -> Result<(), BundlebaseError> {
+        use crate::DataReader;
+        let plugin = ParquetPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                test_datafile("userdata.parquet"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        // userdata.parquet column order:
+        //   0 registration_dttm, 1 id, 2 first_name, 3 last_name, 4 email,
+        //   5 gender, 6 ip_address, 7 cc, 8 country, 9 birthdate, 10 salary,
+        //   11 title, 12 comments
+        // Project ONLY column 4 (email). After the fix, `batch.column(0)`
+        // must be the email field — not registration_dttm.
+        let block_ref = ObjectIdAlias::from(0u16);
+        let ctx = test_context();
+        let projection = vec![4usize];
+        let mut stream = reader
+            .extract_rowids_stream(block_ref, ctx.ctx.clone(), Some(&projection))
+            .await?;
+
+        let mut total_rows = 0;
+        let mut first_col_name: Option<String> = None;
+        while let Some(batch_result) = stream.next().await {
+            let rib = batch_result?;
+            let batch = &rib.batch;
+            total_rows += batch.num_rows();
+            // Capture the first projected column's name from the first batch.
+            if first_col_name.is_none() && batch.num_columns() > 0 {
+                first_col_name = Some(batch.schema().field(0).name().clone());
+            }
+            // Sanity: the projection must yield exactly one column.
+            assert_eq!(
+                batch.num_columns(),
+                1,
+                "projection [4] must yield a 1-column batch, got {} columns ({:?})",
+                batch.num_columns(),
+                batch.schema().fields().iter().map(|f| f.name()).collect::<Vec<_>>()
+            );
+        }
+
+        assert_eq!(total_rows, 1000, "userdata.parquet has 1000 rows");
+        assert_eq!(
+            first_col_name.as_deref(),
+            Some("email"),
+            "extract_rowids_stream(projection=[4]) must surface the `email` column \
+             at batch.column(0); silently dropping the projection puts \
+             `registration_dttm` (column 0 of the file) there instead, which \
+             is exactly how the inverted index ended up indexing the wrong \
+             column data on the claude-history bundle."
+        );
         Ok(())
     }
 }

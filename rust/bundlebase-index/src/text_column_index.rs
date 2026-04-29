@@ -668,7 +668,7 @@ pub fn search_unified(
     let unified_meta_str = serde_json::to_string(&unified_meta).map_err(|e| {
         BundlebaseError::from(format!("Failed to serialize unified meta.json: {}", e))
     })?;
-    std::fs::write(unified_path.join("meta.json"), unified_meta_str).map_err(|e| {
+    std::fs::write(unified_path.join("meta.json"), &unified_meta_str).map_err(|e| {
         BundlebaseError::from(format!("Failed to write unified meta.json: {}", e))
     })?;
 
@@ -958,5 +958,85 @@ mod tests {
         let results = restored.search("title:hello", 10).expect("Search failed");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].row_id.as_u64(), 1);
+    }
+
+    /// Regression for the "search returns 0 hits on real multi-pass bundles"
+    /// failure mode hit on the public claude-history bundle. Build two
+    /// independent `TextIndex` instances containing matching documents,
+    /// serialize each into its own pass tar, and call `search_unified` —
+    /// must find hits from BOTH passes (not just one, not zero).
+    ///
+    /// Previously hidden by the e2e tests, which all use a single bundle's
+    /// auto-reindex path: that path runs each reindex against an in-memory
+    /// `TextIndexBuilder` whose tantivy temp dir is fresh. Here we exercise
+    /// the actual deserialize-serialize-merge surface that runs at query
+    /// time.
+    #[test]
+    fn test_search_unified_finds_hits_across_two_passes() {
+        let columns = vec!["text".to_string()];
+
+        let pass0 = TextIndex::build_streaming_multi(
+            "pass0",
+            &columns,
+            vec![
+                (vec![Some("apple cargo banana".to_string())], RowId::from(1u64)),
+                (vec![Some("the quick brown fox".to_string())], RowId::from(2u64)),
+                (vec![Some("cargo build success".to_string())], RowId::from(3u64)),
+            ]
+            .into_iter(),
+            &TokenizerConfig::Simple,
+        )
+        .expect("build pass0");
+
+        let pass1 = TextIndex::build_streaming_multi(
+            "pass1",
+            &columns,
+            vec![
+                (
+                    vec![Some("rust cargo install crate".to_string())],
+                    RowId::from(101u64),
+                ),
+                (vec![Some("nothing to see here".to_string())], RowId::from(102u64)),
+                (vec![Some("cargo run --release".to_string())], RowId::from(103u64)),
+            ]
+            .into_iter(),
+            &TokenizerConfig::Simple,
+        )
+        .expect("build pass1");
+
+        let p0_bytes = pass0.serialize().expect("serialize pass0");
+        let p1_bytes = pass1.serialize().expect("serialize pass1");
+
+        // Sanity: each pass alone must find its own "cargo" hits via the
+        // per-index `search` path. If this regresses, the unified bug isn't
+        // what's being measured.
+        let p0_solo = pass0.search("cargo", 10).expect("solo search pass0");
+        assert_eq!(
+            p0_solo.len(),
+            2,
+            "pass0 alone should find 2 'cargo' hits, got {}",
+            p0_solo.len()
+        );
+
+        let hits = search_unified(&[p0_bytes, p1_bytes], "cargo", 100)
+            .expect("unified search must succeed");
+        let pass0_hits: Vec<_> = hits.iter().filter(|h| h.pass_idx == 0).collect();
+        let pass1_hits: Vec<_> = hits.iter().filter(|h| h.pass_idx == 1).collect();
+        assert_eq!(
+            pass0_hits.len(),
+            2,
+            "expected 2 pass0 'cargo' hits across unified search, got {} (total hits {}). \
+             A count of 0 reproduces the public claude-history failure mode where \
+             search_unified silently fails to assemble the unified index.",
+            pass0_hits.len(),
+            hits.len()
+        );
+        assert_eq!(
+            pass1_hits.len(),
+            2,
+            "expected 2 pass1 'cargo' hits across unified search, got {} (total hits {})",
+            pass1_hits.len(),
+            hits.len()
+        );
     }
 }
