@@ -2426,3 +2426,64 @@ async fn test_text_search_across_multiple_blocks() -> Result<(), BundlebaseError
 
     Ok(())
 }
+
+/// Regression for the "search returns 0 hits after multi-block fetch"
+/// failure mode hit on the claude-history bundle: 5 separate text-indexed
+/// blocks in the bundle, search() returned 0 rows for terms the underlying
+/// data clearly contained (LIKE on the same column found 2154 matches for
+/// 'panic'). Stricter than test_auto_reindex_after_attach (≥12 hits across
+/// 2 blocks) — verifies that EVERY one of N attached blocks contributes
+/// hits, so missing-block bugs don't slip through.
+#[tokio::test]
+async fn test_text_search_finds_hits_across_many_blocks() -> Result<(), BundlebaseError> {
+    init();
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    // Define the index against an initial block, then commit so subsequent
+    // attaches each form their own change (matching FETCH base ADD which
+    // applies one AttachBlockOp per fetched parquet).
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("init schema + index").await?;
+
+    // Attach the same file four more times so we have 5 blocks total. Each
+    // attach is its own change, so the auto-reindex hook must fire per
+    // attach. Re-attaching the same file means each block contributes the
+    // same 6 'Group' hits — total expected = 6 (initial) + 4 * 6 = 30.
+    for _ in 0..4 {
+        bundle
+            .attach(test_datafile("customers-0-100.csv"), None)
+            .await?;
+    }
+    bundle.commit("attach 4 more blocks").await?;
+
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert_eq!(
+        num_rows, 30,
+        "expected 30 'Group' hits across all 5 blocks (6 per block); got {} — \
+         a count of 6 means only the first block was searched (matches the \
+         claude-history bundle failure mode)",
+        num_rows
+    );
+
+    Ok(())
+}

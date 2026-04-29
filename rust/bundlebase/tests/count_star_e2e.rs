@@ -147,6 +147,50 @@ async fn test_count_star_correct_after_delete() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// Regression for the eager-Phase-3-cache bug uncovered on the
+/// claude-history bundle: DataFusion calls `scan(projection=None)` for
+/// the COUNT(*) plan and the optimizer then constant-folds the result
+/// using `statistics()`. Before the fix, `DataBlock::scan` only took the
+/// fast path when `projection = Some(empty_vec)` and so projection=None
+/// fell through to Phase 3, which eagerly opened every parquet block to
+/// populate the LRU. On a 5-block / ~1GB bundle that turned a
+/// metadata-only count into a 600+ms full read. After the fix the fast
+/// path covers `projection=None` too — verified here by asserting the
+/// global block cache stays empty for this bundle's blocks across the
+/// COUNT(*).
+#[tokio::test]
+async fn test_count_star_does_not_populate_block_cache() -> Result<(), BundlebaseError> {
+    use bundlebase::bundle::block_cache::GLOBAL_BLOCK_CACHE;
+
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+
+    let bytes_before = GLOBAL_BLOCK_CACHE.current_bytes();
+    assert_eq!(count_star(bundle.as_ref()).await?, 100 + 50);
+    let bytes_after = GLOBAL_BLOCK_CACHE.current_bytes();
+
+    // The fast path returns a synthetic empty-schema plan and never
+    // materialises a block into the cache. Other tests share the cache,
+    // so we can't compare against zero — but a no-cache COUNT(*) should
+    // not move the needle. A regression that re-introduces the eager
+    // read would add 100 + 50 rows of customer data per attach.
+    assert!(
+        bytes_after <= bytes_before,
+        "COUNT(*) populated the block cache: before={} after={} (delta={})",
+        bytes_before,
+        bytes_after,
+        bytes_after.saturating_sub(bytes_before)
+    );
+    Ok(())
+}
+
 /// COUNT(*) with a WHERE clause cannot use the fast path (the optimizer
 /// won't push an empty projection through a non-trivial filter); the
 /// answer must still be right.

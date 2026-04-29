@@ -648,9 +648,17 @@ impl TableProvider for DataBlock {
         // actually read, and we're specifically skipping that. Call
         // `validate_version` explicitly so a version mismatch surfaces as
         // a query error instead of silently-succeeding stale data.
-        if let (Some(proj), Some(rows)) = (projection, self.num_rows) {
-            if proj.is_empty()
-                && filters.is_empty()
+        // DataFusion can call scan() with `projection = None` for a
+        // pre-optimisation count plan that the AggregateStatistics rule
+        // will rewrite into a constant. Treat that the same as
+        // `projection = Some(vec![])` so the synthetic plan is built
+        // without ever opening the file — the optimizer throws our plan
+        // away anyway, but the previous code path eagerly read every
+        // block to populate the cache (~700ms cold on the claude-history
+        // bundle for what should be metadata-only).
+        let is_count_shape = projection.is_none_or(|p| p.is_empty());
+        if let (true, Some(rows)) = (is_count_shape, self.num_rows) {
+            if filters.is_empty()
                 && deleted.is_empty()
                 && self.update_overlays.read().is_empty()
             {
