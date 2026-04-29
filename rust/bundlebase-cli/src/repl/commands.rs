@@ -215,11 +215,24 @@ pub fn get_parameter_names(_command_name: &str) -> Vec<String> {
     vec![]
 }
 
-/// Execute a command, returning a stream and output shape (or None for Exit/Clear)
+/// Execute a command, returning a stream and output shape (or None for
+/// Exit/Clear). Applies the interactive REPL row cap.
 pub async fn execute(cmd: Command, bundle: &Arc<dyn BundleFacade>) -> ReplCommandResult {
+    execute_with_hard_limit(cmd, bundle, Some(sql::CLI_QUERY_LIMIT)).await
+}
+
+/// Execute a command with an explicit hard row limit (or `None` for
+/// unlimited). One-shot CLI invocations use `None` so scripts get every
+/// row their SQL asked for.
+pub async fn execute_with_hard_limit(
+    cmd: Command,
+    bundle: &Arc<dyn BundleFacade>,
+    hard_limit: Option<usize>,
+) -> ReplCommandResult {
     match cmd {
         Command::Sql(sql_str) => {
-            let (stream, shape) = sql::execute(bundle, &sql_str).await?;
+            let (stream, shape) =
+                sql::execute_with_hard_limit(bundle, &sql_str, hard_limit).await?;
             Ok(Some((stream, shape)))
         }
         Command::Repl(repl_cmd) => repl_cmd.execute(bundle).await,

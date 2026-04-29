@@ -144,13 +144,16 @@ pub async fn execute_single(
             return Ok(());
         }
 
-        match commands::execute(cmd, &bundle).await {
+        // No row cap on the one-shot `query` / `extend` path: users
+        // explicitly invoked these for scripting / data extraction; their
+        // LIMIT clause (or absence of one) is the cap. Both the DataFusion
+        // hard_limit AND the formatter cap are bypassed (`None` everywhere).
+        // The interactive REPL still applies caps via `commands::execute`.
+        match commands::execute_with_hard_limit(cmd, &bundle, None).await {
             Ok(Some((stream, shape))) => {
                 let output = match format {
-                    OutputFormat::Json => {
-                        format_stream_json(stream, Some(shape), Some(1000)).await?
-                    }
-                    OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await?,
+                    OutputFormat::Json => format_stream_json(stream, Some(shape), None).await?,
+                    OutputFormat::Table => format_stream(stream, Some(shape), None).await?,
                 };
                 if !output.is_empty() {
                     println!("{}", output);

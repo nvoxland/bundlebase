@@ -33,7 +33,13 @@ pub async fn format_stream(
     shape_hint: Option<OutputShape>,
     limit: Option<usize>,
 ) -> Result<String, BundlebaseError> {
-    let limit = limit.unwrap_or(DEFAULT_QUERY_LIMIT);
+    // `None` now means *unlimited* — used by one-shot `bundlebase query`
+    // / `bundlebase extend`, where the user already wrote their own LIMIT
+    // (or wants the firehose). The interactive REPL still passes
+    // `Some(DEFAULT_QUERY_LIMIT)` so terminal users don't accidentally
+    // dump a million rows. Previously `None` fell through to the same
+    // default, which silently truncated `--format json` output too.
+    let limit = limit.unwrap_or(usize::MAX);
 
     futures::pin_mut!(stream);
 
@@ -181,5 +187,51 @@ mod tests {
         let stream = create_table_stream();
         let result = format_stream(stream, None, None).await.unwrap();
         assert!(result.contains("┌")); // Table border character
+    }
+
+    /// Build a stream with `n` rows so we can exercise the limit / no-limit
+    /// boundary without dragging in DataFusion.
+    fn create_n_row_stream(n: usize) -> SendableRecordBatchStream {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let ids: Vec<i64> = (0..n as i64).collect();
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(ids))]).unwrap();
+        let stream = futures::stream::iter(vec![Ok(batch)]);
+        Box::pin(RecordBatchStreamAdapter::new(schema, stream))
+    }
+
+    /// Regression: passing `None` for the row limit must mean *no limit*,
+    /// not "fall back to the REPL default." Before the fix, one-shot
+    /// `bundlebase query` calls passed `Some(1000)` and silently truncated
+    /// `--format json` output too — corrupting downstream scripts.
+    #[tokio::test]
+    async fn test_format_stream_none_limit_is_unlimited() {
+        let stream = create_n_row_stream(2500);
+        let out = format_stream(stream, None, None).await.unwrap();
+        // Truncation appends "(output limited to N rows)" — must not appear.
+        assert!(
+            !out.contains("output limited to"),
+            "format_stream(limit=None) silently truncated output:\n{}",
+            out.lines().rev().take(3).collect::<Vec<_>>().join("\n")
+        );
+        // 2500 rows should each show up at least somewhere as a row index.
+        // Grep for the last row's id to prove the tail of the result is present.
+        assert!(
+            out.contains(" 2499 "),
+            "expected last row (id=2499) to be in output, but it isn't"
+        );
+    }
+
+    /// REPL still passes Some(N) for an explicit cap; that path keeps
+    /// truncating with the user-facing `(output limited to ...)` footer.
+    #[tokio::test]
+    async fn test_format_stream_explicit_limit_truncates_with_footer() {
+        let stream = create_n_row_stream(2500);
+        let out = format_stream(stream, None, Some(50)).await.unwrap();
+        assert!(
+            out.contains("output limited to 50"),
+            "explicit limit must surface to the user via footer, got:\n{}",
+            out
+        );
     }
 }

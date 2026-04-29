@@ -150,7 +150,10 @@ pub async fn format_stream_json(
     shape_hint: Option<OutputShape>,
     limit: Option<usize>,
 ) -> Result<String, BundlebaseError> {
-    let limit = limit.unwrap_or(1000);
+    // `None` = unlimited. JSON output is for piping into scripts, where a
+    // silent truncation produces wrong analyses with no error. Callers
+    // that want a cap (e.g. interactive REPL) pass it explicitly.
+    let limit = limit.unwrap_or(usize::MAX);
 
     futures::pin_mut!(stream);
 
@@ -405,5 +408,30 @@ mod tests {
         assert!(parsed[0]["name"].is_null());
         assert!(parsed[1]["id"].is_null());
         assert_eq!(parsed[1]["name"], "Bob");
+    }
+
+    /// Regression: JSON output must not silently truncate when limit=None.
+    /// Before the fix, `bundlebase query --format json "SELECT … LIMIT 50000"`
+    /// returned only 1000 rows even though the SQL asked for 50k.
+    #[tokio::test]
+    async fn test_format_stream_json_none_limit_emits_all_rows() {
+        let n = 2500;
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let ids: Vec<i64> = (0..n as i64).collect();
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(ids))]).unwrap();
+        let stream = futures::stream::iter(vec![Ok(batch)]);
+        let stream: SendableRecordBatchStream =
+            Box::pin(RecordBatchStreamAdapter::new(schema, stream));
+
+        let result = format_stream_json(stream, None, None).await.unwrap();
+        let parsed: Vec<Value> = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed.len(),
+            n,
+            "expected {} JSON rows when limit=None, got {}",
+            n,
+            parsed.len()
+        );
     }
 }
