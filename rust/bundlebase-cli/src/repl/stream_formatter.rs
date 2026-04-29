@@ -9,7 +9,7 @@ use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 
 use super::display::format_array_value;
-use super::table_utils::{format_batches_as_table, DEFAULT_QUERY_LIMIT};
+use super::table_utils::format_batches_as_table;
 
 /// Format a record batch stream for terminal display.
 ///

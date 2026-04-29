@@ -328,12 +328,12 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         let username = parts[0];
         let password = parts[1];
 
-        // Consume the handshake stream (required for protocol)
-        let _handshake_request = request_stream
-            .next()
-            .await
-            .ok_or_else(|| Status::invalid_argument("No handshake request received"))?
-            .map_err(|e| Status::internal(format!("Failed to receive handshake: {}", e)))?;
+        // Drain any HandshakeRequest body the client sent. PyArrow's
+        // `authenticate_basic_token` only sends the Authorization header
+        // (no body) — requiring a body broke that and every other
+        // header-only client. Treat the body as advisory: we already
+        // have the credentials from the header.
+        let _ = request_stream.next().await;
 
         // Validate credentials
         if !self.authenticator.validate(username, password) {

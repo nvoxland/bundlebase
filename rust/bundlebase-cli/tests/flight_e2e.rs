@@ -697,3 +697,103 @@ async fn test_fabricated_token_rejected() {
     let result = client.execute("SELECT 1".to_string(), None).await;
     assert!(result.is_err(), "Fabricated token should be rejected");
 }
+
+/// Regression: PyArrow's `FlightClient.authenticate_basic_token` only sends
+/// the Authorization header; it does not send a `HandshakeRequest` body in
+/// the bidi-stream. The bundlebase server used to require a body and
+/// returned `INVALID_ARGUMENT: "No handshake request received"` to every
+/// vanilla PyArrow client. Verify a header-only handshake now succeeds.
+#[tokio::test]
+async fn test_handshake_succeeds_without_request_body() {
+    use arrow_flight::flight_service_client::FlightServiceClient;
+    use arrow_flight::HandshakeRequest;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
+    use tonic::Request;
+
+    let (_server, _client) = FlightTestServer::start_unauthenticated().await;
+    // Reach into the same channel the harness used by re-resolving the
+    // address from the auth client. The harness doesn't expose the
+    // raw channel directly, so we just connect to the same loopback +
+    // port via reflection on the unauthenticated client's channel.
+    // Easiest: spin up a fresh server via the existing harness helper
+    // and use its raw URI.
+    drop(_server);
+    drop(_client);
+
+    let port = common::get_available_port();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
+
+    // Spin up our own minimal flight server.
+    let bundle_path = format!(
+        "memory:///flight_handshake_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let builder = bundlebase::BundleBuilder::create(&bundle_path, None)
+        .await
+        .unwrap();
+    builder.commit("init").await.unwrap();
+    let svc = bundlebase_cli::flight::BundlebaseFlightSqlService::new(
+        bundle_path,
+        None,
+        false,
+        bundlebase_cli::auth::BundlebaseAuthenticator::default(),
+    );
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(arrow_flight::flight_service_server::FlightServiceServer::new(svc))
+            .serve_with_shutdown(addr, async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let channel = {
+        let mut attempts = 0;
+        loop {
+            match tonic::transport::Channel::from_shared(format!("http://{}", addr))
+                .unwrap()
+                .connect()
+                .await
+            {
+                Ok(c) => break c,
+                Err(_) if attempts < 20 => {
+                    attempts += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                Err(e) => panic!("connect failed: {}", e),
+            }
+        }
+    };
+
+    // Build a handshake call with the Authorization header set but an
+    // *empty* request stream — exactly what PyArrow's
+    // `authenticate_basic_token` sends.
+    let mut client = FlightServiceClient::new(channel);
+    let creds = BASE64_STANDARD.encode("admin:password");
+    let mut req = Request::new(futures::stream::empty::<HandshakeRequest>());
+    req.metadata_mut()
+        .insert("authorization", format!("Basic {}", creds).parse().unwrap());
+    let resp = client
+        .handshake(req)
+        .await
+        .expect("header-only handshake must succeed (PyArrow compatibility)");
+    // Should get back a HandshakeResponse carrying the bearer token.
+    let mut stream = resp.into_inner();
+    let first = futures::StreamExt::next(&mut stream).await;
+    assert!(first.is_some(), "expected one HandshakeResponse from server");
+    let payload = first.unwrap().unwrap().payload;
+    let s = String::from_utf8_lossy(&payload);
+    assert!(
+        s.starts_with("Bearer "),
+        "expected 'Bearer <token>' payload, got {:?}",
+        s
+    );
+
+    let _ = shutdown_tx.send(());
+}
