@@ -258,8 +258,14 @@ impl Bundle {
         let storage = Arc::new(DataStorage::new());
         let connector_registry = Arc::new(RwLock::new(ConnectorRegistry::new()));
 
-        let mut config =
-            SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "default");
+        let mut config = SessionConfig::new()
+            .with_default_catalog_and_schema(CATALOG_NAME, "default")
+            // `SHOW TABLES`, `SHOW COLUMNS FROM <t>`, and `SELECT * FROM
+            // information_schema.*` all require this. Bundlebase has its
+            // own `bundle_info.*` views, but users reach for `SHOW
+            // TABLES` first, so opt in to the standard catalog rather
+            // than surface a confusing "is not supported" error.
+            .with_information_schema(true);
         let options = config.options_mut();
         options.sql_parser.enable_ident_normalization = false;
         let ctx = Arc::new(SessionContext::new_with_config(config));

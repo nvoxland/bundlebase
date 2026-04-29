@@ -128,13 +128,23 @@ async fn default_execute(
     sql: &str,
     params: Vec<ScalarValue>,
 ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    // See `default_response_schema` — input that starts with a command
+    // keyword but doesn't actually match a pest rule (e.g. `DESCRIBE
+    // bundle`, `SHOW TABLES`) should fall through to DataFusion rather
+    // than surface a parse error. Real bundlebase commands that fail
+    // pest parsing for non-syntax reasons (missing argument, etc.) keep
+    // returning their original error.
     if is_command_statement(sql) {
-        let cmd = parse_command(sql)?;
-        let output = ext.execute_command(cmd).await?;
-        output.into_stream()
-    } else {
-        facade.query(sql, params, None).await
+        match parse_command(sql) {
+            Ok(cmd) => {
+                let output = ext.execute_command(cmd).await?;
+                return output.into_stream();
+            }
+            Err(e) if !e.to_string().contains("Syntax error") => return Err(e),
+            Err(_) => {}
+        }
     }
+    facade.query(sql, params, None).await
 }
 
 async fn default_response_schema(
@@ -142,13 +152,21 @@ async fn default_response_schema(
     sql: &str,
 ) -> Result<(SchemaRef, OutputShape), BundlebaseError> {
     let sql = sql.trim();
+    // `is_command_statement` matches by leading keyword, so e.g. `DESCRIBE
+    // bundle` looks like the registered `DESCRIBE CONNECTOR` command —
+    // pest will fail to parse it. On a *syntax error*, fall through to
+    // DataFusion, which natively handles `DESCRIBE`, `SHOW TABLES`, and
+    // friends. Real semantic errors on command parsing (missing argument,
+    // wrong type, etc.) still surface to the user.
     if is_command_statement(sql) {
-        let cmd = parse_command(sql)?;
-        Ok((cmd.output_schema(), cmd.output_shape()))
-    } else {
-        let stream = facade.query(sql, vec![], None).await?;
-        Ok((stream.schema().clone(), OutputShape::Table))
+        match parse_command(sql) {
+            Ok(cmd) => return Ok((cmd.output_schema(), cmd.output_shape())),
+            Err(e) if !e.to_string().contains("Syntax error") => return Err(e),
+            Err(_) => {}
+        }
     }
+    let stream = facade.query(sql, vec![], None).await?;
+    Ok((stream.schema().clone(), OutputShape::Table))
 }
 
 async fn default_explain(
@@ -431,13 +449,19 @@ impl BundleFacadeCommandExt for Arc<dyn BundleFacade> {
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        // Same fall-through as `default_execute` — pest may reject SQL
+        // that DataFusion handles natively (DESCRIBE, SHOW TABLES).
         if is_command_statement(sql) {
-            let cmd = parse_command(sql)?;
-            let output = self.execute_command(cmd).await?;
-            output.into_stream()
-        } else {
-            self.as_ref().query(sql, params, None).await
+            match parse_command(sql) {
+                Ok(cmd) => {
+                    let output = self.execute_command(cmd).await?;
+                    return output.into_stream();
+                }
+                Err(e) if !e.to_string().contains("Syntax error") => return Err(e),
+                Err(_) => {}
+            }
         }
+        self.as_ref().query(sql, params, None).await
     }
 
     async fn response_schema(

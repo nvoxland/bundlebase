@@ -399,4 +399,29 @@ mod tests {
             err
         );
     }
+
+    /// Regression: pest's command parser doesn't recognize DataFusion-native
+    /// statements like `DESCRIBE bundle` and `SHOW TABLES`, but Python /
+    /// MCP / Flight callers can run them — they go straight through the
+    /// DataFusion engine. CLI used to reject them at the parse layer with
+    /// a confusing pest error. Now any "Syntax error" on a command-keyword
+    /// statement falls through to `Command::Sql(...)` for downstream
+    /// dispatch, matching the other transports.
+    #[test]
+    fn test_parse_describe_falls_through_to_sql() {
+        let cmd = parse_one("DESCRIBE bundle").unwrap();
+        match cmd {
+            Command::Sql(sql) => assert_eq!(sql, "DESCRIBE bundle"),
+            _ => panic!("expected Sql command for DESCRIBE bundle"),
+        }
+    }
+
+    #[test]
+    fn test_parse_show_tables_falls_through_to_sql() {
+        let cmd = parse_one("SHOW TABLES").unwrap();
+        match cmd {
+            Command::Sql(sql) => assert_eq!(sql, "SHOW TABLES"),
+            _ => panic!("expected Sql command for SHOW TABLES"),
+        }
+    }
 }
