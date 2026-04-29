@@ -46,6 +46,26 @@ use std::sync::Arc;
 use stream_formatter::format_stream;
 use tracing::{error, info};
 
+/// Render a query duration in a single human-readable form per magnitude:
+/// `< 1 ms`, `42 ms`, `1.23 s`, `1m 23.4s`. Tuned for end-of-result lines —
+/// no fractional ms (sub-ms is just "<1 ms"), no padding.
+fn format_elapsed(d: std::time::Duration) -> String {
+    let total_ms = d.as_millis();
+    if total_ms < 1 {
+        return "<1 ms".to_string();
+    }
+    if total_ms < 1_000 {
+        return format!("{} ms", total_ms);
+    }
+    let secs = d.as_secs_f64();
+    if secs < 60.0 {
+        return format!("{:.2} s", secs);
+    }
+    let mins = (secs / 60.0).floor() as u64;
+    let rem = secs - (mins as f64) * 60.0;
+    format!("{}m {:.1}s", mins, rem)
+}
+
 fn prompt_label(url: &str) -> String {
     let trimmed = url.trim_end_matches('/');
     trimmed
@@ -236,6 +256,7 @@ pub async fn start(
                 let mut had_error = false;
                 let mut interrupted = false;
                 for cmd in cmds {
+                    let started = std::time::Instant::now();
                     let exec = async {
                         match commands::execute(cmd, &bundle).await {
                             Ok(Some((stream, shape))) => {
@@ -252,12 +273,16 @@ pub async fn start(
                                         if !output.is_empty() {
                                             println!("{}", output);
                                         }
-                                        Ok(())
+                                        // `true` = had output worth timing; we
+                                        // skip the timing line for commands
+                                        // that print nothing (e.g. /clear) so
+                                        // the screen doesn't fill with noise.
+                                        Ok(!output.is_empty())
                                     }
                                     Err(e) => Err(format!("Error formatting output: {}", e)),
                                 }
                             }
-                            Ok(None) => Ok(()), // No output (Clear command)
+                            Ok(None) => Ok(false), // No output (Clear command)
                             Err(e) => Err(format!("Error executing command: {}", e)),
                         }
                     };
@@ -268,10 +293,14 @@ pub async fn start(
                         // pending signal.
                         biased;
                         res = exec => {
-                            if let Err(msg) = res {
-                                error!("{}", msg);
-                                had_error = true;
-                                break;
+                            match res {
+                                Ok(true) => println!("({})", format_elapsed(started.elapsed())),
+                                Ok(false) => {} // Silent commands (clear, etc.)
+                                Err(msg) => {
+                                    error!("{}", msg);
+                                    had_error = true;
+                                    break;
+                                }
                             }
                         }
                         _ = tokio::signal::ctrl_c() => {
