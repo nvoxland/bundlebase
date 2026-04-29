@@ -224,7 +224,7 @@ async def test_query_with_column_selection():
 
 @pytest.mark.asyncio
 async def test_query():
-    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+    c = await (bundlebase.create(random_bundle()).attach(datafile("userdata.parquet")))
     stream = await c.query("SELECT * FROM bundle LIMIT 10")
 
     results = await stream.to_dict()
@@ -234,7 +234,7 @@ async def test_query():
 @pytest.mark.asyncio
 async def test_query_select_star():
     """Test basic SELECT * query."""
-    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+    c = await (bundlebase.create(random_bundle()).attach(datafile("userdata.parquet")))
 
     stream = await c.query("SELECT * FROM bundle LIMIT 10")
     results = await stream.to_dict()
@@ -244,7 +244,7 @@ async def test_query_select_star():
 @pytest.mark.asyncio
 async def test_query_select_columns():
     """Test SELECT with specific columns."""
-    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+    c = await (bundlebase.create(random_bundle()).attach(datafile("userdata.parquet")))
 
     stream = await c.query("SELECT id, first_name FROM bundle LIMIT 5")
     results = await stream.to_dict()
@@ -256,7 +256,7 @@ async def test_query_select_columns():
 @pytest.mark.asyncio
 async def test_query_lowercase_select():
     """Test that query() works with lowercase 'select' keyword."""
-    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+    c = await (bundlebase.create(random_bundle()).attach(datafile("userdata.parquet")))
 
     stream = await c.query("select * from bundle limit 10")
     results = await stream.to_dict()

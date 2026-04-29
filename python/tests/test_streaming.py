@@ -13,7 +13,7 @@ import pytest
 async def test_stream_batches_basic():
     """Test basic streaming functionality."""
     # Create a bundle with test data
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
 
     # Stream batches and count rows
@@ -36,7 +36,7 @@ async def test_stream_batches_basic():
 @pytest.mark.asyncio
 async def test_to_pandas_uses_streaming():
     """Verify to_pandas() now uses streaming internally."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
 
     # This should use streaming internally
@@ -50,7 +50,7 @@ async def test_to_pandas_uses_streaming():
 @pytest.mark.asyncio
 async def test_stream_with_operations():
     """Test streaming with operations applied."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
     c = await c.filter("SELECT * FROM bundle WHERE gender = 'Male'")
 
@@ -71,7 +71,7 @@ async def test_stream_with_operations():
 @pytest.mark.asyncio
 async def test_stream_batches_empty_bundle():
     """Test streaming with no data."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
     # Filter that matches nothing
     c = await c.filter("SELECT * FROM bundle WHERE 1 = 0")
@@ -87,7 +87,7 @@ async def test_stream_batches_empty_bundle():
 @pytest.mark.asyncio
 async def test_stream_batches_with_extending_bundle():
     """Test streaming works with PyBundleBuilder."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = c.attach(bundlebase.test_datafile("userdata.parquet"))
 
     # BundleBuilder should also support streaming
@@ -101,7 +101,7 @@ async def test_stream_batches_with_extending_bundle():
 @pytest.mark.asyncio
 async def test_as_pyarrow_stream_direct_access():
     """Test direct access to the PyRecordBatchStream object."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
 
     # Get the stream object directly
@@ -125,7 +125,7 @@ async def test_as_pyarrow_stream_direct_access():
 @pytest.mark.asyncio
 async def test_stream_consistency_with_collect():
     """Verify streaming produces same results as collecting."""
-    c = await bundlebase.create()
+    c = await bundlebase.create(bundlebase.random_memory_url())
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
 
     # Get data via streaming
