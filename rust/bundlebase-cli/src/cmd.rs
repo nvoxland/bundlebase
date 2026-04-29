@@ -16,7 +16,7 @@ use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::info;
+use tracing::debug;
 
 /// Shared flags for opening an existing bundle.
 #[derive(Args, Debug, Clone)]
@@ -41,13 +41,16 @@ pub struct BundleArgs {
 pub async fn open_bundle(args: &BundleArgs) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
 
+    // Demoted from `info!` to `debug!` — every CLI invocation printed
+    // this to stderr, which is noise in scripts that pipe many queries.
+    // The information is still there at `--log-level debug`.
     let result = if args.read_only {
-        info!("Opening bundle in read-only mode: {}", args.bundle);
+        debug!("Opening bundle in read-only mode: {}", args.bundle);
         Bundle::open(&args.bundle, config)
             .await
             .map(|b| b as Arc<dyn BundleFacade>)
     } else {
-        info!("Opening bundle in read-write mode: {}", args.bundle);
+        debug!("Opening bundle in read-write mode: {}", args.bundle);
         match Bundle::open(&args.bundle, config).await {
             Ok(b) => b.extend(None).await.map(|b| b as Arc<dyn BundleFacade>),
             Err(e) => Err(e),

@@ -106,7 +106,11 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), BundlebaseError> {
+async fn main() {
+    // We *don't* return `Result<(), BundlebaseError>` from `main` —
+    // tokio's wrapper prints the error via `Debug`, which shows literal
+    // `\n` for newlines and wraps the whole message in quotes. Drive the
+    // dispatch ourselves and print via `Display` for readable errors.
     let cli = Cli::parse();
 
     // Install catalog schema providers so Bundle/BundleBuilder creation
@@ -115,20 +119,23 @@ async fn main() -> Result<(), BundlebaseError> {
 
     init_logging(&cli);
 
-    match cli.subcommand {
-        Subcommand::Repl(args) => cmd::repl_cmd::run(args).await?,
-        Subcommand::Create(args) => cmd::create_cmd::run(args).await?,
-        Subcommand::Query(args) => cmd::query_cmd::run(args).await?,
-        Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await?,
-        Subcommand::ListBundles(args) => cmd::list_bundles_cmd::run(args).await?,
-        Subcommand::GenerateReport(args) => cmd::report_cmd::run(args).await?,
-        Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,
-        Subcommand::Server(args) => cmd::server_cmd::run(args).await?,
-        Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args)?,
-        Subcommand::UpgradeBundle(args) => cmd::upgrade_bundle_cmd::run(args).await?,
-    }
+    let result: Result<(), BundlebaseError> = match cli.subcommand {
+        Subcommand::Repl(args) => cmd::repl_cmd::run(args).await,
+        Subcommand::Create(args) => cmd::create_cmd::run(args).await,
+        Subcommand::Query(args) => cmd::query_cmd::run(args).await,
+        Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await,
+        Subcommand::ListBundles(args) => cmd::list_bundles_cmd::run(args).await,
+        Subcommand::GenerateReport(args) => cmd::report_cmd::run(args).await,
+        Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await,
+        Subcommand::Server(args) => cmd::server_cmd::run(args).await,
+        Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args),
+        Subcommand::UpgradeBundle(args) => cmd::upgrade_bundle_cmd::run(args).await,
+    };
 
-    Ok(())
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 fn init_logging(cli: &Cli) {
@@ -142,11 +149,21 @@ fn init_logging(cli: &Cli) {
     // Ignore error if a logger is already set
     let _ = LogTracer::init();
 
+    // Per-crate filter: third-party noise we have no editorial control
+    // over gets clamped to `warn`, so the user only sees actual problems.
+    // Right now this just covers tantivy's `MmapDirectory` info log
+    // ("Meta file ... was modified") which fires on every search() call
+    // through bundlebase_index — two lines of stderr per FTS query.
+    let env_filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(log_config.level.into())
+        .from_env_lossy()
+        .add_directive("tantivy=warn".parse().expect("valid filter"));
+
     // Initialize tracing/logging with the configured level
     if log_config.ui_mode {
         // UI mode: minimal format (message only)
         let _ = tracing_subscriber::fmt()
-            .with_max_level(log_config.level)
+            .with_env_filter(env_filter)
             .with_writer(std::io::stderr)
             .with_target(false)
             .with_level(false)
@@ -159,7 +176,7 @@ fn init_logging(cli: &Cli) {
     } else {
         // Debug mode: full format with timestamp, level, and module
         let _ = tracing_subscriber::fmt()
-            .with_max_level(log_config.level)
+            .with_env_filter(env_filter)
             .with_writer(std::io::stderr)
             .try_init();
     }

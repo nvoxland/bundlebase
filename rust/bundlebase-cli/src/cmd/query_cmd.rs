@@ -10,7 +10,7 @@ use bundlebase_cli::OutputFormat;
 use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::io::Read;
-use tracing::info;
+use tracing::debug;
 
 /// Execute a single SQL query and exit
 #[derive(Args, Debug)]
@@ -49,7 +49,7 @@ pub async fn run(args: QueryArgs) -> Result<(), BundlebaseError> {
     };
 
     let config = load_config(args.config.as_deref())?;
-    info!("Opening bundle in read-only mode: {}", args.bundle);
+    debug!("Opening bundle in read-only mode: {}", args.bundle);
     let state = match Bundle::open(&args.bundle, config).await {
         Ok(s) => s,
         Err(e) => {

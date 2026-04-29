@@ -51,6 +51,9 @@ impl BundleBlocksTable {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("version", DataType::Utf8, false),
+            // Captured at attach time. NULL when the block was created
+            // without a row count (rare — most paths populate this).
+            Field::new("num_rows", DataType::UInt64, true),
             Field::new("pack_id", DataType::Utf8, false),
             Field::new("pack_name", DataType::Utf8, false),
             Field::new("source_id", DataType::Utf8, true),
@@ -86,6 +89,10 @@ impl BundleBlocksTable {
 
         let ids: Vec<String> = blocks.iter().map(|(b, _, _)| b.id().to_string()).collect();
         let versions: Vec<String> = blocks.iter().map(|(b, _, _)| b.version()).collect();
+        let num_rows: Vec<Option<u64>> = blocks
+            .iter()
+            .map(|(b, _, _)| b.num_rows().map(|n| n as u64))
+            .collect();
         let pack_ids: Vec<String> = blocks.iter().map(|(_, pid, _)| pid.to_string()).collect();
         let pack_names: Vec<&str> = blocks.iter().map(|(_, _, pn)| pn.as_str()).collect();
         let source_ids: Vec<Option<String>> = blocks
@@ -129,6 +136,7 @@ impl BundleBlocksTable {
                 Arc::new(StringArray::from(
                     versions.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 )),
+                Arc::new(UInt64Array::from(num_rows)),
                 Arc::new(StringArray::from(
                     pack_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 )),

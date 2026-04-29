@@ -323,6 +323,7 @@ fn get_table_schema(
         Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("version", arrow::datatypes::DataType::Utf8, false),
+            arrow::datatypes::Field::new("num_rows", arrow::datatypes::DataType::UInt64, true),
             arrow::datatypes::Field::new("pack_id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("pack_name", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("source_id", arrow::datatypes::DataType::Utf8, true),

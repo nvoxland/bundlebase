@@ -36,7 +36,11 @@ impl Operation for DropIndexOp {
         // Remove index definition from bundle
         bundle.indexes.write().retain(|idx| idx.id() != &self.id);
 
-        log::info!("Dropped index {}", self.id);
+        // `apply` runs during operation replay on every bundle open —
+        // emitting at info level meant `Dropped index <id>` showed up on
+        // stderr for every CLI invocation against any bundle that ever
+        // had an index dropped in its history. Demoted to debug.
+        log::debug!("Dropped index {}", self.id);
 
         Ok(())
     }
