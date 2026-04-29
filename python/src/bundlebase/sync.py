@@ -91,6 +91,25 @@ class SyncQueryResult:
         """Convert query results to Polars DataFrame."""
         return _loop_manager.run_sync(self._async.to_polars())
 
+    def to_pyarrow(self) -> Any:
+        """Convert query results to a pyarrow.Table.
+
+        Streams every batch from the underlying query and concatenates them
+        into a single Table. For very large results that don't fit in
+        memory, prefer ``stream_batches()``.
+        """
+        async def _collect_table():
+            import pyarrow as pa
+
+            batches = []
+            async for batch in self._async.stream_batches():
+                batches.append(batch)
+            if not batches:
+                return pa.Table.from_batches([])
+            return pa.Table.from_batches(batches)
+
+        return _loop_manager.run_sync(_collect_table())
+
     def to_dict(self) -> Dict[str, List[Any]]:
         """Convert query results to dict of lists."""
         return _loop_manager.run_sync(self._async.to_dict())
@@ -298,6 +317,57 @@ class SyncBundle:
         """Get all data as PyArrow Table."""
         coro = _call_original_method(self._async, "as_pyarrow")
         return _loop_manager.run_sync(coro)
+
+    def view(self, identifier: str) -> "SyncBundle":
+        """Open a named view as its own read-only ``SyncBundle``.
+
+        Views in bundlebase aren't queryable as tables (you don't ``SELECT
+        FROM message_events``); ``view()`` returns a sub-bundle scoped to
+        the view's SQL, and the same ``query("... FROM bundle ...")``
+        idioms apply against the returned bundle.
+        """
+        coro = _call_original_method(self._async, "view", identifier)
+        async_bundle = _loop_manager.run_sync(coro)
+        return SyncBundle(async_bundle)
+
+    def views(self) -> Dict[str, str]:
+        """Return ``{view_id: view_name}`` for every view on this bundle."""
+        return self._async.views()
+
+    def stream_batches(
+        self, sql: Optional[str] = None
+    ) -> Iterator["pa.RecordBatch"]:
+        """Yield ``pyarrow.RecordBatch`` objects synchronously.
+
+        With no SQL, streams the bundle's full dataframe (same shape as
+        ``to_pandas()``). With ``sql``, runs the query and streams its
+        result batches — equivalent to ``query(sql).stream_batches()`` but
+        without the intermediate ``SyncQueryResult`` round-trip.
+
+        WARNING: this materializes ALL batches before yielding the first.
+        The synchronous wrapper has to drive the async event loop to
+        completion; for true incremental streaming over very large
+        datasets, use the async API directly.
+        """
+        warnings.warn(
+            "SyncBundle.stream_batches() loads all batches into memory at "
+            "once. For large datasets, use the async API instead.",
+            stacklevel=2,
+        )
+
+        # Both paths funnel through QueryResult.stream_batches: with no SQL
+        # we just SELECT the full bundle, which mirrors `to_pandas()`.
+        effective_sql = sql if sql is not None else "SELECT * FROM bundle"
+
+        async def _collect():
+            batches = []
+            async_result = await self._async.query(effective_sql, [], None)
+            async for batch in async_result.stream_batches():
+                batches.append(batch)
+            return batches
+
+        for batch in _loop_manager.run_sync(_collect()):
+            yield batch
 
     def extend(
         self,

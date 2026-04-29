@@ -674,3 +674,60 @@ class TestSyncSource:
         c.import_temp_connector("test.my_source", "python::test_function_helpers:double_val")
         result = c.drop_temp_connector("test.my_source")
         assert "Dropped 1 temporary connector" in result
+
+
+class TestSyncBundleAPICompleteness:
+    """Regression: SyncBundle was missing surface that is documented or
+    visible on the async ``Bundle`` — `view`, `views`, `stream_batches` —
+    and `SyncQueryResult` lacked `to_pyarrow`. Anyone following the
+    claude-history doc would hit AttributeError immediately. These tests
+    pin the contract so it can't drift again."""
+
+    def test_views_returns_dict(self):
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.create_view("my_view", "SELECT id, first_name FROM bundle WHERE gender = 'Female'")
+        c.commit("init view")
+        # views() must exist on SyncBundle and return id->name
+        names = list(c.views().values())
+        assert "my_view" in names
+
+    def test_view_returns_scoped_subbundle(self):
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.create_view("females", "SELECT id, first_name FROM bundle WHERE gender = 'Female'")
+        c.commit("init view")
+        # `view()` must be on SyncBundle (not just async). Returns a
+        # SyncBundle whose `bundle` table is scoped to the view's SQL.
+        v = c.view("females")
+        # Querying `bundle` against the view returns only female rows.
+        rows = v.query("SELECT COUNT(*) FROM bundle").to_pandas()
+        n = int(rows.iloc[0, 0])
+        assert n > 0
+        assert n < 1000  # less than full bundle
+
+    def test_stream_batches_yields_pyarrow_batches(self):
+        import pyarrow as pa
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.commit("init")
+        # No SQL: streams the bundle's full dataframe.
+        batches = list(c.stream_batches())
+        assert len(batches) > 0
+        assert all(isinstance(b, pa.RecordBatch) for b in batches)
+        total = sum(b.num_rows for b in batches)
+        assert total == 1000  # userdata.parquet
+        # With SQL: streams query results.
+        batches_q = list(c.stream_batches("SELECT id FROM bundle WHERE id < 10"))
+        rows_q = sum(b.num_rows for b in batches_q)
+        assert rows_q == 9
+
+    def test_query_result_to_pyarrow(self):
+        import pyarrow as pa
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.commit("init")
+        tbl = c.query("SELECT id, first_name FROM bundle LIMIT 5").to_pyarrow()
+        assert isinstance(tbl, pa.Table)
+        assert tbl.num_rows == 5
+        assert set(tbl.column_names) == {"id", "first_name"}
