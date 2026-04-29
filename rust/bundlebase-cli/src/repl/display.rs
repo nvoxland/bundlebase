@@ -94,29 +94,29 @@ pub fn format_array_value(column: &arrow::array::ArrayRef, row_idx: usize) -> St
             .unwrap()
             .value(row_idx)
             .to_string(),
-        DataType::Date32 => {
-            let value = column
-                .as_any()
-                .downcast_ref::<Date32Array>()
-                .unwrap()
-                .value(row_idx);
-            format!("Date32({})", value)
-        }
-        DataType::Date64 => {
-            let value = column
-                .as_any()
-                .downcast_ref::<Date64Array>()
-                .unwrap()
-                .value(row_idx);
-            format!("Date64({})", value)
-        }
-        DataType::Timestamp(unit, tz) => {
-            let value = column
-                .as_any()
-                .downcast_ref::<TimestampNanosecondArray>()
-                .map(|arr| arr.value(row_idx))
-                .unwrap_or(0);
-            format!("Timestamp({:?}, {:?})({})", unit, tz, value)
+        // Date / Time / Timestamp / Duration / Interval / Decimal all
+        // get delegated to Arrow's ArrayFormatter, which knows the
+        // array's actual unit + timezone and renders ISO-8601 strings.
+        // Hand-rolled matches got these wrong: Timestamps were always
+        // downcast to nanosecond (silently zeroing other units), and
+        // Date32/Date64 produced `Date32(20120)` instead of
+        // `2025-02-19`.
+        DataType::Date32
+        | DataType::Date64
+        | DataType::Time32(_)
+        | DataType::Time64(_)
+        | DataType::Timestamp(_, _)
+        | DataType::Duration(_)
+        | DataType::Interval(_)
+        | DataType::Decimal128(_, _)
+        | DataType::Decimal256(_, _) => {
+            match arrow::util::display::ArrayFormatter::try_new(
+                column,
+                &arrow::util::display::FormatOptions::default(),
+            ) {
+                Ok(fmt) => fmt.value(row_idx).to_string(),
+                Err(_) => format!("{:?}", column.slice(row_idx, 1)),
+            }
         }
         _ => format!("{:?}", column.slice(row_idx, 1)),
     }

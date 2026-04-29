@@ -104,21 +104,20 @@ fn array_value_to_json(column: &ArrayRef, row_idx: usize) -> Value {
             .downcast_ref::<StringViewArray>()
             .expect("Utf8View downcast")
             .value(row_idx)),
-        DataType::Date32 => {
-            // Use Arrow's display formatting for dates
-            let formatted = super::display::format_array_value(column, row_idx);
-            json!(formatted)
-        }
-        DataType::Date64 => {
-            let v = column
-                .as_any()
-                .downcast_ref::<Date64Array>()
-                .expect("Date64 downcast")
-                .value(row_idx);
-            json!(v)
-        }
-        DataType::Timestamp(_, _) => {
-            // Use Arrow's display formatting for timestamps
+        // Date / Time / Timestamp / Duration / Interval / Decimal all go
+        // through display::format_array_value, which delegates to Arrow's
+        // ArrayFormatter for unit-aware ISO-8601 rendering. Previously
+        // Date64 emitted the raw epoch-millis int and Timestamp ignored
+        // the array's unit (always assumed nanosecond).
+        DataType::Date32
+        | DataType::Date64
+        | DataType::Time32(_)
+        | DataType::Time64(_)
+        | DataType::Timestamp(_, _)
+        | DataType::Duration(_)
+        | DataType::Interval(_)
+        | DataType::Decimal128(_, _)
+        | DataType::Decimal256(_, _) => {
             let formatted = super::display::format_array_value(column, row_idx);
             json!(formatted)
         }
