@@ -12,6 +12,28 @@ use super::display::format_array_value;
 /// Default row limit for SQL query results.
 pub const DEFAULT_QUERY_LIMIT: usize = 100;
 
+/// Per-cell character cap. Long string cells (paragraph-long
+/// `content_text`, JSON blobs, escape-laden tool output) are truncated
+/// to this length with an `…` suffix before being handed to comfy-table.
+/// Without it, even `SELECT * FROM bundle LIMIT 5` on a wide schema
+/// produced ~50 KB of output for 5 rows because each cell padded to its
+/// longest value.
+const MAX_CELL_CHARS: usize = 80;
+
+/// Truncate cell text to keep table output sane on wide-string columns.
+fn truncate_cell(s: &str) -> String {
+    // Single-line first — newlines explode line count and rarely
+    // survive a row-oriented terminal display anyway.
+    let single_line = s.replace('\n', "\\n");
+    if single_line.chars().count() <= MAX_CELL_CHARS {
+        single_line
+    } else {
+        let mut truncated: String = single_line.chars().take(MAX_CELL_CHARS).collect();
+        truncated.push('…');
+        truncated
+    }
+}
+
 /// Format record batches as a table.
 ///
 /// This is the shared implementation used by both streaming and batch display.
@@ -34,7 +56,14 @@ pub fn format_batches_as_table(
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_content_arrangement(ContentArrangement::Dynamic);
+    // Use the simpler `Disabled` arrangement: each cell renders as-is
+    // (after the per-cell cap below trims paragraph-long values). The
+    // Dynamic arrangement was problematic with 50+ column schemas — it
+    // would either pad each cell to its longest value (massive output
+    // when piped, no terminal width to anchor against) or wrap each
+    // cell across many lines (also huge). For the common case the cell
+    // cap alone is enough to keep output bounded.
+    table.set_content_arrangement(ContentArrangement::Disabled);
 
     let mut row_count = 0;
 
@@ -60,7 +89,7 @@ pub fn format_batches_as_table(
                 .map(|col_idx| {
                     let column = batch.column(col_idx);
                     let value = format_array_value(column, row_idx);
-                    Cell::new(value)
+                    Cell::new(truncate_cell(&value))
                 })
                 .collect();
 
