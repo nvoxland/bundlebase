@@ -6,7 +6,7 @@ categories:
 
 # Bundlebase 0.10.0
 
-Mostly bug fixes and rough edges from beta — auto-reindexing after ATTACH/FETCH, unified BM25 across multi-block indexes, a much friendlier REPL, and a new end-to-end example bundle for Claude Code transcripts.
+Mostly bug fixes and rough edges from beta — auto-reindexing after ATTACH/FETCH, unified BM25 across multi-block indexes, a much friendlier REPL.
 
 <!-- more -->
 
@@ -17,23 +17,6 @@ Mostly bug fixes and rough edges from beta — auto-reindexing after ATTACH/FETC
 This was the biggest sharp edge in 0.9. If you defined a text or btree index, then later attached or fetched data, the index didn't cover the new blocks until you remembered to run `REINDEX`. The shipped claude-history bundle hit this exactly — `search()` came back with zero rows after `FETCH base ADD`.
 
 Now any command that attaches or replaces blocks (`ATTACH`, `REPLACE`, `FETCH`, `JOIN`, `CREATE SOURCE … WITH fetch=true`) runs the reindex in the same change. If you're bulk-loading and want to defer it, the new `NO INDEX` clause on `ATTACH` and `FETCH` opts out, and you run `REINDEX` yourself when ready. See the [indexing guide](../../guide/indexing.md) for the new behavior.
-
-### `search()` table function
-
-Full-text search now goes through a `search()` table function instead of `WHERE col MATCH ...`:
-
-```sql
-SELECT _score, * FROM search('web_search') ORDER BY _score DESC;
-SELECT _score, * FROM search('search_text_idx', 'pg_dump AND timeout');
-```
-
-Single-arg form auto-resolves the index when there's only one. The two-arg form lets you name a specific index and use BM25 query syntax. `_score` is exposed as a real column you can sort, filter, and project.
-
-Underneath: BM25 is now unified across all `IndexedBlocks` entries in the bundle, so the same row gets the same score regardless of how attaches happened to chunk into separate index passes. Pre-fix, scores diverged ~5% across runs depending on commit history.
-
-### Claude Code transcript example bundle
-
-A full end-to-end example: a Go FFI connector that walks `~/.claude/projects` JSONL files, registered into a structure-only bundle that anyone can `FETCH` against to load their own transcript history. The bundle ships indexes (project_id, session_id, event_type, timestamp, plus an inverted text index on `search_text`), two views, and the connector source as an attached zip so recipients can rebuild it. See the [Claude history example](../../examples/claude-history.md).
 
 ### IMPORT CONNECTOR multi-platform + bundled source
 
@@ -68,7 +51,7 @@ When `MIN BATCH` merges many small files into one block, the block carries a lis
 
 ## REPL Improvements
 
-The REPL was the worst place to actually use bundlebase in 0.9. A few things have changed:
+A few things have changed:
 
 - **Multi-line input.** Pressing Enter without a trailing `;` drops to a continuation line. The grammar handles `;` inside quoted strings and `$$...$$` blocks correctly, so a stray semicolon in a literal won't terminate early. Slash commands stay single-line.
 - **Ctrl-C while a query runs cancels the query** instead of killing the CLI. Prints `<Cancelling Query...>` so you know it landed. Ctrl-C at the prompt clears the buffer; a second consecutive Ctrl-C exits.

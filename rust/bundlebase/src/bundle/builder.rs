@@ -805,11 +805,23 @@ impl BundleBuilder {
         sql: &str,
         context: &str,
     ) -> Result<(), BundlebaseError> {
-        let temp_names = self
-            .bundle
-            .function_registry()
-            .read()
-            .temporary_only_names();
+        // Pair each temp-only user-visible name with its `fn_<id>` alias so
+        // the matcher can also catch SQL that's already been rewritten by
+        // translate_sql (which is what's actually stored on disk).
+        let registry = self.bundle.function_registry();
+        let registry = registry.read();
+        let temp_names: Vec<(String, String)> = registry
+            .temporary_only_names()
+            .into_iter()
+            .map(|name| {
+                let internal = registry
+                    .name_to_internal_name()
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_default();
+                (name, internal)
+            })
+            .collect();
         if temp_names.is_empty() {
             return Ok(());
         }

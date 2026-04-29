@@ -177,12 +177,21 @@ impl NativePythonBridge for PyNativeBridge {
                     .getattr("version")
                     .and_then(|v| v.extract())
                     .unwrap_or_default();
+                // num_rows is `int | None = None` in the SDK Location; pass
+                // through verbatim so the Rust side can distinguish "unknown"
+                // (explicit null) from "zero rows" (0). A connector that
+                // doesn't populate it gets the SDK default (None / null).
+                let num_rows: Option<u64> = loc
+                    .getattr("num_rows")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(None);
 
                 json_locations.push(serde_json::json!({
                     "location": location,
                     "must_copy": must_copy,
                     "format": format,
                     "version": version,
+                    "num_rows": num_rows,
                 }));
             }
 

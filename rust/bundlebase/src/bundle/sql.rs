@@ -10,22 +10,29 @@ pub const BASE_PACK_NAME: &str = "base";
 
 /// Check which of the given function names appear in a SQL query.
 ///
-/// Uses text matching to find dotted function names in the SQL string,
-/// checking for both quoted (`"ns.func"(...)`) and unquoted (`ns.func(...)`) forms.
-/// This is more reliable than plan-based extraction since DataFusion may interpret
-/// dotted names as schema-qualified references depending on context.
-pub(crate) fn find_temp_functions_in_sql(sql: &str, temp_names: &[String]) -> Vec<String> {
+/// Stored SQL (FILTER, CREATE VIEW, etc.) goes through name translation —
+/// `test.double_val` becomes `fn_<id>` before being persisted — so we accept
+/// both the user-visible name AND its internal `fn_<id>` alias and report
+/// matches under the user-visible form. The translation is a strict alias,
+/// not a rewrite of the call site, so either form unambiguously identifies
+/// the function.
+pub(crate) fn find_temp_functions_in_sql(
+    sql: &str,
+    temp_names: &[(String, String)],
+) -> Vec<String> {
     let sql_lower = sql.to_lowercase();
     temp_names
         .iter()
-        .filter(|name| {
-            let name_lower = name.to_lowercase();
-            // Check unquoted: ns.func(
-            sql_lower.contains(&name_lower)
-                // Check quoted: "ns.func"(
-                || sql_lower.contains(&format!("\"{}\"", name_lower))
+        .filter(|(user_name, internal_name)| {
+            let user_lower = user_name.to_lowercase();
+            let internal_lower = internal_name.to_lowercase();
+            // Unquoted user-visible (`ns.func(...)`), quoted user-visible
+            // (`"ns.func"(...)`), or the rewritten `fn_<id>(...)`.
+            sql_lower.contains(&user_lower)
+                || sql_lower.contains(&format!("\"{}\"", user_lower))
+                || sql_lower.contains(&internal_lower)
         })
-        .cloned()
+        .map(|(user_name, _)| user_name.clone())
         .collect()
 }
 
@@ -252,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_find_temp_functions_in_sql_unquoted() {
-        let temp_names = vec!["test.double_val".to_string()];
+        let temp_names = vec![("test.double_val".to_string(), "fn_abc123".to_string())];
         let matches = find_temp_functions_in_sql(
             "SELECT * FROM bundle WHERE test.double_val(id) > 10",
             &temp_names,
@@ -262,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_find_temp_functions_in_sql_quoted() {
-        let temp_names = vec!["test.double_val".to_string()];
+        let temp_names = vec![("test.double_val".to_string(), "fn_abc123".to_string())];
         let matches =
             find_temp_functions_in_sql("SELECT \"test.double_val\"(id) FROM bundle", &temp_names);
         assert_eq!(matches, vec!["test.double_val"]);
@@ -270,14 +277,14 @@ mod tests {
 
     #[test]
     fn test_find_temp_functions_in_sql_no_match() {
-        let temp_names = vec!["test.double_val".to_string()];
+        let temp_names = vec![("test.double_val".to_string(), "fn_abc123".to_string())];
         let matches = find_temp_functions_in_sql("SELECT * FROM bundle WHERE id > 10", &temp_names);
         assert!(matches.is_empty());
     }
 
     #[test]
     fn test_find_temp_functions_in_sql_case_insensitive() {
-        let temp_names = vec!["Test.Double_Val".to_string()];
+        let temp_names = vec![("Test.Double_Val".to_string(), "fn_abc123".to_string())];
         let matches = find_temp_functions_in_sql(
             "SELECT * FROM bundle WHERE test.double_val(id) > 10",
             &temp_names,
@@ -288,9 +295,9 @@ mod tests {
     #[test]
     fn test_find_temp_functions_in_sql_multiple() {
         let temp_names = vec![
-            "test.func_a".to_string(),
-            "test.func_b".to_string(),
-            "test.func_c".to_string(),
+            ("test.func_a".to_string(), "fn_aaa".to_string()),
+            ("test.func_b".to_string(), "fn_bbb".to_string()),
+            ("test.func_c".to_string(), "fn_ccc".to_string()),
         ];
         let matches = find_temp_functions_in_sql(
             "SELECT test.func_a(id), test.func_c(name) FROM bundle",
@@ -299,5 +306,19 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert!(matches.contains(&"test.func_a".to_string()));
         assert!(matches.contains(&"test.func_c".to_string()));
+    }
+
+    /// Stored SQL ops carry the rewritten `fn_<id>` form because
+    /// `BundleBuilder::translate_sql` runs before persistence. The check
+    /// must catch that form too — otherwise a temp filter slips past the
+    /// commit guard.
+    #[test]
+    fn test_find_temp_functions_in_sql_matches_rewritten_internal_name() {
+        let temp_names = vec![("test.double_val".to_string(), "fn_abc123".to_string())];
+        let matches = find_temp_functions_in_sql(
+            "SELECT * FROM bundle WHERE fn_abc123(id) > 10",
+            &temp_names,
+        );
+        assert_eq!(matches, vec!["test.double_val"]);
     }
 }

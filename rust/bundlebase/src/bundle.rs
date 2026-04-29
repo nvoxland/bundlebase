@@ -687,6 +687,20 @@ async fn resolve_attach_sidecars(
 }
 
 impl Bundle {
+    /// Rewrite user-visible function names (e.g. `test.double_val`) to the
+    /// stable `fn_<id>` form actually registered with DataFusion. Column
+    /// rewriting happens elsewhere (BundleSchema), so this only consults
+    /// the function registry. Used by `Bundle::query` so SQL submitted
+    /// directly through the facade — Python `bundle.query(...)`, Flight,
+    /// MCP — picks up imported UDFs the same way the command builder does.
+    fn translate_function_names(&self, sql: &str) -> String {
+        let fn_map = self.function_registry.read().name_to_internal_name();
+        if fn_map.is_empty() {
+            return sql.to_string();
+        }
+        crate::bundle::bundle_schema::translate_identifiers_in_sql(sql, &fn_map)
+    }
+
     /// Check bundle format version compatibility by scanning raw YAML before typed deserialization.
     ///
     /// Reads the init commit and all manifest files as raw YAML values, looking for
@@ -1634,7 +1648,13 @@ impl BundleFacade for Bundle {
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let ctx = self.ctx();
 
-        let plan = ctx.state().create_logical_plan(sql).await?;
+        // Rewrite user-visible function names (`namespace.func`) to the
+        // stable `fn_<id>` form they were registered under in DataFusion.
+        // Column identifiers are already rewritten by query-time projection
+        // pushdown via the BundleSchema; functions need this explicit pass
+        // because DataFusion's analyzer sees them before our hooks fire.
+        let sql = self.translate_function_names(sql);
+        let plan = ctx.state().create_logical_plan(&sql).await?;
 
         // Apply parameter values using DataFusion's native binding
         let plan = plan.with_param_values(params)?;
