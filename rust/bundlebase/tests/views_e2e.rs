@@ -916,3 +916,62 @@ async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+/// Regression: a view's SQL must survive a round-trip through
+/// `EXPORT EMPTY` + tar transfer + fresh fetch on a recipient. Before
+/// the fix, EXPORT EMPTY only persisted the parent's CreateViewOp
+/// (name + id), and the per-view `view_<id>/_bundlebase/` sub-bundle
+/// directory was lost. `Bundle::view()` then errored with
+/// "No bundle found at view_<id>/_bundlebase/00000000000000000.yaml
+/// does not exist" — which is exactly what users reported on the
+/// public claude-history bundle.
+#[tokio::test]
+async fn test_view_works_after_view_dir_is_removed() -> Result<(), BundlebaseError> {
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv"), None)
+        .await?;
+    c.commit("Initial data").await?;
+
+    c.create_view("chile", "select * from bundle where Country = 'Chile'")
+        .await?;
+    c.commit("Add chile view").await?;
+
+    // Sanity: the view works in the normal path.
+    let view = c.view("chile").await?;
+    assert!(view.num_rows().await? > 0);
+    drop(view);
+
+    // Simulate what EXPORT EMPTY + tar + extract does: blow away the
+    // per-view sub-bundle directory. The parent's CreateViewOp
+    // (and now its embedded SQL) should be enough to re-materialize.
+    let view_id = c
+        .bundle()
+        .views_by_name()
+        .get("chile")
+        .copied()
+        .expect("chile view should be registered");
+    let view_subdir = format!("view_{}", view_id);
+    let view_dir = c.bundle().data_dir().writable_subdir(&view_subdir)?;
+    let manifest_dir = view_dir.writable_subdir("_bundlebase")?;
+    let files = manifest_dir.list_files().await?;
+    for fi in files {
+        let url_str = fi.url.to_string();
+        let leaf = url_str
+            .rsplit('/')
+            .next()
+            .expect("file URL has at least one segment");
+        manifest_dir.writable_file(leaf)?.delete().await?;
+    }
+
+    // Now re-open and access the view: lazy materialization should
+    // recreate the sub-bundle from the cached SQL on the parent's
+    // CreateViewOp and the open should succeed.
+    let view = c.view("chile").await?;
+    assert!(
+        view.num_rows().await? > 0,
+        "view must yield rows after lazy re-materialization"
+    );
+
+    Ok(())
+}

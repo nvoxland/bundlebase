@@ -19,6 +19,14 @@ use uuid::Uuid;
 pub struct CreateViewOp {
     pub name: String,
     pub id: ObjectId,
+    /// The view's filter SQL, persisted on the parent bundle so the view
+    /// can be re-materialized on a recipient that received the bundle via
+    /// `EXPORT EMPTY` + tar (which strips the per-view sub-bundle dirs).
+    /// Empty for manifests written before the field was added; in that
+    /// case `Bundle::view()` falls back to opening the on-disk
+    /// `view_<id>/` sub-bundle.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub sql: String,
 }
 
 impl CreateViewOp {
@@ -129,9 +137,83 @@ impl CreateViewOp {
             CreateViewOp {
                 name: name.to_string(),
                 id: view_id,
+                sql: sql.to_string(),
             },
             view_builder,
         ))
+    }
+
+    /// Write the view sub-bundle's `_bundlebase/init.yaml` +
+    /// `_bundlebase/00001<hash>.yaml` files into the parent bundle's
+    /// `view_<id>/` subdir from a stored SQL string. Used as a
+    /// lazy-materialization fallback in `Bundle::view()` when a
+    /// recipient received the parent via `EXPORT EMPTY` + tar (which
+    /// strips the per-view directories) and the view's `CreateViewOp`
+    /// is the only surviving record of the view's SQL.
+    ///
+    /// Mirrors the file-writing tail of `setup()` exactly; the only
+    /// difference is the source of the writable data-dir (parent
+    /// bundle vs. parent builder).
+    pub async fn materialize_view_dir(
+        name: &str,
+        view_id: ObjectId,
+        sql: &str,
+        parent: &Bundle,
+    ) -> Result<(), BundlebaseError> {
+        debug!(
+            "Materializing missing view sub-bundle '{}' ({}) with SQL: {}",
+            name, view_id, sql
+        );
+
+        let view_dir = parent
+            .data_dir()
+            .writable_subdir(&format!("view_{}", view_id))?;
+        let manifest_dir = view_dir.writable_subdir(META_DIR)?;
+
+        let filter_op = FilterOp::new(sql.to_string(), vec![]);
+        let operations: Vec<AnyOperation> = vec![AnyOperation::Filter(filter_op)];
+
+        let now = std::time::SystemTime::now();
+        let timestamp = {
+            use chrono::DateTime;
+            let datetime: DateTime<chrono::Utc> = now.into();
+            datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+        };
+        let author = std::env::var("BUNDLEBASE_AUTHOR")
+            .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
+
+        let commit = BundleCommit {
+            url: None,
+            data_dir: None,
+            message: format!("View: {}", name),
+            author,
+            timestamp,
+            changes: vec![BundleChange {
+                id: Uuid::new_v4(),
+                description: format!("Define view '{}'", name),
+                operations: operations.clone(),
+                suppress_auto_reindex: false,
+            }],
+        };
+
+        let yaml = serde_yaml_ng::to_string(&commit)?;
+        let mut hasher = Sha256::new();
+        hasher.update(yaml.as_bytes());
+        let hash_hex = hex::encode(hasher.finalize());
+        let hash_short = &hash_hex[..12];
+        let filename = format!("00001{}.yaml", hash_short);
+        let data = bytes::Bytes::from(yaml);
+        let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
+        manifest_dir
+            .writable_file(&filename)?
+            .write_stream(Box::pin(stream))
+            .await?;
+
+        use crate::bundle::init::{InitCommit, INIT_FILENAME};
+        let init = InitCommit::new_view(&view_id.to_string());
+        write_yaml(manifest_dir.writable_file(INIT_FILENAME)?.as_ref(), &init).await?;
+
+        Ok(())
     }
 }
 
@@ -161,6 +243,12 @@ impl Operation for CreateViewOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Store view name->id mapping
         bundle.views.write().insert(self.name.clone(), self.id);
+        // Cache the SQL for lazy materialization in `Bundle::view()`. Older
+        // manifests that don't carry SQL store an empty string here, which
+        // signals "fall back to opening the on-disk view_<id>/ subdir."
+        if !self.sql.is_empty() {
+            bundle.view_sql.write().insert(self.id, self.sql.clone());
+        }
         Ok(())
     }
 

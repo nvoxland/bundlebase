@@ -143,6 +143,12 @@ pub struct Bundle {
     sources: Arc<RwLock<HashMap<ObjectId, Arc<Source>>>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
+    /// View id → filter SQL. Populated by `CreateViewOp::apply` so
+    /// `Bundle::view()` can lazily materialize the view sub-bundle when
+    /// the on-disk `view_<id>/` directory is missing (typical after
+    /// `EXPORT EMPTY` + tar transfer + fresh `FETCH`). Empty entries
+    /// (no SQL) fall back to the legacy on-disk-open path.
+    view_sql: Arc<RwLock<HashMap<ObjectId, String>>>,
     reports: Arc<RwLock<HashMap<String, ReportEntry>>>,
     dataframe: DataFrameHolder,
     bundle_schema: Arc<RwLock<BundleSchema>>,
@@ -222,6 +228,7 @@ impl Clone for Bundle {
             sources: Arc::clone(&self.sources),
             indexes: Arc::clone(&self.indexes),
             views: Arc::clone(&self.views),
+            view_sql: Arc::clone(&self.view_sql),
             reports: Arc::clone(&self.reports),
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
@@ -274,6 +281,7 @@ impl Bundle {
         let commits = Arc::new(RwLock::new(vec![]));
         let indexes = Arc::new(RwLock::new(Vec::new()));
         let views = Arc::new(RwLock::new(HashMap::new()));
+        let view_sql = Arc::new(RwLock::new(HashMap::new()));
         let reports = Arc::new(RwLock::new(HashMap::new()));
         let sources = Arc::new(RwLock::new(HashMap::new()));
         let operations = Arc::new(RwLock::new(Vec::new()));
@@ -316,6 +324,7 @@ impl Bundle {
             sources,
             indexes,
             views,
+            view_sql,
             reports,
             storage: Arc::clone(&storage),
             reader_factory: DataReaderFactory::new_with_plugins(
@@ -1003,6 +1012,7 @@ impl Bundle {
         *self.packs.write() = other.packs.read().clone();
         *self.indexes.write() = other.indexes.read().clone();
         *self.views.write() = other.views.read().clone();
+        *self.view_sql.write() = other.view_sql.read().clone();
         // Reload config: replace Stored entries from the new manifest
         self.config.reload_stored(&other.config);
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
@@ -1678,7 +1688,7 @@ impl BundleFacade for Bundle {
 
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
         // Look up view by name or ID
-        let (view_id, _name) = self.get_view_id_by_name_or_id(identifier)?;
+        let (view_id, view_name) = self.get_view_id_by_name_or_id(identifier)?;
 
         // Construct view path: view_{id}/
         let view_path = self
@@ -1689,7 +1699,27 @@ impl BundleFacade for Bundle {
 
         // Open view as Bundle (automatically loads parent via FROM)
         let passed = (*self.config.passed_config()).clone();
-        Bundle::open(&view_path, Some(passed)).await
+        match Bundle::open(&view_path, Some(passed.clone())).await {
+            Ok(b) => Ok(b),
+            Err(open_err) => {
+                // EXPORT EMPTY + tar transfer + extract loses the
+                // view_<id>/ sub-bundle directory — only the parent's
+                // CreateViewOp survives. If we have the view's SQL
+                // cached from that op, materialize the sub-bundle on
+                // disk lazily on first access. Subsequent calls hit the
+                // happy path above.
+                let sql = self.view_sql.read().get(&view_id).cloned();
+                if let Some(sql) = sql {
+                    crate::bundle::operation::CreateViewOp::materialize_view_dir(
+                        &view_name, view_id, &sql, self,
+                    )
+                    .await?;
+                    Bundle::open(&view_path, Some(passed)).await
+                } else {
+                    Err(open_err)
+                }
+            }
+        }
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {
