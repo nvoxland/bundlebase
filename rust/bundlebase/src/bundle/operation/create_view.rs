@@ -173,14 +173,20 @@ impl CreateViewOp {
         let filter_op = FilterOp::new(sql.to_string(), vec![]);
         let operations: Vec<AnyOperation> = vec![AnyOperation::Filter(filter_op)];
 
-        let now = std::time::SystemTime::now();
-        let timestamp = {
-            use chrono::DateTime;
-            let datetime: DateTime<chrono::Utc> = now.into();
-            datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string()
-        };
-        let author = std::env::var("BUNDLEBASE_AUTHOR")
-            .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
+        // Deterministic content: fixed timestamp + author + UUID derived
+        // from (view_id, sql). Two recipients lazy-materializing the same
+        // view get byte-identical commit YAML, so the hashed filename
+        // matches and concurrent calls write the same bytes (race-safe).
+        let timestamp = "1970-01-01T00:00:00Z".to_string();
+        let author = "bundlebase".to_string();
+        let mut id_hasher = Sha256::new();
+        id_hasher.update(b"bundlebase-view-materialize-v1");
+        id_hasher.update(view_id.to_string().as_bytes());
+        id_hasher.update(sql.as_bytes());
+        let id_bytes = id_hasher.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&id_bytes[..16]);
+        let change_id = Uuid::from_bytes(uuid_bytes);
 
         let commit = BundleCommit {
             url: None,
@@ -189,7 +195,7 @@ impl CreateViewOp {
             author,
             timestamp,
             changes: vec![BundleChange {
-                id: Uuid::new_v4(),
+                id: change_id,
                 description: format!("Define view '{}'", name),
                 operations: operations.clone(),
                 suppress_auto_reindex: false,

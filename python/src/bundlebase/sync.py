@@ -17,7 +17,6 @@ For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
-import warnings
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator, Union
 
 from bundlebase._loop_manager import EventLoopManager
@@ -115,25 +114,25 @@ class SyncQueryResult:
         return _loop_manager.run_sync(self._async.to_dict())
 
     def stream_batches(self) -> Iterator["pa.RecordBatch"]:
-        """Stream batches synchronously.
+        """Stream batches synchronously, one at a time.
 
-        WARNING: This materializes ALL batches first, then yields.
-        For true streaming, use the async API.
+        Drives the underlying async iterator one ``__anext__`` per yield,
+        so memory stays bounded by a single batch (plus whatever the
+        consumer holds onto). True incremental streaming — not a
+        collect-then-yield wrapper.
         """
-        warnings.warn(
-            "SyncBundle.stream_batches() loads all batches into memory at once. "
-            "For large datasets, use the async API's stream_batches() instead.",
-            stacklevel=2
-        )
+        async_iter = self._async.stream_batches().__aiter__()
 
-        async def _collect():
-            batches = []
-            async for batch in self._async.stream_batches():
-                batches.append(batch)
-            return batches
+        async def _next_batch():
+            try:
+                return (False, await async_iter.__anext__())
+            except StopAsyncIteration:
+                return (True, None)
 
-        batches = _loop_manager.run_sync(_collect())
-        for batch in batches:
+        while True:
+            done, batch = _loop_manager.run_sync(_next_batch())
+            if done:
+                return
             yield batch
 
 
@@ -337,36 +336,36 @@ class SyncBundle:
     def stream_batches(
         self, sql: Optional[str] = None
     ) -> Iterator["pa.RecordBatch"]:
-        """Yield ``pyarrow.RecordBatch`` objects synchronously.
+        """Yield ``pyarrow.RecordBatch`` objects synchronously, one at a time.
 
         With no SQL, streams the bundle's full dataframe (same shape as
         ``to_pandas()``). With ``sql``, runs the query and streams its
         result batches — equivalent to ``query(sql).stream_batches()`` but
         without the intermediate ``SyncQueryResult`` round-trip.
 
-        WARNING: this materializes ALL batches before yielding the first.
-        The synchronous wrapper has to drive the async event loop to
-        completion; for true incremental streaming over very large
-        datasets, use the async API directly.
+        Drives the async iterator one ``__anext__`` per yield so memory
+        stays bounded by a single batch.
         """
-        warnings.warn(
-            "SyncBundle.stream_batches() loads all batches into memory at "
-            "once. For large datasets, use the async API instead.",
-            stacklevel=2,
-        )
-
         # Both paths funnel through QueryResult.stream_batches: with no SQL
         # we just SELECT the full bundle, which mirrors `to_pandas()`.
         effective_sql = sql if sql is not None else "SELECT * FROM bundle"
 
-        async def _collect():
-            batches = []
+        async def _open_iter():
             async_result = await self._async.query(effective_sql, [], None)
-            async for batch in async_result.stream_batches():
-                batches.append(batch)
-            return batches
+            return async_result.stream_batches().__aiter__()
 
-        for batch in _loop_manager.run_sync(_collect()):
+        async_iter = _loop_manager.run_sync(_open_iter())
+
+        async def _next_batch():
+            try:
+                return (False, await async_iter.__anext__())
+            except StopAsyncIteration:
+                return (True, None)
+
+        while True:
+            done, batch = _loop_manager.run_sync(_next_batch())
+            if done:
+                return
             yield batch
 
     def extend(
@@ -1498,24 +1497,16 @@ def upgrade_bundle(path: str, config: Optional[Any] = None) -> None:
 
 
 def stream_batches(bundle: SyncBundle) -> Any:
-    """Stream RecordBatches from a bundle synchronously.
+    """Stream RecordBatches from a bundle synchronously, one at a time.
 
-    WARNING: This function materializes ALL batches in memory first, then yields them.
-    This is a limitation of the synchronous API due to Python's threading model.
-    For true streaming with constant memory usage, use the async API:
-        async for batch in bundlebase.stream_batches(bundle):
-            process(batch)
-
-    For better memory efficiency with the sync API, consider:
-    1. Using pandas/polars conversion instead of streaming
-    2. Processing smaller subsets of data (using filter operations)
-    3. Using the async API instead
+    Drives the async iterator one ``__anext__`` per yield, so memory
+    stays bounded by a single batch.
 
     Args:
         bundle: SyncBundle to stream from
 
     Yields:
-        pyarrow.RecordBatch objects (all loaded into memory first)
+        pyarrow.RecordBatch objects
 
     Example:
         >>> import bundlebase.sync as bb
@@ -1528,23 +1519,16 @@ def stream_batches(bundle: SyncBundle) -> Any:
     """
     import bundlebase
 
-    warnings.warn(
-        "SyncBundle.stream_batches() loads all batches into memory at once. "
-        "For large datasets, use the async API's stream_batches() instead.",
-        stacklevel=2
-    )
+    async_iter = bundlebase.stream_batches(bundle._async).__aiter__()
 
-    async def _collect() -> List[Any]:
-        """Collect all batches from async stream.
+    async def _next_batch():
+        try:
+            return (False, await async_iter.__anext__())
+        except StopAsyncIteration:
+            return (True, None)
 
-        Note: This collects all batches into memory synchronously,
-        which is unavoidable when using sync API with async Rust code.
-        """
-        batches = []
-        async for batch in bundlebase.stream_batches(bundle._async):
-            batches.append(batch)
-        return batches
-
-    batches = _loop_manager.run_sync(_collect())
-    for batch in batches:
+    while True:
+        done, batch = _loop_manager.run_sync(_next_batch())
+        if done:
+            return
         yield batch

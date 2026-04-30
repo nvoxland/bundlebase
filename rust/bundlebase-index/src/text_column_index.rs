@@ -836,6 +836,17 @@ pub fn search_unified_cached(
     if paths.is_empty() {
         return Ok(Vec::new());
     }
+    // Pass paths must be content-addressed
+    // (`<hash-prefix>/<sha>.index.inverted.tar`) for the cache key to
+    // be safe — two calls with the same paths must mean the same
+    // bytes. Catch accidental non-content-addressed callers in debug.
+    debug_assert!(
+        paths
+            .iter()
+            .all(|p| p.contains(".index.inverted.tar") || p.contains(".index.")),
+        "search_unified_cached: pass paths must be content-addressed; got {:?}",
+        paths
+    );
     let key: UnifiedIndexKey = paths.to_vec();
 
     // Fast path: cache hit.

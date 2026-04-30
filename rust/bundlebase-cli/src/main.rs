@@ -133,7 +133,10 @@ async fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("Error: {}", e);
+        // `{:#}` walks the source chain on errors that carry one,
+        // joining causes with `: `. For BundlebaseError variants
+        // without a source it's identical to `{}`.
+        eprintln!("Error: {:#}", e);
         std::process::exit(1);
     }
 }
@@ -150,14 +153,26 @@ fn init_logging(cli: &Cli) {
     let _ = LogTracer::init();
 
     // Per-crate filter: third-party noise we have no editorial control
-    // over gets clamped to `warn`, so the user only sees actual problems.
-    // Right now this just covers tantivy's `MmapDirectory` info log
-    // ("Meta file ... was modified") which fires on every search() call
-    // through bundlebase_index — two lines of stderr per FTS query.
-    let env_filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(log_config.level.into())
-        .from_env_lossy()
-        .add_directive("tantivy=warn".parse().expect("valid filter"));
+    // over gets clamped to `warn` by default, so the user only sees
+    // actual problems. Right now this just covers tantivy's
+    // `MmapDirectory` info log ("Meta file ... was modified") which
+    // fires on every search() call through bundlebase_index — two
+    // lines of stderr per FTS query.
+    //
+    // Order matters: our defaults (level + tantivy=warn) come *first*
+    // and the user's `RUST_LOG` is appended last, so a directive like
+    // `RUST_LOG=tantivy=info` overrides our clamp. Adding directives
+    // after `from_env_lossy()` (which used to be the case) inverted
+    // this and silently clobbered user intent.
+    let user_filter = std::env::var("RUST_LOG").unwrap_or_default();
+    let combined = if user_filter.is_empty() {
+        format!("{},tantivy=warn", log_config.level)
+    } else {
+        format!("{},tantivy=warn,{}", log_config.level, user_filter)
+    };
+    let env_filter = tracing_subscriber::EnvFilter::try_new(&combined).unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(log_config.level.to_string())
+    });
 
     // Initialize tracing/logging with the configured level
     if log_config.ui_mode {

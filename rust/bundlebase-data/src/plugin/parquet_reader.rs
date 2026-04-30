@@ -448,6 +448,13 @@ impl DataReader for ParquetDataReader {
         // column in the file — not the column the index was supposed to
         // cover. That's how the claude-history bundle ended up with an
         // inverted index full of `agent_id` data labelled `search_text`.
+        //
+        // Caveat: `ProjectionMask::roots` indexes *root* (top-level)
+        // columns. For the flat schemas we currently index this matches
+        // Arrow column indices 1:1. If we ever start indexing nested
+        // columns (struct/list children), root indices won't equal Arrow
+        // leaf indices and this needs to switch to `ProjectionMask::leaves`
+        // with a leaf-id translation step.
         if let Some(cols) = projection {
             let parquet_schema = builder.parquet_schema();
             let mask = datafusion::parquet::arrow::ProjectionMask::roots(

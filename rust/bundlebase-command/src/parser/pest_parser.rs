@@ -43,6 +43,19 @@ pub fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> Bundleba
     .into()
 }
 
+/// Returns `true` when `err` was produced by [`format_pest_error`] —
+/// i.e. a pest *parse-stage* failure (the input didn't match any rule),
+/// as opposed to a semantic failure inside a command's `from_statement`.
+///
+/// Callers (e.g. the BundleFacade dispatcher) use this to distinguish
+/// "this isn't a bundlebase command, fall through to DataFusion" from
+/// "this *is* a bundlebase command but the arguments are wrong, surface
+/// the error". Centralizes the brittle prefix match in the module that
+/// produces the prefix in the first place.
+pub fn is_syntax_error(err: &BundlebaseError) -> bool {
+    err.to_string().starts_with("Syntax error at line ")
+}
+
 /// Produce a command-specific hint when the pest error is "missing required
 /// token after the command keyword". Returns `Some(hint)` only when we can
 /// match the input to a known bundlebase command and the parser was expecting

@@ -6,7 +6,7 @@
 //! in its own crate.
 
 use crate::facade::describe_data::DescribeDataColumnSpec;
-use crate::parser::{is_command_statement, parse_command};
+use crate::parser::{is_command_statement, is_syntax_error, parse_command};
 use crate::response::{CommandResponse, OutputShape};
 use crate::{BundleCommand, FacadeCommand};
 use crate::{
@@ -140,7 +140,7 @@ async fn default_execute(
                 let output = ext.execute_command(cmd).await?;
                 return output.into_stream();
             }
-            Err(e) if !e.to_string().contains("Syntax error") => return Err(e),
+            Err(e) if !is_syntax_error(&e) => return Err(e),
             Err(_) => {}
         }
     }
@@ -161,7 +161,7 @@ async fn default_response_schema(
     if is_command_statement(sql) {
         match parse_command(sql) {
             Ok(cmd) => return Ok((cmd.output_schema(), cmd.output_shape())),
-            Err(e) if !e.to_string().contains("Syntax error") => return Err(e),
+            Err(e) if !is_syntax_error(&e) => return Err(e),
             Err(_) => {}
         }
     }

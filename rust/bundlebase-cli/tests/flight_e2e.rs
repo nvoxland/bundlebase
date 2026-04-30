@@ -711,16 +711,9 @@ async fn test_handshake_succeeds_without_request_body() {
     use base64::Engine;
     use tonic::Request;
 
-    let (_server, _client) = FlightTestServer::start_unauthenticated().await;
-    // Reach into the same channel the harness used by re-resolving the
-    // address from the auth client. The harness doesn't expose the
-    // raw channel directly, so we just connect to the same loopback +
-    // port via reflection on the unauthenticated client's channel.
-    // Easiest: spin up a fresh server via the existing harness helper
-    // and use its raw URI.
-    drop(_server);
-    drop(_client);
-
+    // The harness's `FlightTestServer` doesn't expose its raw channel,
+    // so we spin up a minimal flight server directly in this test
+    // and connect to it with a hand-rolled `FlightServiceClient`.
     let port = common::get_available_port();
     let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
 
