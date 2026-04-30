@@ -2487,3 +2487,67 @@ async fn test_text_search_finds_hits_across_many_blocks() -> Result<(), Bundleba
 
     Ok(())
 }
+
+/// Regression: `SELECT COUNT(*) FROM search('term')` used to error with
+/// `Arrow error: Invalid argument error: must either specify a row count
+/// or at least one column`. DataFusion's count plan asks the search()
+/// TableProvider for an empty projection (no columns); the projection
+/// step then called `RecordBatch::try_new` with zero columns, and Arrow
+/// rejected the batch because it can't infer a row count from columns
+/// alone.
+#[tokio::test]
+async fn test_count_star_from_search_works() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("init + index").await?;
+
+    // Reference count via a regular projection.
+    let baseline_stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let baseline_batches: Vec<RecordBatch> = baseline_stream.try_collect().await?;
+    let baseline_count: usize = baseline_batches.iter().map(|rb| rb.num_rows()).sum();
+    assert!(
+        baseline_count > 0,
+        "baseline projection should return matching rows"
+    );
+
+    // The previously broken path: COUNT(*) over the same search().
+    let count_stream = bundle
+        .query(
+            "SELECT COUNT(*) FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let count_batches: Vec<RecordBatch> = count_stream.try_collect().await?;
+    let count_value = count_batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::Int64Array>()
+        .expect("COUNT(*) should be Int64")
+        .value(0) as usize;
+
+    assert_eq!(
+        count_value, baseline_count,
+        "COUNT(*) FROM search() should match the projected row count ({} expected)",
+        baseline_count
+    );
+
+    Ok(())
+}

@@ -775,8 +775,25 @@ impl DataSource for SearchDataSource {
                                 .project(proj)
                                 .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
                         );
-                        RecordBatch::try_new(proj_schema, projected_columns)
+                        if proj.is_empty() {
+                            // `SELECT COUNT(*) FROM search('term')` lands here:
+                            // DataFusion's count plan asks for an empty
+                            // projection, and Arrow can't construct a 0-column
+                            // RecordBatch without an explicit row count. Use
+                            // try_new_with_options to preserve the row count
+                            // from the underlying batch.
+                            let opts = arrow::record_batch::RecordBatchOptions::new()
+                                .with_row_count(Some(batch.num_rows()));
+                            RecordBatch::try_new_with_options(
+                                proj_schema,
+                                projected_columns,
+                                &opts,
+                            )
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
+                        } else {
+                            RecordBatch::try_new(proj_schema, projected_columns)
+                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
+                        }
                     } else {
                         Ok(batch)
                     }
