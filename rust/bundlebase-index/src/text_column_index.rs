@@ -541,16 +541,55 @@ pub struct UnifiedSearchHit {
 ///
 /// Each returned `UnifiedSearchHit` carries the index of the pass that
 /// produced it, recovered via the unified `Searcher`'s segment readers.
+///
+/// This call extracts each pass's tar, copies all segment files, writes
+/// a synthesized `meta.json`, and opens a fresh tantivy `Index` — work
+/// that is identical for repeated calls against the same input. Most
+/// callers should go through [`search_unified_cached`] instead, which
+/// reuses an `Arc<UnifiedIndex>` keyed by pass identity. This bare
+/// entrypoint is kept for callers that want one-off behavior or have
+/// already resolved their own caching.
 pub fn search_unified(
     passes: &[Bytes],
     query: &str,
     limit: usize,
 ) -> Result<Vec<UnifiedSearchHit>, BundlebaseError> {
+    if passes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let unified = build_unified_index(passes)?;
+    search_in_unified(&unified, query, limit)
+}
+
+/// A pre-assembled unified tantivy index over multiple `IndexedBlocks`
+/// passes. Owns its own tempdir + tantivy `Index` and is reusable
+/// across many search calls — the assembly cost (extracting each tar,
+/// shuffling segment files, opening tantivy) only happens once.
+///
+/// Cheap to clone via `Arc`; expensive to construct.
+pub struct UnifiedIndex {
+    /// Kept alive so the on-disk segment files survive every `search`
+    /// call. Dropped when the last `Arc<UnifiedIndex>` goes away.
+    _temp_dir: TempDir,
+    index: TantivyIndex,
+    /// Stable u64 segment_id (from `SegmentId::uuid_string`) → which
+    /// input pass produced that segment. Same role as the closure-local
+    /// map in the original `search_unified`.
+    seg_to_pass: std::collections::HashMap<String, usize>,
+}
+
+/// Build a `UnifiedIndex` from raw pass tar bytes. Idempotent for a
+/// given set of `passes` — equivalent calls produce semantically
+/// identical indexes (segment uuids carry through, so a hit's
+/// `pass_idx` is stable across rebuilds).
+pub fn build_unified_index(passes: &[Bytes]) -> Result<UnifiedIndex, BundlebaseError> {
     use std::collections::HashMap;
     use tar::Archive;
 
     if passes.is_empty() {
-        return Ok(Vec::new());
+        return Err(BundlebaseError::from(
+            "build_unified_index: passes must be non-empty",
+        ));
     }
 
     let unified_dir = TempDir::with_prefix("bundlebase_text_unified_").map_err(|e| {
@@ -677,23 +716,36 @@ pub fn search_unified(
     })?;
     TextIndex::register_tokenizers(&index)?;
 
-    let reader = index
+    Ok(UnifiedIndex {
+        _temp_dir: unified_dir,
+        index,
+        seg_to_pass,
+    })
+}
+
+/// Run a single search against a pre-assembled `UnifiedIndex`. Cheap
+/// (single-digit ms on warm tantivy mmaps); the expensive part lives in
+/// [`build_unified_index`].
+pub fn search_in_unified(
+    unified: &UnifiedIndex,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<UnifiedSearchHit>, BundlebaseError> {
+    let reader = unified
+        .index
         .reader()
         .map_err(|e| BundlebaseError::from(format!("Failed to create reader: {}", e)))?;
     let searcher = reader.searcher();
-    let schema = index.schema();
+    let schema = unified.index.schema();
     let rowid_field = schema
         .get_field(ROWID_FIELD)
         .map_err(|e| BundlebaseError::from(format!("rowid field missing: {}", e)))?;
 
-    // Default search fields: every text field on the schema.
     let default_fields: Vec<Field> = schema
         .fields()
         .filter_map(|(f, e)| {
-            if matches!(
-                e.field_type(),
-                tantivy::schema::FieldType::Str(_)
-            ) && schema.get_field_name(f) != ROWID_FIELD
+            if matches!(e.field_type(), tantivy::schema::FieldType::Str(_))
+                && schema.get_field_name(f) != ROWID_FIELD
             {
                 Some(f)
             } else {
@@ -707,7 +759,7 @@ pub fn search_unified(
         ));
     }
 
-    let parser = QueryParser::for_index(&index, default_fields);
+    let parser = QueryParser::for_index(&unified.index, default_fields);
     let parsed = parser.parse_query(query).map_err(|e| {
         BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e))
     })?;
@@ -721,7 +773,7 @@ pub fn search_unified(
             .segment_reader(doc_address.segment_ord)
             .segment_id()
             .uuid_string();
-        let pass_idx = *seg_to_pass.get(&segment_id).ok_or_else(|| {
+        let pass_idx = *unified.seg_to_pass.get(&segment_id).ok_or_else(|| {
             BundlebaseError::from(format!(
                 "Unified search returned a hit from segment {} which doesn't belong to any pass",
                 segment_id
@@ -742,6 +794,82 @@ pub fn search_unified(
     }
 
     Ok(hits)
+}
+
+/// Bounded LRU keyed by the *paths* of the input passes — not their
+/// bytes. Pass paths are content-addressed
+/// (`xx/<sha>.index.inverted.tar`), so two calls with the same paths
+/// must mean the same bytes. This means we can avoid the expensive
+/// "hash MB of bytes per call" approach and still get a safe key.
+///
+/// A single entry holds a `UnifiedIndex` (with its tempdir + tantivy
+/// `Index`) keeping the on-disk index alive across many searches.
+/// Eviction drops it; the next miss triggers a fresh assemble.
+type UnifiedIndexKey = Vec<String>;
+const UNIFIED_INDEX_CACHE_CAPACITY: usize = 16;
+
+static UNIFIED_INDEX_CACHE: std::sync::LazyLock<
+    parking_lot::Mutex<lru::LruCache<UnifiedIndexKey, std::sync::Arc<UnifiedIndex>>>,
+> = std::sync::LazyLock::new(|| {
+    parking_lot::Mutex::new(lru::LruCache::new(
+        std::num::NonZeroUsize::new(UNIFIED_INDEX_CACHE_CAPACITY).expect("non-zero capacity"),
+    ))
+});
+
+/// Cached version of [`search_unified`]. The unified tantivy `Index` is
+/// assembled once per (set-of-pass-paths) and reused across search
+/// calls. Skipping reassembly is the difference between ~700 ms and
+/// ~5 ms per query on a multi-block bundle.
+///
+/// `paths` is the cache key; pass IDs in the same order as `passes`.
+/// `passes` is the raw tar bytes for each pass — only consulted on a
+/// cache miss. If callers want to skip the I/O entirely when the
+/// cache is warm, check [`unified_index_cached`] first and skip
+/// reading bytes in that case (passing `passes = []` is fine on a
+/// cache hit and an error on a cache miss).
+pub fn search_unified_cached(
+    paths: &[String],
+    passes: &[Bytes],
+    query: &str,
+    limit: usize,
+) -> Result<Vec<UnifiedSearchHit>, BundlebaseError> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let key: UnifiedIndexKey = paths.to_vec();
+
+    // Fast path: cache hit.
+    {
+        let mut cache = UNIFIED_INDEX_CACHE.lock();
+        if let Some(unified) = cache.get(&key) {
+            let unified = std::sync::Arc::clone(unified);
+            drop(cache);
+            return search_in_unified(&unified, query, limit);
+        }
+    }
+
+    // Cache miss — we need the actual bytes to build.
+    if passes.len() != paths.len() {
+        return Err(BundlebaseError::from(format!(
+            "search_unified_cached: cache miss for {} passes but only {} pass bytes provided. \
+             Caller should check unified_index_cached() before deciding whether to skip the I/O.",
+            paths.len(),
+            passes.len()
+        )));
+    }
+    let unified = std::sync::Arc::new(build_unified_index(passes)?);
+    {
+        let mut cache = UNIFIED_INDEX_CACHE.lock();
+        cache.put(key, std::sync::Arc::clone(&unified));
+    }
+    search_in_unified(&unified, query, limit)
+}
+
+/// Returns `true` when the unified-index cache has an entry for the
+/// given path set. Lets callers skip reading pass tars on a cache hit.
+pub fn unified_index_cached(paths: &[String]) -> bool {
+    let mut cache = UNIFIED_INDEX_CACHE.lock();
+    cache.contains(&paths.to_vec())
 }
 
 impl Index for TextIndex {
@@ -1037,6 +1165,59 @@ mod tests {
             "expected 2 pass1 'cargo' hits across unified search, got {} (total hits {})",
             pass1_hits.len(),
             hits.len()
+        );
+    }
+
+    /// Cache contract: a cache hit must skip the build entirely
+    /// (callers can pass empty `passes` and still get hits) and produce
+    /// the same results as the bare `search_unified`.
+    #[test]
+    fn test_search_unified_cached_reuses_assembly() {
+        let columns = vec!["text".to_string()];
+        let pass0 = TextIndex::build_streaming_multi(
+            "p0",
+            &columns,
+            vec![
+                (vec![Some("alpha bravo".to_string())], RowId::from(1u64)),
+                (vec![Some("charlie alpha".to_string())], RowId::from(2u64)),
+            ]
+            .into_iter(),
+            &TokenizerConfig::Simple,
+        )
+        .expect("build pass0");
+        let p0_bytes = pass0.serialize().expect("serialize");
+
+        let paths = vec!["test://cache_reuse/0".to_string()];
+        let passes = vec![p0_bytes];
+
+        // Miss → cached
+        assert!(!unified_index_cached(&paths));
+        let first =
+            search_unified_cached(&paths, &passes, "alpha", 10).expect("first call");
+        assert_eq!(first.len(), 2);
+        assert!(unified_index_cached(&paths));
+
+        // Hit → skips build entirely. Pass an empty `passes` slice to
+        // prove the cache fed the result without re-extracting.
+        let second =
+            search_unified_cached(&paths, &[], "alpha", 10).expect("second call (cache hit)");
+        assert_eq!(second.len(), 2);
+        let scores_first: Vec<_> = first.iter().map(|h| h.score).collect();
+        let scores_second: Vec<_> = second.iter().map(|h| h.score).collect();
+        assert_eq!(scores_first, scores_second);
+
+        // A different query against the same cached index also works.
+        let other =
+            search_unified_cached(&paths, &[], "charlie", 10).expect("second query (cache hit)");
+        assert_eq!(other.len(), 1);
+
+        // Cache miss with no bytes → clear error, not a panic.
+        let unknown_paths = vec!["test://cache_reuse/never_seen".to_string()];
+        let err = search_unified_cached(&unknown_paths, &[], "alpha", 10).unwrap_err();
+        assert!(
+            err.to_string().contains("cache miss"),
+            "expected 'cache miss' in error: {}",
+            err
         );
     }
 }

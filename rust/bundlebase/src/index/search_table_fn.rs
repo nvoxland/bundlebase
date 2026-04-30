@@ -413,24 +413,48 @@ impl TableProvider for SearchResultTableProvider {
         // prevents unbounded result sets for broad search terms.
         let search_limit = limit.unwrap_or(10000);
 
+        // Path-only cache key (paths are content-addressed, so identity
+        // implies bytes-identity). On cache hit we skip the I/O entirely;
+        // on miss we pay tar reads + assembly once per (set-of-passes)
+        // and reuse the unified index for every subsequent search.
+        let pass_paths: Vec<String> = per_entry
+            .iter()
+            .map(|e| e.indexed_blocks.path().to_string())
+            .collect();
+
+        // Read pass bytes only on cache miss. We don't know that yet, but
+        // the cached path is checked first inside search_unified_cached.
         let mut pass_bytes: Vec<bytes::Bytes> = Vec::with_capacity(per_entry.len());
-        for entry in &per_entry {
-            let index_path = entry.indexed_blocks.path();
-            let index_file =
-                ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())
-                    .map_err(|e| DataFusionError::External(e))?;
-            let index_bytes = index_file
-                .read_bytes()
-                .await
-                .map_err(|e| DataFusionError::External(e))?
-                .ok_or_else(|| {
-                    DataFusionError::Execution(format!("Text index file not found: {}", index_path))
-                })?;
-            pass_bytes.push(index_bytes);
+        if !bundlebase_index::unified_index_cached(&pass_paths) {
+            for entry in &per_entry {
+                let index_path = entry.indexed_blocks.path();
+                let index_file = ObjectStoreFile::from_str(
+                    index_path,
+                    self.data_dir.as_ref(),
+                    self.config.clone(),
+                )
+                .map_err(|e| DataFusionError::External(e))?;
+                let index_bytes = index_file
+                    .read_bytes()
+                    .await
+                    .map_err(|e| DataFusionError::External(e))?
+                    .ok_or_else(|| {
+                        DataFusionError::Execution(format!(
+                            "Text index file not found: {}",
+                            index_path
+                        ))
+                    })?;
+                pass_bytes.push(index_bytes);
+            }
         }
 
-        let hits = bundlebase_index::search_unified(&pass_bytes, &rewritten_query, search_limit)
-            .map_err(|e| DataFusionError::External(e))?;
+        let hits = bundlebase_index::search_unified_cached(
+            &pass_paths,
+            &pass_bytes,
+            &rewritten_query,
+            search_limit,
+        )
+        .map_err(|e| DataFusionError::External(e))?;
 
         for hit in hits {
             // hit.pass_idx indexes into per_entry, so we know exactly which
