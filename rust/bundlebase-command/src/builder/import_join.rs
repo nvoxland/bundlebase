@@ -667,6 +667,7 @@ mod tests {
         let op = AnyOperation::CreateView(CreateViewOp {
             id: ObjectId::generate(),
             name: "v".into(),
+            sql: String::new(),
         });
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
