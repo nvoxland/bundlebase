@@ -1198,7 +1198,11 @@ mod tests {
         .expect("build pass0");
         let p0_bytes = pass0.serialize().expect("serialize");
 
-        let paths = vec!["test://cache_reuse/0".to_string()];
+        // Use a path that satisfies the content-addressed-look check on
+        // search_unified_cached. The bytes don't actually have to match
+        // the hash — the check is just a debug-only sanity guard against
+        // accidental non-content-addressed callers.
+        let paths = vec!["aa/aaaaaaaaaaaaaa.index.inverted.tar".to_string()];
         let passes = vec![p0_bytes];
 
         // Miss → cached
@@ -1223,7 +1227,7 @@ mod tests {
         assert_eq!(other.len(), 1);
 
         // Cache miss with no bytes → clear error, not a panic.
-        let unknown_paths = vec!["test://cache_reuse/never_seen".to_string()];
+        let unknown_paths = vec!["bb/bbbbbbbbbbbbbb.index.inverted.tar".to_string()];
         let err = search_unified_cached(&unknown_paths, &[], "alpha", 10).unwrap_err();
         assert!(
             err.to_string().contains("cache miss"),
