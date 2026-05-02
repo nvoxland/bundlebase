@@ -109,7 +109,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           manylinux: auto
           rust-toolchain: stable
@@ -167,7 +167,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.os == 'macos-13' && 'x86_64' || 'aarch64' }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           rust-toolchain: stable
           working-directory: .
@@ -223,7 +223,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64
-          args: --release --out dist --find-interpreter
+          args: --release --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           rust-toolchain: stable
           working-directory: .
