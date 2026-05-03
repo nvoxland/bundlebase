@@ -1,6 +1,6 @@
 # Bundlebase config file for the Claude transcript history bundle.
 #
 # The bundle ships an FFI shared library; bundlebase only loads external code
-# when this is set to 'true'. Pass with `bundlebase ... --config bundlebase-config.yaml`.
+# when this is set to 'true'. Pass with `bundlebase ... --config bundlebase.yaml`.
 system:
   allow_external_code: 'true'

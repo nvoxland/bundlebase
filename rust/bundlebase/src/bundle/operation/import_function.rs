@@ -11,6 +11,35 @@ use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
+mod input_types_serde {
+    use crate::bundle::operation::serde_util::{deserialize_data_type, serialize_data_type};
+    use arrow::datatypes::DataType;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_yaml_ng::Value;
+
+    pub fn serialize<S>(types: &[DataType], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let values: Result<Vec<Value>, _> = types
+            .iter()
+            .map(|dt| serialize_data_type(dt).map_err(serde::ser::Error::custom))
+            .collect();
+        values?.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<DataType>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let values: Vec<Value> = Vec::deserialize(deserializer)?;
+        values
+            .iter()
+            .map(|v| deserialize_data_type(v).map_err(serde::de::Error::custom))
+            .collect()
+    }
+}
+
 /// Operation that defines a named function and registers it with DataFusion.
 ///
 /// Always persisted — for runtime-only functions, use `import_temp_function` instead.
@@ -22,8 +51,10 @@ pub struct ImportFunctionOp {
     /// Full dotted function name (e.g., "acme.double_val")
     pub name: String,
     /// Arrow types for input parameters
+    #[serde(with = "input_types_serde")]
     pub input_types: Vec<DataType>,
     /// Arrow type for the return value
+    #[serde(with = "crate::bundle::operation::serde_util::data_type_serde")]
     pub return_type: DataType,
     /// Runtime with parsed entrypoint (e.g., `ipc::./my_func`)
     pub from: UdfRuntime,

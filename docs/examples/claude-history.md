@@ -22,7 +22,7 @@ No data is fetched at build time, so the bundle ends as a structure-only / empty
 | File | Description                                                                         | Download |
 |---|-------------------------------------------------------------------------------------|---|
 | <span style="white-space: nowrap">`claude-history-bundle.tar.gz`</span> | **Prebuilt** empty bundle (gzipped tar). Extract, open with `bundlebase`, and `FETCH`. | [Download](scripts/claude_history/claude-history-bundle.tar.gz){:download} |
-| <span style="white-space: nowrap">`bundlebase-config.yaml`</span> | Config file enabling `system.allow_external_code` so the bundled FFI connector loads. | [Download](scripts/claude_history/bundlebase-config.yaml){:download} |
+| <span style="white-space: nowrap">`bundlebase.yaml`</span> | Config file enabling `system.allow_external_code` so the bundled FFI connector loads. | [Download](scripts/claude_history/bundlebase.yaml){:download} |
 | <span style="white-space: nowrap">`create_claude_history_bundle.py`</span> | Python script that builds the connector, defines the bundle, and writes the `.tar`. | [Download](scripts/claude_history/create_claude_history_bundle.py){:download} |
 | <span style="white-space: nowrap">`claude_history_connector/main.go`</span> | Go connector source. Implements the bundlebase FFI ABI to walk `*.jsonl` files.     | [Download](scripts/claude_history/claude_history_connector/main.go){:download} |
 | <span style="white-space: nowrap">`claude_history_connector/go.mod`</span> | Go module manifest.                                                                 | [Download](scripts/claude_history/claude_history_connector/go.mod){:download} |
@@ -38,26 +38,26 @@ mkdir claude-history-bundle && tar -xzf claude-history-bundle.tar.gz -C claude-h
 
 Then `FETCH` to populate the bundle from your local `~/.claude/projects` directory and start querying. Pick whichever interface you prefer:
 
-The connector is a custom FFI shared library, so bundlebase has to be told it's allowed to load external code by setting `system.allow_external_code = 'true'`. The CLI tab below picks that up from a YAML config file ([`bundlebase-config.yaml`](scripts/claude_history/bundlebase-config.yaml){:download}) via `--config`; SQL uses `SET CONFIG`; Python passes a `config={...}` dict to `open()`. Without it, `FETCH` refuses to load the connector.
+The connector is a custom FFI shared library, so bundlebase has to be told it's allowed to load external code by setting `system.allow_external_code = 'true'`. The CLI tab below picks that up from a YAML config file ([`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download}) via `--config`; SQL uses `SET CONFIG`; Python passes a `config={...}` dict to `open()`. Without it, `FETCH` refuses to load the connector.
 
 === "CLI"
 
-    Download [`bundlebase-config.yaml`](scripts/claude_history/bundlebase-config.yaml){:download} into the same directory as the extracted bundle and pass it with `--config`:
+    Download [`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download} into the same directory as the extracted bundle and pass it with `--config`:
 
     ```bash
     # Pull data from your local ~/.claude/projects into the bundle.
     # `extend` is the mutating subcommand; `--config` enables the FFI connector.
-    bundlebase extend --config bundlebase-config.yaml \
+    bundlebase extend --config bundlebase.yaml \
         --bundle ./claude-history-bundle \
         "FETCH base ADD"
 
     # Same --config is needed on every read that touches the connector.
-    bundlebase query --config bundlebase-config.yaml \
+    bundlebase query --config bundlebase.yaml \
         --bundle ./claude-history-bundle \
         "SELECT COUNT(*) FROM bundle"
 
     # Recent assistant replies in one project (uses the project_id index)
-    bundlebase query --config bundlebase-config.yaml \
+    bundlebase query --config bundlebase.yaml \
         --bundle ./claude-history-bundle "
             SELECT timestamp, content_text
             FROM message_events
@@ -68,7 +68,7 @@ The connector is a custom FFI shared library, so bundlebase has to be told it's 
         "
     ```
 
-    The config file is just two lines of YAML — `bundlebase-config.yaml` contains:
+    The config file is just two lines of YAML — `bundlebase.yaml` contains:
 
     ```yaml
     system:

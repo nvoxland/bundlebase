@@ -14,7 +14,7 @@ pub struct SerializedField {
 }
 
 /// Serialize a DataType to structured YAML format (avoiding YAML tags)
-fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
+pub fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
     match dt {
         // Only include branches for types that don't serialize correctly
         // Complex types with parameters - use structured format
@@ -178,7 +178,7 @@ fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
 }
 
 /// Deserialize a DataType from structured YAML format
-fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
+pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
     match value {
         Value::String(s) => {
             let dt: DataType = serde_yaml_ng::from_str(s).map_err(|e| e.to_string())?;
@@ -411,6 +411,36 @@ fn deserialize_field_internal(value: &Value) -> Result<Field, String> {
         .unwrap_or_default();
 
     Ok(Field::new(name, data_type, nullable).with_metadata(metadata))
+}
+
+/// `#[serde(with = "data_type_serde")]` adapter for a `DataType` field that
+/// lives inside a manifest struct. Routes through the structured
+/// (mapping/string) representation produced by `serialize_data_type` /
+/// `deserialize_data_type` instead of arrow's default tagged-tuple-variant
+/// derive — that derive emits YAML like `!Timestamp [Microsecond, UTC]`
+/// across two indented lines, which `serde_yaml_ng` cannot read back when
+/// the field lives inside an internally-tagged enum (e.g. `AnyOperation`).
+pub mod data_type_serde {
+    use super::{deserialize_data_type, serialize_data_type};
+    use arrow_schema::DataType;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_yaml_ng::Value;
+
+    pub fn serialize<S>(dt: &DataType, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = serialize_data_type(dt).map_err(serde::ser::Error::custom)?;
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DataType, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        deserialize_data_type(&value).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Serialize Schema with custom DataType handling

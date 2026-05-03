@@ -23,6 +23,7 @@ pub struct ExpectedColumn {
     /// Column name (case-sensitive, must match fetched schema exactly).
     pub name: String,
     /// Expected Arrow data type.
+    #[serde(with = "crate::bundle::operation::serde_util::data_type_serde")]
     pub data_type: DataType,
 }
 

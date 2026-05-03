@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/bmatcuk/doublestar/v4"
@@ -73,7 +74,7 @@ var outputSchema = map[string]string{
 	"source_file":                "Utf8",
 	"source_tool_assistant_uuid": "Utf8",
 	"thinking_text":              "Utf8",
-	"timestamp":                  "Utf8",
+	"timestamp":                  "Timestamp",
 	"tool_call_ids":              "Utf8",
 	"tool_input_json":            "Utf8",
 	"tool_names":                 "Utf8",
@@ -216,7 +217,7 @@ func buildRow(sourceFile string, lineNumber int64, event map[string]interface{})
 		"slug":                       stringValue(event["slug"]),
 		"source_file":                sourceFile,
 		"source_tool_assistant_uuid": stringValue(event["sourceToolAssistantUUID"]),
-		"timestamp":                  stringValue(event["timestamp"]),
+		"timestamp":                  parseTimestampMicros(stringValue(event["timestamp"])),
 		"tool_use_id":                stringValue(event["toolUseID"]),
 		"user_type":                  stringValue(event["userType"]),
 		"uuid":                       stringValue(event["uuid"]),
@@ -252,6 +253,7 @@ func buildRow(sourceFile string, lineNumber int64, event map[string]interface{})
 	toolCallIDs := []string{}
 	toolInputs := []interface{}{}
 	toolResultParts := []string{}
+	toolResultUseIDs := []string{}
 	var toolResultError *bool
 
 	if message, ok := mapValue(event["message"]); ok {
@@ -295,6 +297,7 @@ func buildRow(sourceFile string, lineNumber int64, event map[string]interface{})
 					}
 				case "tool_result":
 					appendIfPresent(&toolResultParts, stringOrStructuredText(itemMap["content"]))
+					appendIfPresent(&toolResultUseIDs, stringValue(itemMap["tool_use_id"]))
 					if value, ok := boolValue(itemMap["is_error"]); ok {
 						if toolResultError == nil {
 							toolResultError = new(bool)
@@ -321,6 +324,13 @@ func buildRow(sourceFile string, lineNumber int64, event map[string]interface{})
 	}
 	if toolResultError != nil {
 		row["tool_result_error"] = *toolResultError
+	}
+	// Claude Code nests `tool_use_id` inside each `tool_result` content block;
+	// the top-level `event["toolUseID"]` only appears on a few sub-agent
+	// metadata events. Prefer the nested ID(s) so result rows can be joined
+	// back to the assistant's tool_use via the same id.
+	if len(toolResultUseIDs) > 0 {
+		row["tool_use_id"] = joinedWithComma(toolResultUseIDs)
 	}
 
 	searchParts := []string{
@@ -477,6 +487,21 @@ func int64Value(value interface{}) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// parseTimestampMicros converts an ISO-8601 string (the format Claude Code
+// writes for `timestamp` fields) to microseconds since the Unix epoch — the
+// units the SDK's Timestamp_us builder expects. Returns nil for empty or
+// unparseable inputs so the row gets a real null instead of a sentinel zero.
+func parseTimestampMicros(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return nil
+	}
+	return t.UnixMicro()
 }
 
 func stringValue(value interface{}) string {

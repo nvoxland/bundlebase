@@ -16,6 +16,7 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct CastColumnOp {
     pub id: ColumnId,
+    #[serde(with = "crate::bundle::operation::serde_util::data_type_serde")]
     pub new_type: DataType,
 }
 
