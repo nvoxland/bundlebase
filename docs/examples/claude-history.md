@@ -21,12 +21,12 @@ No data is fetched at build time, so the bundle ends as a structure-only / empty
 
 | File | Description                                                                         | Download |
 |---|-------------------------------------------------------------------------------------|---|
-| <span style="white-space: nowrap">`claude-history-bundle.tar.gz`</span> | **Prebuilt** empty bundle (gzipped tar). Extract, open with `bundlebase`, and `FETCH`. | [Download](scripts/claude_history/claude-history-bundle.tar.gz){:download} |
-| <span style="white-space: nowrap">`bundlebase.yaml`</span> | Config file enabling `system.allow_external_code` so the bundled FFI connector loads. | [Download](scripts/claude_history/bundlebase.yaml){:download} |
-| <span style="white-space: nowrap">`create_claude_history_bundle.py`</span> | Python script that builds the connector, defines the bundle, and writes the `.tar`. | [Download](scripts/claude_history/create_claude_history_bundle.py){:download} |
-| <span style="white-space: nowrap">`claude_history_connector/main.go`</span> | Go connector source. Implements the bundlebase FFI ABI to walk `*.jsonl` files.     | [Download](scripts/claude_history/claude_history_connector/main.go){:download} |
-| <span style="white-space: nowrap">`claude_history_connector/go.mod`</span> | Go module manifest.                                                                 | [Download](scripts/claude_history/claude_history_connector/go.mod){:download} |
-| <span style="white-space: nowrap">`claude_history_connector/go.sum`</span> | Go module checksums.                                                                | [Download](scripts/claude_history/claude_history_connector/go.sum){:download} |
+| <span style="white-space: nowrap">`claude-history-bundle.tar.gz`</span> | **Prebuilt** empty bundle (gzipped tar). Extract, open with `bundlebase`, and `FETCH`. | [Download](scripts/claude_history/claude-history-bundle.tar.gz){:download="claude-history-bundle.tar.gz"} |
+| <span style="white-space: nowrap">`bundlebase.yaml`</span> | Config file enabling `system.allow_external_code` so the bundled FFI connector loads. | [Download](scripts/claude_history/bundlebase.yaml){:download="bundlebase.yaml"} |
+| <span style="white-space: nowrap">`create_claude_history_bundle.py`</span> | Python script that builds the connector, defines the bundle, and writes the `.tar`. | [Download](scripts/claude_history/create_claude_history_bundle.py){:download="create_claude_history_bundle.py"} |
+| <span style="white-space: nowrap">`claude_history_connector/main.go`</span> | Go connector source. Implements the bundlebase FFI ABI to walk `*.jsonl` files.     | [Download](scripts/claude_history/claude_history_connector/main.go){:download="main.go"} |
+| <span style="white-space: nowrap">`claude_history_connector/go.mod`</span> | Go module manifest.                                                                 | [Download](scripts/claude_history/claude_history_connector/go.mod){:download="go.mod"} |
+| <span style="white-space: nowrap">`claude_history_connector/go.sum`</span> | Go module checksums.                                                                | [Download](scripts/claude_history/claude_history_connector/go.sum){:download="go.sum"} |
 
 ## Using the Prebuilt Bundle
 
@@ -38,11 +38,11 @@ mkdir claude-history-bundle && tar -xzf claude-history-bundle.tar.gz -C claude-h
 
 Then `FETCH` to populate the bundle from your local `~/.claude/projects` directory and start querying. Pick whichever interface you prefer:
 
-The connector is a custom FFI shared library, so bundlebase has to be told it's allowed to load external code by setting `system.allow_external_code = 'true'`. The CLI tab below picks that up from a YAML config file ([`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download}) via `--config`; SQL uses `SET CONFIG`; Python passes a `config={...}` dict to `open()`. Without it, `FETCH` refuses to load the connector.
+The connector is a custom FFI shared library, so bundlebase has to be told it's allowed to load external code by setting `system.allow_external_code = 'true'`. The CLI tab below picks that up from a YAML config file ([`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download="bundlebase.yaml"}) via `--config`; SQL uses `SET CONFIG`; Python passes a `config={...}` dict to `open()`. Without it, `FETCH` refuses to load the connector.
 
 === "CLI"
 
-    Download [`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download} into the same directory as the extracted bundle and pass it with `--config`:
+    Download [`bundlebase.yaml`](scripts/claude_history/bundlebase.yaml){:download="bundlebase.yaml"} into the same directory as the extracted bundle and pass it with `--config`:
 
     ```bash
     # Pull data from your local ~/.claude/projects into the bundle.
