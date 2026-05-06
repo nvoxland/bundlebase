@@ -39,6 +39,17 @@ pub struct BundleArgs {
 ///
 /// If the bundle doesn't exist, returns a helpful error suggesting `bundlebase create`.
 pub async fn open_bundle(args: &BundleArgs) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+    open_bundle_with_create_hint(args, "To create a new bundle, use 'bundlebase create'.").await
+}
+
+/// Like [`open_bundle`], but lets the caller customize the hint shown when the
+/// bundle doesn't exist. Used by commands like `repl` and `serve` that have
+/// their own `--create` flag and want to point at it instead of the separate
+/// `bundlebase create` subcommand.
+pub async fn open_bundle_with_create_hint(
+    args: &BundleArgs,
+    create_hint: &str,
+) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
 
     // Demoted from `info!` to `debug!` — every CLI invocation printed
@@ -61,8 +72,8 @@ pub async fn open_bundle(args: &BundleArgs) -> Result<Arc<dyn BundleFacade>, Bun
         let msg = e.to_string();
         if msg.contains("init.yaml") || msg.contains("not found") || msg.contains("No such file") || msg.contains("does not exist") {
             BundlebaseError::from(format!(
-                "No bundle found at '{}'. To create a new bundle, use 'bundlebase create'.\n\nUnderlying error: {}",
-                args.bundle, msg
+                "No bundle found at '{}'. {}\n\nUnderlying error: {}",
+                args.bundle, create_hint, msg
             ))
         } else {
             e
@@ -262,6 +273,148 @@ mod tests {
         assert!(
             msg.contains("bundlebase create"),
             "Expected suggestion to use 'bundlebase create' in error, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repl_create_flag_creates_bundle() {
+        init();
+        let url = format!(
+            "memory:///repl_create_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+
+        // Pipe empty stdin so the REPL falls through to one-shot mode
+        // and exits without trying to enter raw terminal mode.
+        // (stdin is non-tty under cargo test, so this works automatically.)
+        let result = repl_cmd::run(repl_cmd::ReplArgs {
+            bundle: BundleArgs {
+                bundle: url.clone(),
+                read_only: false,
+                config: None,
+            },
+            format: bundlebase_cli::OutputFormat::Table,
+            create: true,
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "Expected repl --create to succeed, got: {:?}",
+            result.err()
+        );
+
+        // Bundle should now be persisted and re-openable
+        let open_args = BundleArgs {
+            bundle: url,
+            read_only: true,
+            config: None,
+        };
+        assert!(
+            open_bundle(&open_args).await.is_ok(),
+            "Expected bundle to be openable after repl --create"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repl_open_missing_bundle_suggests_create_flag() {
+        init();
+        let args = BundleArgs {
+            bundle: "memory:///repl_open_missing_test".to_string(),
+            read_only: false,
+            config: None,
+        };
+        let err = repl_cmd::run(repl_cmd::ReplArgs {
+            bundle: args,
+            format: bundlebase_cli::OutputFormat::Table,
+            create: false,
+        })
+        .await
+        .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--create"),
+            "Expected error to mention --create flag, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_serve_create_existing_bundle_errors() {
+        init();
+        let url = format!(
+            "memory:///serve_create_existing_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+
+        // Create the bundle first
+        let builder = bundlebase::BundleBuilder::create(&url, None)
+            .await
+            .expect("Failed to create bundle");
+        builder.commit("Initial").await.expect("Failed to commit");
+
+        let err = server_cmd::run(server_cmd::ServerArgs {
+            bundle: BundleArgs {
+                bundle: url,
+                read_only: false,
+                config: None,
+            },
+            host: "127.0.0.1".to_string(),
+            port: Some(0),
+            create: true,
+        })
+        .await
+        .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("already exists"),
+            "Expected 'already exists' error from serve --create, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repl_create_existing_bundle_errors() {
+        init();
+        let url = format!(
+            "memory:///repl_create_existing_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+
+        // Create the bundle first
+        let builder = bundlebase::BundleBuilder::create(&url, None)
+            .await
+            .expect("Failed to create bundle");
+        builder.commit("Initial").await.expect("Failed to commit");
+
+        let err = repl_cmd::run(repl_cmd::ReplArgs {
+            bundle: BundleArgs {
+                bundle: url,
+                read_only: false,
+                config: None,
+            },
+            format: bundlebase_cli::OutputFormat::Table,
+            create: true,
+        })
+        .await
+        .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("already exists"),
+            "Expected 'already exists' in error, got: {}",
             msg
         );
     }
