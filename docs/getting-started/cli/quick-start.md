@@ -8,47 +8,46 @@ description: Get started with the Bundlebase CLI. Create a bundle, attach data, 
 ## Create a bundle and open the REPL
 
 ```bash
-bundlebase create --bundle ./my-bundle
-bundlebase repl --bundle ./my-bundle
+bundlebase repl --bundle ./my-bundle --create
 ```
 
 You'll see a header and prompt:
 
 ```
-Opened bundle at ./my-bundle (version ..., 1 commit)
+Opened bundle at file://tmp/my-bundle (version empty, 1 commit)
 Type '/help' for available commands, '/exit' to quit
 ----------------------------------------------------------
-./my-bundle>
+my-bundle>
 ```
 
 ## Attach data
 
 ```
-./my-bundle> ATTACH 'customers.csv'
+my-bundle> ATTACH 'customers.csv'
 ```
 
 ## Query
 
 ```
-./my-bundle> SELECT * FROM bundle
+my-bundle> SELECT * FROM bundle
 ```
 
 ## Filter rows
 
 ```
-./my-bundle> FILTER WITH SELECT * FROM bundle WHERE country = 'US'
+my-bundle> FILTER WITH SELECT * FROM bundle WHERE country = 'US'
 ```
 
 ## Commit
 
 ```
-./my-bundle> COMMIT 'Added and filtered customer data'
+my-bundle> COMMIT 'Added and filtered customer data'
 ```
 
 ## View history
 
 ```
-./my-bundle> SHOW HISTORY
+my-bundle> SHOW HISTORY
 ```
 
 ## Exit
