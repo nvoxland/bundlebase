@@ -175,7 +175,11 @@ pub(crate) mod test_utils {
 
     struct EmptyConfig;
     impl ConfigProvider for EmptyConfig {
-        fn get(&self, _: &Scope, _: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+        fn get_in_scope(
+            &self,
+            _: &Scope,
+            _: &ConfigKey,
+        ) -> Result<Option<String>, BundlebaseError> {
             Ok(None)
         }
     }

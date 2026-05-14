@@ -630,7 +630,7 @@ mod tests {
 
     struct EmptyConfigProvider;
     impl bundlebase_common::ConfigProvider for EmptyConfigProvider {
-        fn get(
+        fn get_in_scope(
             &self,
             _scope: &bundlebase_common::Scope,
             _key: &bundlebase_common::ConfigKey,

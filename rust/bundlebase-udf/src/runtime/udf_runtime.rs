@@ -344,7 +344,11 @@ mod tests {
     struct EmptyConfig;
 
     impl ConfigProvider for EmptyConfig {
-        fn get(&self, _scope: &Scope, _key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+        fn get_in_scope(
+            &self,
+            _scope: &Scope,
+            _key: &ConfigKey,
+        ) -> Result<Option<String>, BundlebaseError> {
             Ok(None)
         }
     }

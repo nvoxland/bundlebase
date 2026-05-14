@@ -8,7 +8,11 @@ use url::Url;
 struct EmptyConfigProvider;
 
 impl ConfigProvider for EmptyConfigProvider {
-    fn get(&self, _scope: &Scope, _key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+    fn get_in_scope(
+        &self,
+        _scope: &Scope,
+        _key: &ConfigKey,
+    ) -> Result<Option<String>, BundlebaseError> {
         Ok(None)
     }
 }
