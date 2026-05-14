@@ -31,7 +31,7 @@ impl TestConfigProvider {
 }
 
 impl ConfigProvider for TestConfigProvider {
-    fn get(
+    fn get_in_scope(
         &self,
         scope: &bundlebase_common::Scope,
         key: &bundlebase_common::ConfigKey,
