@@ -12,7 +12,7 @@ Custom connectors let you write data providers in any language. The `runtime` pa
 
 Internally, `python` and `ffi` run **in-process** (native mode) for zero-copy Arrow transfer. `java`, `docker`, and `ipc` run as **subprocesses** communicating over stdin/stdout.
 
-**Your source code is the same regardless of type** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
+**Your source code is the same regardless of type**; only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
 ## Runtime URI Format Reference
 
@@ -39,22 +39,22 @@ Bundlebase includes several built-in connectors that don't need to be imported:
 | `web_scrape` | Data scraped from web pages |
 | `postgres` | Data from a PostgreSQL database |
 
-Use these directly with `CREATE SOURCE` — no `IMPORT CONNECTOR` step needed.
+Use these directly with `CREATE SOURCE`; no `IMPORT CONNECTOR` step needed.
 
 ## Overview
 
 Custom connectors use a simple workflow:
 
-1. [**Load the connector**](#import-connector) — defines a named connector
-2. [**Create a source**](#create-source) — creates a source instance from the connector
-3. [**Fetch data**](#fetch) — discovers and attaches data from the source
+1. [**Load the connector**](#import-connector) -- defines a named connector
+2. [**Create a source**](#create-source) -- creates a source instance from the connector
+3. [**Fetch data**](#fetch) -- discovers and attaches data from the source
 
 To remove or rename connectors:
 
-- [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's entry)
-- [**Drop temp connector**](#drop-temp-connector) — removes runtime-only connector entries
-- [**Rename connector**](#rename-connector) — renames a connector and updates associated sources
-- [**Rename temp connector**](#rename-temp-connector) — renames runtime-only connector entries
+- [**Drop connector**](#drop-connector) -- removes the connector (or just a specific platform's entry)
+- [**Drop temp connector**](#drop-temp-connector) -- removes runtime-only connector entries
+- [**Rename connector**](#rename-connector) -- renames a connector and updates associated sources
+- [**Rename temp connector**](#rename-temp-connector) -- renames runtime-only connector entries
 
 ## Choosing a Runtime
 
@@ -129,19 +129,19 @@ Creates a named connector. The connector definition is **persisted** into the bu
 !!! note
     `IMPORT CONNECTOR` rejects `runtime='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for Python connectors.
 
-Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
+Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization to prevent naming collisions when sharing bundles. For example:
 
-- `mycompany.sales.crm` — "mycompany" namespace
-- `jdoe.weather.noaa` — personal namespace
-- `acme.weather` — organization namespace
+- `mycompany.sales.crm` -- "mycompany" namespace
+- `jdoe.weather.noaa` -- personal namespace
+- `acme.weather` -- organization namespace
 
 The name must contain exactly one dot.
 
-You can call `IMPORT CONNECTOR` multiple times for different platforms on the same connector — the last call for a given platform wins. At runtime, Bundlebase selects the best match for the current OS/architecture.
+You can call `IMPORT CONNECTOR` multiple times for different platforms on the same connector; the last call for a given platform wins. At runtime, Bundlebase selects the best match for the current OS/architecture.
 
 #### Multi-platform in one statement
 
-Instead of calling `IMPORT CONNECTOR` once per target, the SQL form accepts a **platform map** or a **glob** with `{os}`, `{arch}`, `{ext}` placeholders. Both desugar to N entries — one per platform — committed atomically.
+Instead of calling `IMPORT CONNECTOR` once per target, the SQL form accepts a **platform map** or a **glob** with `{os}`, `{arch}`, `{ext}` placeholders. Both desugar to N entries (one per platform) committed atomically.
 
 ```sql
 -- Map form: list every platform explicitly
@@ -173,7 +173,7 @@ The archive is copied into the bundle's content-addressed data directory and tra
 
 ### IMPORT TEMP CONNECTOR
 
-Creates a connector at **runtime only** — nothing is persisted into the bundle. Use this for `runtime='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
+Creates a connector at **runtime only**; nothing is persisted into the bundle. Use this for `runtime='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
 
 === "Async API"
 
@@ -275,7 +275,7 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `connector` | `str` | *(required)* | Connector name — either a built-in name or a dot-separated custom connector name |
+| `connector` | `str` | *(required)* | Connector name -- either a built-in name or a dot-separated custom connector name |
 | `args` | `dict` | `{}` | Key-value arguments passed to the connector. For custom connectors, these are forwarded as extra arguments to `discover()`, `data()`, and `stable_url()` |
 | `pack` | `str` | `"base"` | Which pack to attach discovered files to |
 
@@ -323,7 +323,7 @@ Discovers and attaches new files from sources. Returns a list of `FetchResults`,
 
 Removes a connector. Without a platform, removes the entire connector definition and **all** its entries (persisted and temporary) and source instances. With a platform, removes only the connector for that platform.
 
-Like other drop operations, the bundled artifacts are not deleted — a `DropConnectorOp` is added to the history.
+Like other drop operations, the bundled artifacts are not deleted; a `DropConnectorOp` is added to the history.
 
 === "Async API"
 
@@ -461,7 +461,7 @@ Renames **runtime-only** connector entries to a new name. Only temporary entries
 
 ### Native Mode
 
-**Python:** Source objects are called directly in-process via PyO3 — no subprocess, no serialization.
+**Python:** Source objects are called directly in-process via PyO3; no subprocess, no serialization.
 
 **Compiled languages:** Build a shared library (`.so`/`.dylib`/`.dll`) exporting the [C ABI](native.md#c-abi-reference). Bundlebase `dlopen`s it and uses the Arrow C Data Interface.
 
@@ -469,10 +469,10 @@ Renames **runtime-only** connector entries to a new name. Only temporary entries
 
 An IPC connector runs as a subprocess that Bundlebase launches and communicates with over stdin/stdout:
 
-1. **Discover** — Bundlebase sends a `discover` call. Your source returns a list of available data locations.
-2. **Data** — For each location, Bundlebase sends a `data` call. Your source returns Arrow record batches.
-3. **Stable URL** (optional) — Bundlebase may send a `stable_url` call to check if a location has a cached URL.
-4. **Shutdown** — Bundlebase sends a `shutdown` call and the subprocess exits.
+1. **Discover** -- Bundlebase sends a `discover` call. Your source returns a list of available data locations.
+2. **Data** -- For each location, Bundlebase sends a `data` call. Your source returns Arrow record batches.
+3. **Stable URL** (optional) -- Bundlebase may send a `stable_url` call to check if a location has a cached URL.
+4. **Shutdown** -- Bundlebase sends a `shutdown` call and the subprocess exits.
 
 ## Key Concepts
 
@@ -548,7 +548,7 @@ The container receives JSON-RPC on stdin and writes responses to stdout.
 
 ## SDK Quick Start
 
-Each SDK handles the protocol for you. Implement the connector interface and choose your entry point — `serve()` for IPC mode or the native export for zero-copy mode.
+Each SDK handles the protocol for you. Implement the connector interface and choose your entry point: `serve()` for IPC mode or the native export for zero-copy mode.
 
 === "Python"
 
@@ -637,35 +637,35 @@ For implementing connectors in languages without an SDK.
 
 ### Health Check
 
-**`ping`** — Returns `"pong"`. Used by Bundlebase to verify the subprocess is alive and responsive. All SDKs handle this automatically.
+**`ping`** -- Returns `"pong"`. Used by Bundlebase to verify the subprocess is alive and responsive. All SDKs handle this automatically.
 
 ### Reserved Argument Keys
 
 The `args` map passed to `discover`, `data`, and `stable_url` may contain reserved keys prefixed with `_`:
 
-- **`_columns`** — A comma-separated list of column names that the caller wants. Connectors that support column pushdown can parse this key to return only the requested columns, reducing data transfer. It is safe to ignore this key.
+- **`_columns`** -- A comma-separated list of column names that the caller wants. Connectors that support column pushdown can parse this key to return only the requested columns, reducing data transfer. It is safe to ignore this key.
 
 ### Methods
 
-**`discover`** — Returns available locations.
+**`discover`** -- Returns available locations.
 
 Request params: `{"attached_locations": ["loc1", ...], ...extra_args}`
 
 Response: `{"locations": [{"location": "...", "must_copy": true, "format": "parquet", "version": "v1", "num_rows": 1234}, ...]}`
 
-`num_rows` must be present (integer or JSON `null`) — see the [Location](#location) field reference.
+`num_rows` must be present (integer or JSON `null`); see the [Location](#location) field reference.
 
-**`data`** — Returns data for a location.
+**`data`** -- Returns data for a location.
 
 Request params: `{"location": {"location": "...", "must_copy": true, "format": "...", "version": "...", "num_rows": null}, ...extra_args}`
 
 Response: `{"ok": true}` followed by a length-prefixed Arrow IPC frame.
 
-**`stable_url`** — Returns a stable URL (optional).
+**`stable_url`** -- Returns a stable URL (optional).
 
 Response: `{"url": "https://..."}` or `null`.
 
-**`shutdown`** — Clean exit.
+**`shutdown`** -- Clean exit.
 
 Response: `{"ok": true}`, then exit.
 

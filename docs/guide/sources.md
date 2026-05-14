@@ -9,7 +9,7 @@ The source workflow has two steps:
 1. **Define a source** with `CREATE SOURCE` - Specifies where to look for files
 2. **Fetch new files** with `FETCH` - Discovers and attaches any new files found
 
-`CREATE SOURCE` runs an implicit `FETCH base ADD` by default, so the new source is populated immediately. Pass `fetch=False` (Python) or add `NO FETCH` (SQL) to skip that step — useful when shipping an empty bundle whose recipients fetch their own data.
+`CREATE SOURCE` runs an implicit `FETCH base ADD` by default, so the new source is populated immediately. Pass `fetch=False` (Python) or add `NO FETCH` (SQL) to skip that step. This is useful when shipping an empty bundle whose recipients fetch their own data.
 
 ## Basic Usage
 
@@ -107,9 +107,9 @@ Downloads data from a single HTTP(S) URL. Supports GET, POST, and PUT methods, c
 
 **Format auto-detection:** When `format` is `auto` (the default), the connector detects the data format using this priority:
 
-1. **Content-Type header** — from the HTTP response (e.g., `text/csv`, `application/json`)
-2. **URL file extension** — recognized extensions: `.csv`, `.json`, `.jsonl`, `.parquet`, `.tsv`, `.xlsx`
-3. **Content inspection** — examines the downloaded bytes
+1. **Content-Type header** from the HTTP response (e.g., `text/csv`, `application/json`)
+2. **URL file extension** (recognized: `.csv`, `.json`, `.jsonl`, `.parquet`, `.tsv`, `.xlsx`)
+3. **Content inspection** of the downloaded bytes
 
 **GET requests (default):**
 
@@ -119,7 +119,7 @@ Downloads data from a single HTTP(S) URL. Supports GET, POST, and PUT methods, c
     -- Download a CSV directly
     CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')
 
-    -- API endpoint — format auto-detected from Content-Type header
+    -- API endpoint, format auto-detected from Content-Type header
     CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?query=results')
 
     -- Force format when auto-detection doesn't match
@@ -151,9 +151,9 @@ Downloads data from a single HTTP(S) URL. Supports GET, POST, and PUT methods, c
 
 **POST and PUT requests:**
 
-Some APIs require POST or PUT to retrieve data — for example, query APIs that accept filter parameters as a JSON body. Use the `method` and `body` arguments.
+Some APIs require POST or PUT to retrieve data, for example query APIs that accept filter parameters as a JSON body. Use the `method` and `body` arguments.
 
-For multi-line JSON bodies, use [dollar-quoting](../sql-reference/index.md#string-literals) (`$$...$$`) — no escaping needed:
+For multi-line JSON bodies, use [dollar-quoting](../sql-reference/index.md#string-literals) (`$$...$$`), which avoids the need for escaping:
 
 === "SQL"
 
@@ -244,7 +244,7 @@ Accept: text/csv'
     ```
 
 !!! note
-    POST and PUT requests skip the HEAD probe entirely — `head_supported` has no effect for non-GET methods.
+    POST and PUT requests skip the HEAD probe entirely, so `head_supported` has no effect for non-GET methods.
 
 ## JSON Options
 
@@ -256,7 +256,7 @@ When a connector fetches a JSON file, you can control how records are extracted 
 | `json_sep` | `_` | Separator used when flattening nested field names. With the default, `user.name` becomes the column `user_name`. |
 | `json_meta` | _(none)_ | Comma-separated dot-notation paths to fields in the outer object to include as extra columns on every row (e.g., `"total,page"`). |
 
-**Common pattern — API with response wrapper:**
+**Common pattern: API with response wrapper**
 
 Most REST APIs return a wrapper like `{"total": 847, "data": [{...}, ...]}` rather than a bare array. Use `json_record_path` to reach the array and `json_meta` to capture outer fields:
 
@@ -546,7 +546,7 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 
 ### Custom Connectors
 
-Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#import-connector) or [`IMPORT TEMP CONNECTOR`](custom-connectors/index.md#import-temp-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
+Bundlebase supports custom connectors in two modes: **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#import-connector) or [`IMPORT TEMP CONNECTOR`](custom-connectors/index.md#import-temp-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
 
 #### native (In-Process, Zero-Copy)
 
@@ -568,8 +568,8 @@ See [Custom Connectors](custom-connectors/index.md) for full command reference, 
 
 To remove custom connectors, see the full command reference:
 
-- [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) — removes the connector (or just a specific platform's entry)
-- [`DROP TEMP CONNECTOR`](custom-connectors/index.md#drop-temp-connector) — removes runtime-only connector entries
+- [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) -- removes the connector (or just a specific platform's entry)
+- [`DROP TEMP CONNECTOR`](custom-connectors/index.md#drop-temp-connector) -- removes runtime-only connector entries
 
 ## Fetching Data
 
@@ -654,13 +654,13 @@ Each `FetchResults` object contains:
 | Property | Type | Description |
 |----------|------|-------------|
 | `connector` | `str` | Connector name (e.g., "remote_dir") |
-| `source_id` | `str` | Stable identifier for this source — pass to `DESCRIBE SOURCE` for full configuration |
+| `source_id` | `str` | Stable identifier for this source. Pass to `DESCRIBE SOURCE` for full configuration |
 | `pack` | `str` | Pack name ("base" or join name) |
 | `added` | `list[FetchedSource]` | Source locations newly added (one entry per `DiscoveredLocation`, *not* per bundle block) |
 | `replaced` | `list[FetchedSource]` | Source locations whose content changed and was re-attached |
 | `removed` | `list[str]` | Source locations no longer reported by the connector and detached |
 
-These lists are an *upper bound* on the resulting block delta — `MIN BATCH` may merge several added/replaced source locations into a single bundle block.
+These lists are an *upper bound* on the resulting block delta; `MIN BATCH` may merge several added/replaced source locations into a single bundle block.
 
 Methods:
 

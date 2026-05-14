@@ -1,17 +1,17 @@
 ---
-title: Why Bundlebase? — DVC vs Delta Lake vs Plain Files vs Databases
-description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases — analytics dataset sharing and LLM agent data storage.
+title: Why Bundlebase? -- DVC vs Delta Lake vs Plain Files vs Databases
+description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases -- analytics dataset sharing and LLM agent data storage.
 ---
 
 # Why Bundlebase?
 
-If you know Docker: the mental model is the same — the artifact carries its own context, opening the bundle is the pull, and consumers don't need to know how it was built — whether they're using Python, the CLI, a BI tool, or an AI assistant. Whether that fits your situation is what this page covers.
+If you know Docker, the mental model is the same: the artifact carries its own context, opening the bundle is the pull, and consumers don't need to know how it was built, whether they're using Python, the CLI, a BI tool, or an AI assistant. Whether that fits your situation is what this page covers.
 
 ## The problem with plain files
 
-Plain files on S3 or a shared drive are the default, and they work fine — until they don't. Here's where they fall apart:
+Plain files on S3 or a shared drive are the default, and they work fine until they don't. Here's where they fall apart:
 
-**Schema is implicit.** A Parquet file carries column names and types, which helps. A CSV carries nothing. Either way, there's no "what does this data represent" attached to the file. The consumer has to read a README, ask the person who made it, or just guess.
+**Schema is implicit.** A Parquet file carries column names and types, which helps. A CSV carries nothing. Either way, there's no "what does this data represent" attached to the file. The consumer has to read a README, ask the person who made it, or guess.
 
 **No transformation record.** Did someone filter this to only include active customers? Remove a PII column? Rename fields from the source? That history lives in a script somewhere, or in nobody's head. Six months later, nobody's sure what the file actually contains.
 
@@ -27,7 +27,7 @@ Bundlebase's answer: bundle the data, transformation record, commit history, and
 
 ### The scenario
 
-You have a quarterly sales export from your CRM — three CSVs with inconsistent column names, a few PII fields you need to strip, and a filter to apply (closed-won deals only). You want the data science team to work from a clean, stable version of this. You also want to update it monthly and have a clear changelog.
+You have a quarterly sales export from your CRM: three CSVs with inconsistent column names, a few PII fields you need to strip, and a filter to apply (closed-won deals only). You want the data science team to work from a clean, stable version of this. You also want to update it monthly and have a clear changelog.
 
 ### How you'd do it
 
@@ -44,7 +44,7 @@ You have a quarterly sales export from your CRM — three CSVs with inconsistent
         .drop_column("ssn")
         .drop_column("email")
         .filter("status = 'closed_won'")
-        .set_name("Q1 2026 Sales — Closed Won")
+        .set_name("Q1 2026 Sales -- Closed Won")
         .set_description("CRM export, PII removed, normalized column names"))
 
     bundle.commit("Initial Q1 2026 export")
@@ -71,7 +71,7 @@ The data science team uses it like this:
     import bundlebase.sync as bb
 
     bundle = bb.open("s3://company-data/sales-q1-2026")
-    print(bundle.name)           # "Q1 2026 Sales — Closed Won"
+    print(bundle.name)           # "Q1 2026 Sales -- Closed Won"
     print(bundle.description)    # what's in it and how it was prepared
     print(bundle.version)        # which commit they're on
 
@@ -101,15 +101,15 @@ sequenceDiagram
     participant DS as Data Science Team
 
     You->>Bundle: create().attach().filter().commit()
-    Note over Bundle: version 1 — 4,218 rows
+    Note over Bundle: version 1 -- 4,218 rows
 
     DS->>Bundle: bb.open("s3://company-data/sales-q1-2026")
     Bundle-->>DS: name, description, version, schema
     DS->>Bundle: .to_pandas()
-    Bundle-->>DS: DataFrame — ready to use
+    Bundle-->>DS: DataFrame -- ready to use
 
     You->>Bundle: extend().attach("april.csv").commit("Added April")
-    Note over Bundle: version 2 — 5,601 rows
+    Note over Bundle: version 2 -- 5,601 rows
 
     DS->>Bundle: bundle.history()
     Bundle-->>DS: [v1: Initial export, v2: Added April]
@@ -149,7 +149,7 @@ DVC versions data alongside code in Git. It's a good fit if you're tracking ML e
 
 #### vs. Delta Lake / Apache Iceberg
 
-Delta Lake and Iceberg solve table format problems at warehouse scale: concurrent writes, schema evolution, time travel, ACID transactions. They're genuinely good at these things. They also require Spark or Trino-class infrastructure and significant setup.
+Delta Lake and Iceberg solve table format problems at warehouse scale: concurrent writes, schema evolution, time travel, ACID transactions. They're good at these things. They also require Spark or Trino-class infrastructure and significant setup.
 
 | | Delta / Iceberg | Bundlebase |
 |---|---|---|
@@ -183,7 +183,7 @@ A database is right when you need concurrent writes, long-lived operational stor
 
 ### The scenario
 
-An agent is doing automated data analysis — scraping product reviews from an API, processing them, building up a dataset over multiple sessions. Between sessions, context resets. The agent needs to answer: what data do I already have? Where did it come from? What was the last thing I did?
+An agent is doing automated data analysis: scraping product reviews from an API, processing them, building up a dataset over multiple sessions. Between sessions, context resets. The agent needs to answer: what data do I already have? Where did it come from? What was the last thing I did?
 
 Without durable, self-describing storage, the agent either re-fetches everything or relies on a sidecar file it wrote itself (which may be stale, incomplete, or missing entirely if the previous session crashed).
 
@@ -204,7 +204,7 @@ In each session, the agent updates the bundle:
         .fetch("base", "add")
         .set_description("Product reviews from example.com API"))
 
-    bundle.commit(f"Fetched batch {batch_id} — {new_rows} new reviews")
+    bundle.commit(f"Fetched batch {batch_id} -- {new_rows} new reviews")
     ```
 
 === "SQL"
@@ -214,7 +214,7 @@ In each session, the agent updates the bundle:
     CREATE SOURCE http 'https://api.example.com/reviews'
       json_record_path=data;
     FETCH base ADD;
-    COMMIT 'Fetched batch 3 — 2,840 new reviews';
+    COMMIT 'Fetched batch 3 -- 2,840 new reviews';
     ```
 
 At the start of the next session, the agent reconstructs its context from the bundle:
@@ -234,9 +234,9 @@ At the start of the next session, the agent reconstructs its context from the bu
     # What happened last time?
     for entry in bundle.history():
         print(entry)
-    # → v1: Initial fetch — 1,240 reviews
-    # → v2: Fetched batch 2 — 3,100 new reviews
-    # → v3: Fetched batch 3 — 2,840 new reviews
+    # -> v1: Initial fetch -- 1,240 reviews
+    # -> v2: Fetched batch 2 -- 3,100 new reviews
+    # -> v3: Fetched batch 3 -- 2,840 new reviews
 
     # Query without loading everything
     recent = bundle.query(
@@ -251,9 +251,9 @@ At the start of the next session, the agent reconstructs its context from the bu
     SHOW STATUS;   -- name, rows, schema, version
     SHOW HISTORY;
 
-    -- v1: Initial fetch — 1,240 reviews
-    -- v2: Fetched batch 2 — 3,100 new reviews
-    -- v3: Fetched batch 3 — 2,840 new reviews
+    -- v1: Initial fetch -- 1,240 reviews
+    -- v2: Fetched batch 2 -- 3,100 new reviews
+    -- v3: Fetched batch 3 -- 2,840 new reviews
 
     SELECT * FROM bundle WHERE review_date >= '2026-01-01';
     ```
@@ -264,7 +264,7 @@ The manifest file stored with each commit is machine-readable and carries the fu
 
 ```yaml
 author: agent-process
-message: Fetched batch 3 — 2,840 new reviews
+message: Fetched batch 3 -- 2,840 new reviews
 timestamp: 2026-03-15T14:22:09Z
 changes:
   - description: Attach https://api.example.com/reviews
@@ -278,7 +278,7 @@ Three specific things this enables:
 
 - **Source provenance without a catalog.** The manifest stores the exact source URL and content hash for every attached file. The agent doesn't need an external system to answer "where did this come from."
 - **Machine-readable changelog.** `bundle.history()` returns structured entries. The agent can check whether data has changed since the last session without re-downloading anything.
-- **Structural metadata without a full scan.** `bundle.num_rows` and `bundle.schema` are cheap property reads — the agent can understand what it has before deciding whether to query.
+- **Structural metadata without a full scan.** `bundle.num_rows` and `bundle.schema` are cheap property reads, so the agent can understand what it has before deciding whether to query.
 
 ### Session flow
 
@@ -289,30 +289,30 @@ sequenceDiagram
     participant S2 as Agent Session 2
 
     S1->>B: create().fetch().commit("Initial fetch")
-    Note over B: v1 — 1,240 rows
+    Note over B: v1 -- 1,240 rows
 
     S1->>B: extend().fetch().commit("Batch 2")
-    Note over B: v2 — 4,340 rows
+    Note over B: v2 -- 4,340 rows
 
-    Note over S2: New session — context is empty
+    Note over S2: New session -- context is empty
 
     S2->>B: bb.open("s3://agent-workspace/product-reviews")
     B-->>S2: name, schema, num_rows, version
     S2->>B: bundle.history()
     B-->>S2: [v1: Initial fetch, v2: Batch 2]
     S2->>B: bundle.query("SELECT ...")
-    B-->>S2: DataFrame — agent continues where it left off
+    B-->>S2: DataFrame -- agent continues where it left off
 ```
 
 ### How it compares to alternatives
 
 #### vs. Plain JSON or Parquet files
 
-Plain files are the obvious baseline — just write the fetched data to a file. The capability gap is what's attached. A plain Parquet file has column names and types. A bundle has column names, types, source URL, content hash, transformation history, commit timestamps, and a name/description. An agent working with plain files has to maintain its own sidecar metadata file; with a bundle, the data carries its context.
+Plain files are the obvious baseline: write the fetched data to a file. The capability gap is what's attached. A plain Parquet file has column names and types. A bundle has column names, types, source URL, content hash, transformation history, commit timestamps, and a name/description. An agent working with plain files has to maintain its own sidecar metadata file; with a bundle, the data carries its context.
 
 #### vs. Vector databases
 
-Vector databases (Pinecone, Weaviate, Chroma) solve semantic search over unstructured text: find documents similar to this query by embedding distance. If your agent does retrieval-augmented generation over document chunks, use a vector database — that's what they're built for.
+Vector databases (Pinecone, Weaviate, Chroma) solve semantic search over unstructured text: find documents similar to this query by embedding distance. If your agent does retrieval-augmented generation over document chunks, use a vector database -- that's what they're built for.
 
 If your agent accumulates structured tabular data (review scores, prices, timestamps, event logs), a vector database is the wrong tool.
 
@@ -327,7 +327,7 @@ If your agent accumulates structured tabular data (review scores, prices, timest
 
 #### vs. Regular databases
 
-A database works well for agents running on a persistent server with a stable connection. For agents that run as ephemeral processes — serverless functions, CI jobs, scheduled scripts — a database requires connection management and usually a separate server process. Bundlebase lives at a path and opens with one call. The trade-off: no concurrent writes, no row-level permissions.
+A database works well for agents running on a persistent server with a stable connection. For agents that run as ephemeral processes -- serverless functions, CI jobs, scheduled scripts -- a database requires connection management and usually a separate server process. Bundlebase lives at a path and opens with one call. The trade-off: no concurrent writes, no row-level permissions.
 
 ---
 
@@ -348,19 +348,19 @@ Your data source is dirty and it stays dirty. Every time you pull a new export, 
 
     bundle = bb.create("s3://analytics/crm-pipeline")
 
-    # Define cleanup rules once — they fire automatically on every future attach
+    # Define cleanup rules once -- they fire automatically on every future attach
     bundle.always_delete("WHERE status = 'test'")
     bundle.always_delete("WHERE amount < 0")          # credits tracked separately
     bundle.always_delete("WHERE email IS NULL")
 
-    # Attach the first month's dirty export — rules apply automatically
+    # Attach the first month's dirty export -- rules apply automatically
     bundle.attach("s3://crm-exports/jan.csv")
-    bundle.commit("January — rules applied automatically")
+    bundle.commit("January -- rules applied automatically")
 
-    # Next month: extend and attach — same rules fire without you doing anything
+    # Next month: extend and attach -- same rules fire without you doing anything
     bundle = bb.open("s3://analytics/crm-pipeline").extend()
     bundle.attach("s3://crm-exports/feb.csv")
-    bundle.commit("February — rules applied automatically")
+    bundle.commit("February -- rules applied automatically")
     ```
 
 === "SQL"
@@ -371,14 +371,14 @@ Your data source is dirty and it stays dirty. Every time you pull a new export, 
     ALWAYS DELETE WHERE email IS NULL;
 
     ATTACH 's3://crm-exports/jan.csv';
-    COMMIT 'January — rules applied automatically';
+    COMMIT 'January -- rules applied automatically';
 
     -- next month
     ATTACH 's3://crm-exports/feb.csv';
-    COMMIT 'February — rules applied automatically';
+    COMMIT 'February -- rules applied automatically';
     ```
 
-The rules are stored in the bundle's manifest. Anyone who extends the bundle — a colleague, a scheduled script, a different process — gets the same cleanup applied. You can't accidentally skip it.
+The rules are stored in the bundle's manifest. Anyone who extends the bundle -- a colleague, a scheduled script, a different process -- gets the same cleanup applied. You can't accidentally skip it.
 
 ### Why this is different from a cleanup script
 
@@ -401,7 +401,7 @@ A cleanup script lives outside the data. It has to be run, remembered, and passe
 
 ---
 
-## Querying from anywhere — no Python required
+## Querying from anywhere -- no Python required
 
 Bundlebase can run as a SQL server:
 
@@ -409,7 +409,7 @@ Bundlebase can run as a SQL server:
 bundlebase serve --bundle s3://analytics/crm-pipeline --port 32010
 ```
 
-Any tool with an Arrow Flight JDBC or ODBC driver connects to it — or any client with native Arrow Flight support — Metabase, DBeaver, Power BI, R, Julia, Go, Java. The bundle is read-only from this interface; nothing the consumer does can change the committed data.
+Any tool with an Arrow Flight JDBC or ODBC driver connects to it -- or any client with native Arrow Flight support -- Metabase, DBeaver, Power BI, R, Julia, Go, Java. The bundle is read-only from this interface; nothing the consumer does can change the committed data.
 
 From R:
 ```r
@@ -420,7 +420,7 @@ df <- flight_get(conn, "SELECT region, SUM(amount) FROM bundle GROUP BY region")
 
 From DBeaver or any JDBC client: use the SQL JDBC driver, point it at `localhost:32010`, and query `bundle` as a table.
 
-This means a data analyst using Metabase and a Python developer using pandas can both work from the same versioned, self-describing dataset — from the same path, with the same data, at the same version.
+This means a data analyst using Metabase and a Python developer using pandas can both work from the same versioned, self-describing dataset -- from the same path, with the same data, at the same version.
 
 ---
 
@@ -432,7 +432,7 @@ For AI agents and assistants that support the Model Context Protocol:
 bundlebase mcp --bundle s3://agent-workspace/pricing-intel
 ```
 
-This exposes the bundle as a set of tools an AI assistant can call directly: `query`, `schema`, `sample`, `history`, `status`. The assistant can explore the dataset, run SQL, and check provenance without writing any code — the bundle is the context.
+This exposes the bundle as a set of tools an AI assistant can call directly: `query`, `schema`, `sample`, `history`, `status`. The assistant can explore the dataset, run SQL, and check provenance without writing any code -- the bundle is the context.
 
 ```
 > What data do I have in this bundle?
@@ -441,10 +441,10 @@ This exposes the bundle as a set of tools an AI assistant can call directly: `qu
 Bundle: Competitive Pricing Intelligence
 Rows: 14,302
 Columns: product_id (Int64), vendor (Utf8), price (Float64), fetched_at (Timestamp)
-Last commit: "Daily refresh — 2026-04-03"
+Last commit: "Daily refresh -- 2026-04-03"
 ```
 
-The combination of self-describing metadata and the MCP interface means an AI assistant can answer "what data do I have and where is it from" before deciding whether to query — the same reconstruction that takes several tool calls with plain files happens in one.
+The combination of self-describing metadata and the MCP interface means an AI assistant can answer "what data do I have and where is it from" before deciding whether to query -- the same reconstruction that takes several tool calls with plain files happens in one.
 
 ---
 
@@ -454,7 +454,7 @@ Built-in sources (S3, HTTP, SFTP, local files) and SQL cover most cases. When th
 
 ### Custom connectors
 
-Write a connector in Python, Go, Java, or any IPC-compatible language to attach data from sources that have no built-in support — Salesforce, an internal database, a proprietary API. Connectors implement a simple `Discover` + `Data` interface and register as a named source:
+Write a connector in Python, Go, Java, or any IPC-compatible language to attach data from sources that have no built-in support -- Salesforce, an internal database, a proprietary API. Connectors implement a simple `Discover` + `Data` interface and register as a named source:
 
 === "Python"
 
@@ -480,11 +480,11 @@ Write a connector in Python, Go, Java, or any IPC-compatible language to attach 
     COMMIT 'Q1 opportunities from Salesforce';
     ```
 
-Connectors built with non-Python runtimes (Go, Java, IPC binary) can be registered persistently — the connector definition is stored in the bundle manifest, so anyone who opens the bundle gets it automatically.
+Connectors built with non-Python runtimes (Go, Java, IPC binary) can be registered persistently -- the connector definition is stored in the bundle manifest, so anyone who opens the bundle gets it automatically.
 
 ### Custom SQL functions
 
-Register Python callables as scalar or aggregate UDFs and call them from any SQL query — `SELECT`, `FILTER`, `ALWAYS_DELETE`, wherever SQL runs:
+Register Python callables as scalar or aggregate UDFs and call them from any SQL query -- `SELECT`, `FILTER`, `ALWAYS_DELETE`, wherever SQL runs:
 
 === "Python"
 
@@ -521,23 +521,23 @@ Use this as a quick filter, not a definitive answer.
 **Use Bundlebase if:**
 
 - You want to share a versioned dataset with no infrastructure setup
-- Consumers use Python, a BI tool, the CLI, or an AI assistant — any or all of these
+- Consumers use Python, a BI tool, the CLI, or an AI assistant -- any or all of these
 - You have recurring dirty source data that needs consistent, automatic cleanup
-- You need self-describing data — name, description, history, schema
-- You need a custom data source or custom SQL logic — connectors and UDFs extend both
+- You need self-describing data -- name, description, history, schema
+- You need a custom data source or custom SQL logic -- connectors and UDFs extend both
 - You're building an agent that accumulates structured data across sessions
 - Your dataset fits comfortably in a single directory (local or cloud)
 - SQL queries are useful but you don't need a full database
 
 **Consider something else if:**
 
-- You need concurrent writes from multiple processes → use a database
-- You're already running Spark and the data is large (>1TB) → use Delta Lake or Iceberg
-- You need ML experiment metrics tied to code commits → use DVC
-- You need semantic search over unstructured text → use a vector database
-- You need row-level access control → use a database
-- You need a long-running operational data store with schema migrations → use a database
+- You need concurrent writes from multiple processes -> use a database
+- You're already running Spark and the data is large (>1TB) -> use Delta Lake or Iceberg
+- You need ML experiment metrics tied to code commits -> use DVC
+- You need semantic search over unstructured text -> use a vector database
+- You need row-level access control -> use a database
+- You need a long-running operational data store with schema migrations -> use a database
 
 ## What Bundlebase is not
 
-Bundlebase is not a database, not a data warehouse, and not a replacement for Spark at scale. It doesn't support concurrent writes, row-level permissions, or complex schema migrations. It's a format for packaging and sharing analytical datasets and giving them a minimal identity and history. If you need something it doesn't do, the alternatives above are better choices — and knowing that upfront saves everyone time.
+Bundlebase is not a database, not a data warehouse, and not a replacement for Spark at scale. It doesn't support concurrent writes, row-level permissions, or complex schema migrations. It's a format for packaging and sharing analytical datasets and giving them a minimal identity and history. If you need something it doesn't do, the alternatives above are better choices -- and knowing that upfront saves everyone time.

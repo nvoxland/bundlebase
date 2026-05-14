@@ -1,6 +1,6 @@
 # Sync API
 
-The sync API provides a synchronous interface perfect for scripts and Jupyter notebooks. No `async`/`await` required!
+The sync API provides a synchronous interface for scripts and Jupyter notebooks. No `async`/`await` required.
 
 ## Overview
 
@@ -9,7 +9,7 @@ The sync API is available in the `bundlebase.sync` module and wraps the async AP
 ```python
 import bundlebase.sync as dc
 
-# No await needed!
+# No await needed
 c = dc.create()
 c.attach("data.parquet")
 df = c.to_pandas()
@@ -231,7 +231,7 @@ c.filter("x > 10")
 df = c.to_pandas()
 ```
 
-Just remove `await` and import `bundlebase.sync`!
+Just remove `await` and import `bundlebase.sync`.
 
 ## Troubleshooting
 

@@ -21,7 +21,7 @@ This means a value set via `SET CONFIG` during a session always overrides the sa
 
 ## Configuration Methods
 
-### Runtime Config — SET CONFIG (Highest Priority)
+### Runtime Config -- SET CONFIG (Highest Priority)
 
 Use `SET CONFIG` or `set_config()` to set a configuration value for the current session only. This is the highest-priority config source. The value is not persisted and is lost when the session ends.
 
@@ -146,8 +146,8 @@ Environment variables use a single underscore (`_`) to separate the scope name f
 
 After stripping the `BB_` prefix:
 
-- **No `__`**: the first `_` separates scope name from key (e.g., `BB_S3_REGION` → scope `s3`, key `region`)
-- **With `__`**: split on `__` — first part = scope name, last part = key, middle parts = scope sub-path segments (e.g., `BB_S3__MY_BUCKET__KEY` → scope `s3/my_bucket`, key `key`)
+- **No `__`**: the first `_` separates scope name from key (e.g., `BB_S3_REGION` -> scope `s3`, key `region`)
+- **With `__`**: split on `__` -- first part = scope name, last part = key, middle parts = scope sub-path segments (e.g., `BB_S3__MY_BUCKET__KEY` -> scope `s3/my_bucket`, key `key`)
 
 | Environment Variable | Scope | Key |
 |---------------------|-------|-----|

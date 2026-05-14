@@ -134,7 +134,7 @@ pub struct Location {
 | `must_copy` | `bool` | `true` | Whether the data must be copied into the bundle |
 | `format` | `String` | `"parquet"` | File format |
 | `version` | `String` | `""` | Version string for change detection |
-| `num_rows` | `Option<u64>` | `None` | Row count for `FETCH ... DRY RUN` accounting. `Some(n)` when known cheaply (e.g. Parquet footer); `None` when counting would require fully parsing the data — bundlebase preserves the distinction in its output. |
+| `num_rows` | `Option<u64>` | `None` | Row count for `FETCH ... DRY RUN` accounting. `Some(n)` when known cheaply (e.g. Parquet footer); `None` when counting would require fully parsing the data. Bundlebase preserves the distinction in its output. |
 
 Convenience constructor: `Location::new("path")` sets defaults for all other fields.
 
@@ -396,7 +396,7 @@ The `export_source!` macro:
 2. Generates `extern "C"` functions matching the [Bundlebase C ABI](native.md#c-abi-reference)
 3. Uses Arrow's `FFI_ArrowArrayStream` for zero-copy data export
 
-The same `Connector` trait works for both native and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
+The same `Connector` trait works for both native and IPC; switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
 
 See [Native Mode](native.md) for the full C ABI reference.
 

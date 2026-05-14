@@ -45,10 +45,10 @@ bundlebase repl --bundle ./my-bundle
 
 For one-shot operations without the interactive REPL:
 
-- **`bundlebase query`** — Read-only queries (SELECT, EXPLAIN, SHOW, SYNTAX, meta-commands)
-- **`bundlebase create`** — Create a new bundle, optionally with initial commands
-- **`bundlebase extend`** — Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
-- **`bundlebase list-bundles`** — Discover all bundles in a directory
+- **`bundlebase query`** -- Read-only queries (SELECT, EXPLAIN, SHOW, SYNTAX, meta-commands)
+- **`bundlebase create`** -- Create a new bundle, optionally with initial commands
+- **`bundlebase extend`** -- Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
+- **`bundlebase list-bundles`** -- Discover all bundles in a directory
 
 ```bash
 # Read-only query
@@ -81,16 +81,16 @@ bundlebase extend --bundle ./data "ATTACH 'sales.csv'; FILTER WITH SELECT * FROM
 bundlebase query --bundle ./data "SHOW COLUMNS; SHOW COUNT"
 ```
 
-All statements are **validated before any execute** — if any statement has a syntax error, none will run. Semicolons inside single-quoted strings are handled correctly (e.g., `COMMIT 'added; cleaned'` is treated as one statement).
+All statements are **validated before any execute**: if any statement has a syntax error, none will run. Semicolons inside single-quoted strings are handled correctly (e.g., `COMMIT 'added; cleaned'` is treated as one statement).
 
 When using `bundlebase extend` with multiple statements, all changes are **committed together** as a single commit after all statements complete.
 
 ## REPL Features
 
-- **Command history** — Previous commands are saved to `~/.bundlebase/history.txt` (up to 1,000 entries) and recalled with the up/down arrow keys
-- **Tab completion** — Press Tab to complete command names and column names
-- **Emacs keybindings** — Standard Emacs shortcuts (Ctrl+A, Ctrl+E, Ctrl+K, etc.)
-- **Exit** — Press `Ctrl+C`, `Ctrl+D`, or type `/exit`
+- **Command history** -- Previous commands are saved to `~/.bundlebase/history.txt` (up to 1,000 entries) and recalled with the up/down arrow keys
+- **Tab completion** -- Press Tab to complete command names and column names
+- **Emacs keybindings** -- Standard Emacs shortcuts (Ctrl+A, Ctrl+E, Ctrl+K, etc.)
+- **Exit** -- Press `Ctrl+C`, `Ctrl+D`, or type `/exit`
 
 ## Meta-Commands
 
@@ -253,14 +253,14 @@ Use `--agent claude` or `--agent copilot` to bypass auto-detection.
 
 For Claude Code, it installs:
 
-- `.agents/skills/bundlebase/SKILL.md` and `reference.md` — agent skill files with CLI workflows and SQL command reference
-- `.mcp.json` — Claude Code MCP server config
+- `.agents/skills/bundlebase/SKILL.md` and `reference.md` -- agent skill files with CLI workflows and SQL command reference
+- `.mcp.json` -- Claude Code MCP server config
 - Appends a `## Bundlebase` section to `CLAUDE.md` (creates the file if it doesn't exist) so agents always know bundlebase is available
 
 For GitHub Copilot, it installs:
 
-- `.vscode/mcp.json` — workspace MCP server config for Bundlebase
-- `AGENTS.md` — always-on Bundlebase guidance for Copilot chat/agent workflows
+- `.vscode/mcp.json` -- workspace MCP server config for Bundlebase
+- `AGENTS.md` -- always-on Bundlebase guidance for Copilot chat/agent workflows
 
 ### User-Level Install
 
@@ -272,7 +272,7 @@ Global scope is Claude-only. It installs to `~/.agents/skills/bundlebase/`, `~/.
 
 ### Notes
 
-- The command is idempotent — running it again refreshes Bundlebase-managed config and skill files
+- The command is idempotent: running it again refreshes Bundlebase-managed config and skill files
 - No `--bundle` flag is needed
 - If auto-detection finds nothing on `PATH`, rerun with `--agent claude` or `--agent copilot`
 - The installed files contain CLI usage patterns and the full SQL command reference so agents can use bundlebase without making web requests to documentation

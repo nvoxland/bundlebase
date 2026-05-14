@@ -116,7 +116,7 @@ type Location struct {
 | `MustCopy` | `bool` | `false` (zero value) | Whether the data must be copied into the bundle |
 | `Format` | `string` | `""` (zero value) | File format |
 | `Version` | `string` | `""` (zero value) | Version string for change detection |
-| `NumRows` | `*int64` | `nil` (zero value) | Optional row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest lookup); leave `nil` when counting would require fully parsing the file — bundlebase preserves `nil` distinct from `0` so users can tell "no rows" from "I don't know". |
+| `NumRows` | `*int64` | `nil` (zero value) | Optional row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest lookup); leave `nil` when counting would require fully parsing the file. Bundlebase preserves `nil` distinct from `0` so users can tell "no rows" from "I don't know". |
 
 ### StableUrl
 
@@ -330,7 +330,7 @@ bundle.create_source('example.connector')
 
 `ExportConnector()` stores your connector globally. The package exports `bundlebase_discover`, `bundlebase_data`, `bundlebase_free`, and `bundlebase_stable_url` via cgo. Data is transferred through the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html) using `arrow/cdata.ExportArrowRecordBatchReader`.
 
-The same `Connector` interface works for both native and IPC — switch between them by changing only the entry point (`ExportConnector()` + `c-shared` build vs `func main() { Serve(&source) }`).
+The same `Connector` interface works for both native and IPC; switch between them by changing only the entry point (`ExportConnector()` + `c-shared` build vs `func main() { Serve(&source) }`).
 
 See [Native Mode](native.md) for the full C ABI reference.
 

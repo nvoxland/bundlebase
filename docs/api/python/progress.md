@@ -4,7 +4,7 @@ Monitor the progress of long-running Bundlebase operations.
 
 ## Overview
 
-Bundlebase provides a progress tracking system for monitoring data processing operations. This is particularly useful when working with large datasets or long-running transformations.
+Bundlebase provides a progress tracking system for monitoring data processing operations. Use it when working with large datasets or long-running transformations.
 
 ## Progress Module
 
@@ -93,7 +93,7 @@ from tqdm import tqdm
 progress = StreamProgress()
 c = await bundlebase.open("large_dataset.parquet")
 
-# Use tqdm for nice progress bar
+# Use tqdm for a progress bar
 with tqdm(total=100, desc="Processing") as pbar:
     last_percentage = 0
 
@@ -174,7 +174,7 @@ Progress tracking adds minimal overhead:
 - **With progress**: ~0.1ms per batch
 - **Without progress**: ~0.05ms per batch
 
-For most use cases, this overhead is negligible compared to data processing time.
+This overhead is negligible compared to data processing time.
 
 ## Integration with UI Frameworks
 

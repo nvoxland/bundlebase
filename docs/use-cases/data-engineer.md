@@ -1,6 +1,6 @@
 ---
 title: Bundlebase for Data Engineers — Automated Incremental Data Pipelines
-description: Build idempotent data pipelines with Bundlebase sources. Fetch incrementally from S3, HTTP APIs, and SFTP. Commit history serves as your pipeline audit log. Works with cron, Airflow, and GitHub Actions.
+description: Build idempotent data pipelines with Bundlebase sources. Fetch incrementally from S3, HTTP APIs, and SFTP. Commit history is your pipeline audit log. Works with cron, Airflow, and GitHub Actions.
 ---
 
 # Use Case: Data Engineer
@@ -278,7 +278,7 @@ bundle.commit(f"Daily refresh — {date.today()}")
 === "Python"
 
     ```python
-    bundle.always_update("SET currency = UPPER(currency)")           # normalize 'usd' → 'USD'
+    bundle.always_update("SET currency = UPPER(currency)")           # normalize 'usd' -> 'USD'
     bundle.always_update("SET amount = ROUND(amount, 2)")            # normalize precision
     bundle.always_update("SET event_type = LOWER(event_type)")       # normalize casing
     ```

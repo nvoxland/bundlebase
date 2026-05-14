@@ -122,7 +122,7 @@ public record Location(String location, boolean mustCopy, String format, String 
 | `mustCopy` | `boolean` | `true` | Whether the data must be copied into the bundle |
 | `format` | `String` | `"parquet"` | File format |
 | `version` | `String` | `""` | Version string for change detection |
-| `numRows` | `Long` | `null` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest); leave `null` when counting would require fully parsing the data — bundlebase preserves `null` distinct from `0`. |
+| `numRows` | `Long` | `null` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest); leave `null` when counting would require fully parsing the data. Bundlebase preserves `null` distinct from `0`. |
 
 The single-argument constructor `new Location("path")` defaults to `mustCopy=true`, `format="parquet"`, `version=""`, `numRows=null`.
 
@@ -399,7 +399,7 @@ Build your connector as a shared library using Project Panama (Java 22+) for zer
 
 ### Requirements
 
-- **Java 22+** — uses the Foreign Function & Memory API (JEP 454)
+- **Java 22+** -- uses the Foreign Function & Memory API (JEP 454)
 - GCC or Clang for compiling the thin C bootstrap
 
 ### Setup
@@ -441,17 +441,17 @@ bundle.create_source('example.connector')
 
 ### How It Works
 
-The native bridge uses Project Panama's Foreign Function & Memory API for high-performance Java↔C interop:
+The native bridge uses Project Panama's Foreign Function & Memory API for high-performance Java/C interop:
 
 1. A thin C bootstrap (`bundlebase_plugin.c`) starts the JVM once at library load
-2. It calls `PluginExport.initialize()` — a single JNI call that registers Panama upcall stubs
-3. All subsequent `bundlebase_discover`, `bundlebase_data`, and `bundlebase_stable_url` calls route through Panama function pointers — no JNI method dispatch on the hot path
+2. It calls `PluginExport.initialize()`, a single JNI call that registers Panama upcall stubs
+3. All subsequent `bundlebase_discover`, `bundlebase_data`, and `bundlebase_stable_url` calls route through Panama function pointers; no JNI method dispatch on the hot path
 4. Strings are allocated via `malloc()` in Java (using Panama downcalls) and freed by Bundlebase via `bundlebase_free()`
 5. Arrow data is transferred via the Arrow C Data Interface (`ArrowArrayStream`)
 
 This architecture means JNI is used only for the one-time JVM bootstrap. All data-path calls use Panama upcalls, which avoids JNI overhead (method ID lookups, string conversions in C, etc.).
 
-The same `Connector` interface works for both native and IPC — switch between them by changing only the entry point (`PluginExport.register()` + native build vs `Serve.run()` + JAR).
+The same `Connector` interface works for both native and IPC; switch between them by changing only the entry point (`PluginExport.register()` + native build vs `Serve.run()` + JAR).
 
 See [Native Mode](native.md) for the full C ABI reference.
 

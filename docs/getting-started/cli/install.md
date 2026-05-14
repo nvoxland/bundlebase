@@ -1,11 +1,11 @@
 ---
-title: CLI Install — Bundlebase
+title: CLI Install -- Bundlebase
 description: Install the Bundlebase CLI binary. No Python or other runtime required.
 ---
 
 # CLI Install
 
-No Python or other runtime required — the CLI is a self-contained binary.
+No Python or other runtime required -- the CLI is a self-contained binary.
 
 === "Linux (x86_64)"
 
@@ -57,4 +57,4 @@ bundlebase --help
 
 ## Next step
 
-[CLI Quick Start](quick-start.md) — create a bundle and query it interactively from the REPL.
+[CLI Quick Start](quick-start.md) -- create a bundle and query it interactively from the REPL.

@@ -61,7 +61,7 @@ The `attach()` method handles paths flexibly:
 
 ## Attaching From Another Bundle
 
-You can attach the query output of another committed bundle using a `bundle://` URL. This reads the target bundle's full query output — including any filters, column operations, and joins that have been applied.
+You can attach the query output of another committed bundle using a `bundle://` URL. This reads the target bundle's full query output, including any filters, column operations, and joins that have been applied.
 
 **For filesystem bundles**, use `bundle://` followed by the path:
 
@@ -104,17 +104,17 @@ You can attach the query output of another committed bundle using a `bundle://` 
     ```
 
 !!! note
-    The target bundle must be committed. The attached data reflects the target's full query output at read time — including any filters, column operations, and joins that have been applied.
+    The target bundle must be committed. The attached data reflects the target's full query output at read time, including any filters, column operations, and joins that have been applied.
 
 ## Supported Formats
 
 - CSV (`.csv`)
-- TSV (`.tsv`) — tab-separated values
+- TSV (`.tsv`) -- tab-separated values
 - JSON Lines (`.json`, `.jsonl`)
 - Parquet (`.parquet`)
 
 !!! note
-    Only JSON Lines format (one JSON object per line) can be directly attached. For arbitrary JSON files — including API responses with wrapper objects, nested structures, or JSON arrays — use a connector (`CREATE SOURCE USING http`, `remote_dir`, etc.) with `json_record_path`. The connector transforms and copies the data into the bundle as Parquet. See [Sources: JSON Options](sources.md#json-options).
+    Only JSON Lines format (one JSON object per line) can be directly attached. For arbitrary JSON files (including API responses with wrapper objects, nested structures, or JSON arrays) use a connector (`CREATE SOURCE USING http`, `remote_dir`, etc.) with `json_record_path`. The connector transforms and copies the data into the bundle as Parquet. See [Sources: JSON Options](sources.md#json-options).
 
 ## Index Refresh
 
@@ -135,7 +135,7 @@ The same `NO INDEX` flag is available on `FETCH` and `FETCH ALL`.
 
 ## Column Types
 
-**CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
+**CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable: a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
 
 **JSON files** retain their native types (string, number, boolean) since the JSON format encodes types directly in the data.
 

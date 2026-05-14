@@ -1,5 +1,5 @@
 ---
-title: CLI Quick Start — Bundlebase
+title: CLI Quick Start -- Bundlebase
 description: Get started with the Bundlebase CLI. Create a bundle, attach data, and query it interactively from the REPL.
 ---
 
@@ -56,6 +56,6 @@ Type `/exit`, `/quit`, or press `Ctrl+C` / `Ctrl+D`.
 
 ## Next steps
 
-- [CLI REPL Guide](../../guide/cli-repl.md) — full REPL reference
-- [SQL Server Guide](../../guide/cli-serve.md) — remote access from Metabase, R, DBeaver
-- [Basic Concepts](../basic-concepts.md) — bundles, operations, and versioning
+- [CLI REPL Guide](../../guide/cli-repl.md) -- full REPL reference
+- [SQL Server Guide](../../guide/cli-serve.md) -- remote access from Metabase, R, DBeaver
+- [Basic Concepts](../basic-concepts.md) -- bundles, operations, and versioning

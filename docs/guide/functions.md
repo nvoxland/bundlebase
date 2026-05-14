@@ -8,14 +8,14 @@ Custom functions let you extend bundlebase's SQL with high-performance scalar an
 |---------|-------------|----------|-------------|
 | `python` | In-process via PyO3 | Prototyping, scripts | Temp only |
 | `ipc` | Subprocess via SDK, communicates via Arrow IPC | Go, Python, any language | Yes |
-| `ffi` | Loads a shared library (.so/.dylib) via FFI | Rust, C, C++ — zero IPC overhead | Yes |
+| `ffi` | Loads a shared library (.so/.dylib) via FFI | Rust, C, C++ -- zero IPC overhead | Yes |
 | `java` | JVM subprocess via `java -jar` | Java | Yes |
 | `docker` | Containerized subprocess | Any language, most isolated | Yes |
 
 ### Persistent vs Temporary
 
 - **Temporary** (`IMPORT TEMP FUNCTION`): Session-scoped, supports all runtimes including `python`. Great for iterative development.
-- **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runtime (`ipc`, `ffi`, `java`, `docker` — not `python`).
+- **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runtime (`ipc`, `ffi`, `java`, `docker` -- not `python`).
 
 **Development workflow:** Start temporary for fast iteration, then promote to persistent when ready:
 
@@ -252,27 +252,27 @@ Both FFI and IPC runtimes use the same JSON manifest format:
 
 When Bundlebase invokes a scalar IPC function, the exchange is:
 
-1. **JSON-RPC request** — `invoke` method with the function name
-2. **Arrow IPC input** — length-prefixed (4-byte big-endian u32) Arrow IPC stream containing one RecordBatch with one column per argument
-3. **Arrow IPC output** — length-prefixed Arrow IPC stream containing a single-column RecordBatch with the result
+1. **JSON-RPC request** -- `invoke` method with the function name
+2. **Arrow IPC input** -- length-prefixed (4-byte big-endian u32) Arrow IPC stream containing one RecordBatch with one column per argument
+3. **Arrow IPC output** -- length-prefixed Arrow IPC stream containing a single-column RecordBatch with the result
 
 ### IPC Aggregate Protocol
 
-IPC aggregate functions use four JSON-RPC methods. Aggregate state is **opaque and server-side** — only string state IDs cross the wire.
+IPC aggregate functions use four JSON-RPC methods. Aggregate state is **opaque and server-side**; only string state IDs cross the wire.
 
 | Step | Method | Params | Arrow IPC | Response |
 |------|--------|--------|-----------|----------|
-| 1 | `create_state` | `function` | — | `{"state_id": "0"}` |
+| 1 | `create_state` | `function` | -- | `{"state_id": "0"}` |
 | 2 | `accumulate` | `function`, `state_id` | Input batch (one column per arg) | `{"ok": true}` (ack) |
-| 3 | `merge` | `function`, `state_id1`, `state_id2` | — | `{"state_id": "2"}` |
-| 4 | `evaluate` | `function`, `state_id` | — | `{"ok": true}` (ack), then Arrow IPC output (single-row, single-column) |
+| 3 | `merge` | `function`, `state_id1`, `state_id2` | -- | `{"state_id": "2"}` |
+| 4 | `evaluate` | `function`, `state_id` | -- | `{"ok": true}` (ack), then Arrow IPC output (single-row, single-column) |
 
 **Lifecycle:**
 
-1. `create_state` — allocates a fresh accumulator on the server, returns an opaque state ID.
-2. `accumulate` — called once per batch. After the JSON-RPC ack, Bundlebase sends a length-prefixed Arrow IPC stream with the batch data. The server updates its internal state; nothing is returned.
-3. `merge` — combines two states (used during parallel/partitioned execution). Returns the merged state ID.
-4. `evaluate` — finalizes the aggregate. After the JSON-RPC ack, the server sends a length-prefixed Arrow IPC stream containing a single-row, single-column RecordBatch with the result.
+1. `create_state` -- allocates a fresh accumulator on the server, returns an opaque state ID.
+2. `accumulate` -- called once per batch. After the JSON-RPC ack, Bundlebase sends a length-prefixed Arrow IPC stream with the batch data. The server updates its internal state; nothing is returned.
+3. `merge` -- combines two states (used during parallel/partitioned execution). Returns the merged state ID.
+4. `evaluate` -- finalizes the aggregate. After the JSON-RPC ack, the server sends a length-prefixed Arrow IPC stream containing a single-row, single-column RecordBatch with the result.
 
 To declare an aggregate function in the manifest, set `"kind": "aggregate"`:
 
@@ -316,7 +316,7 @@ SELECT tools.double_val(id) FROM bundle
 
 ### Aggregate Example
 
-For aggregate functions, implement four additional methods: `create_state`, `accumulate`, `merge`, and `evaluate`. The SDK's `_AggregateStateStore` manages state lifecycle automatically — your methods just work with plain Python objects.
+For aggregate functions, implement four additional methods: `create_state`, `accumulate`, `merge`, and `evaluate`. The SDK's `_AggregateStateStore` manages state lifecycle automatically; your methods just work with plain Python objects.
 
 ```python
 from bundlebase_sdk.function import Function
@@ -333,7 +333,7 @@ class MyFunctions(Function):
         raise NotImplementedError("No scalar functions")
 
     def create_state(self, name):
-        # Return any Python object — it stays server-side
+        # Return any Python object -- it stays server-side
         return {"sum": 0.0, "count": 0}
 
     def accumulate(self, name, state, batch):
@@ -365,7 +365,7 @@ SELECT category, stats.my_avg(amount) FROM bundle GROUP BY category
 ```
 
 **Key points:**
-- State objects are arbitrary Python objects — they never cross the wire
+- State objects are arbitrary Python objects; they never cross the wire
 - `accumulate` receives a `pa.RecordBatch` with one column per function argument
 - `evaluate` must return a `pa.Scalar` (or a plain Python value that PyArrow can convert)
 - After `evaluate`, the state is automatically cleaned up
@@ -374,9 +374,9 @@ SELECT category, stats.my_avg(amount) FROM bundle GROUP BY category
 
 The `kind` field in a function manifest can be one of:
 
-- `scalar` (default) — row-by-row transformation
-- `aggregate` — many rows to one result per group
-- `table_valued` — returns a table of rows (registration supported; execution is planned for a future release)
+- `scalar` (default) -- row-by-row transformation
+- `aggregate` -- many rows to one result per group
+- `table_valued` -- returns a table of rows (registration supported; execution is planned for a future release)
 
 ### Supported Arrow Types
 

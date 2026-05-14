@@ -1,6 +1,6 @@
 # Python API Reference
 
-Bundlebase provides both async and sync Python APIs for maximum flexibility.
+Bundlebase provides both async and sync Python APIs.
 
 ## API Styles
 
@@ -115,7 +115,7 @@ async for batch in bundlebase.stream_batches(c):
 
 ## Type Hints
 
-Bundlebase includes comprehensive type hints for IDE support:
+Bundlebase includes type hints for IDE support:
 
 ```python
 from bundlebase import PyBundle, PyBundleBuilder
@@ -135,4 +135,4 @@ async def process_data(path: str) -> pd.DataFrame:
 - **[Async API Reference](async-api.md)** - Complete async API documentation
 - **[Sync API Reference](sync-api.md)** - Complete sync API documentation
 - **[Examples](../../examples/basic-operations.md)** - Practical code examples
-- **[Guides](../../guide/attaching.md)** - Deep dives into advanced topics
+- **[Guides](../../guide/attaching.md)** - Advanced topics

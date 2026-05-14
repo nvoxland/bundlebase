@@ -105,10 +105,10 @@ Rebuild an existing index on a column. Useful if the index has become stale or c
 Indexes stay in sync automatically. After every `ATTACH`, `REPLACE`, or
 `FETCH`, Bundlebase folds an index-rebuild for the new/replaced blocks
 into the same change, so queries see freshly-attached data through the
-index immediately — no manual `REINDEX` step needed.
+index immediately. No manual `REINDEX` step is needed.
 
-To opt out — for example, when bulk-loading many files and you'd rather
-rebuild once at the end — pass `NO INDEX`:
+To opt out (for example, when bulk-loading many files and you'd rather
+rebuild once at the end) pass `NO INDEX`:
 
 ```sql
 ATTACH 'jan.parquet' NO INDEX;
@@ -124,7 +124,7 @@ index data.
 ## Reindex
 
 Create index files for any blocks that are missing them. This checks
-existing indexes and avoids redundant work — you typically only need to
+existing indexes and avoids redundant work, so you typically only need to
 call it explicitly after using `NO INDEX`.
 
 === "Async API"

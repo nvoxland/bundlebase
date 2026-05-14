@@ -1,6 +1,6 @@
 # PDF Reports
 
-Bundlebase can generate PDF reports from a markdown template. You write a normal markdown document, and wherever you want live data from a bundle — a chart, a table — you drop in a `bundlebase` fenced code block with a SQL query and chart type. Bundlebase runs the queries and compiles everything to PDF via [Typst](https://typst.app/).
+Bundlebase can generate PDF reports from a markdown template. You write a normal markdown document, and wherever you want live data from a bundle (a chart, a table) you drop in a `bundlebase` fenced code block with a SQL query and chart type. Bundlebase runs the queries and compiles everything to PDF via [Typst](https://typst.app/).
 
 ## Generating a Report
 
@@ -42,7 +42,7 @@ Every block requires three fields:
 | Field | Description |
 |-------|-------------|
 | `bundle` | Path to the bundle to query |
-| `query` | SQL query — `bundle` is the table name |
+| `query` | SQL query, where `bundle` is the table name |
 | `type` | `table`, `pie`, `bar`, `line`, `horizontal_bar`, `box_whisker`, `pyramid`, `error_bar`, or `violin` |
 
 `title` is optional and adds a caption below the figure.
@@ -95,7 +95,7 @@ options:
 ```
 ````
 
-Use `type: horizontal_bar` to flip the orientation — useful for long category names.
+Use `type: horizontal_bar` to flip the orientation, useful for long category names.
 
 Bar/horizontal bar options:
 
@@ -169,18 +169,18 @@ Line chart options:
 
 ### Other Chart Types
 
-**`box_whisker`** — requires six columns: `label, min, q1, median, q3, max`.
+**`box_whisker`** -- requires six columns: `label, min, q1, median, q3, max`.
 
 ```sql
 SELECT station, min_depth, q1_depth, median_depth, q3_depth, max_depth
 FROM bundle
 ```
 
-**`violin`** — requires two columns: `category, value`. Each unique category gets its own violin.
+**`violin`** -- requires two columns: `category, value`. Each unique category gets its own violin.
 
-**`pyramid`** — two columns: `label, value`. Useful for funnel or hierarchical data. Options include `mode` (`"REGULAR"`, `"AREA-HEIGHT"`, `"HEIGHT"`, `"WIDTH"`) and `gap`.
+**`pyramid`** -- two columns: `label, value`. Useful for funnel or hierarchical data. Options include `mode` (`"REGULAR"`, `"AREA-HEIGHT"`, `"HEIGHT"`, `"WIDTH"`) and `gap`.
 
-**`error_bar`** — three or four columns: `x, y, y_error[, x_error]`.
+**`error_bar`** -- three or four columns: `x, y, y_error[, x_error]`.
 
 ## Default Color Palette
 
@@ -234,7 +234,7 @@ title: Top 20 Products
 
 ## Stored Reports
 
-You can save report templates inside a bundle so they travel with the data. Stored reports are identified by an **id** (alphanumeric characters, underscores, and hyphens).
+You can save report templates inside a bundle so they travel with the data. Stored reports are identified by an `id` (alphanumeric characters, underscores, and hyphens).
 
 ### Creating a Report
 

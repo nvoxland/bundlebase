@@ -22,7 +22,7 @@ bundlebase mcp --bundle <path> [options]
 ### Examples
 
 ```bash
-# Start without a bundle — agent uses open_bundle/create_bundle tools
+# Start without a bundle -- agent uses open_bundle/create_bundle tools
 bundlebase mcp
 
 # Start with a bundle pre-opened (key defaults to directory name "my-bundle")

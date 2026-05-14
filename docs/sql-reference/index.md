@@ -12,7 +12,7 @@ Bundlebase supports three string literal forms:
 |------|---------|-------|
 | Single-quoted | `'hello world'` | Standard SQL. Use `''` to escape a single quote inside: `'it''s fine'`. Supports `\n`, `\r`, `\t` escape sequences. |
 | Double-quoted | `"hello world"` | Same escape rules as single-quoted. Typically used for identifiers in standard SQL, but accepted as a string value here too. |
-| Dollar-quoted | `$$hello world$$` | PostgreSQL-style. Content is **raw** — no escaping needed. Ideal for multi-line strings, JSON, and any text containing single quotes. |
+| Dollar-quoted | `$$hello world$$` | PostgreSQL-style. Content is **raw** -- no escaping needed. Ideal for multi-line strings, JSON, and any text containing single quotes. |
 
 Dollar-quoted strings are particularly useful when the value contains quotes or spans multiple lines:
 
@@ -45,7 +45,7 @@ ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)] [NO INDEX]
 
 By default, every defined index is automatically refreshed against the new
 block(s) before the change lands, so queries see them immediately. Add
-`NO INDEX` to skip that step — useful when bulk-loading many files where
+`NO INDEX` to skip that step -- useful when bulk-loading many files where
 you'd rather rebuild once at the end with [`REINDEX`](#reindex).
 
 **Examples:**
@@ -83,7 +83,7 @@ IMPORT JOIN <name> [FLATTEN HISTORY]
 -- First, create a join referencing another bundle
 JOIN 'bundle://./stations' AS stations ON lake_id = stations.lake_id
 
--- Then solidify it — copies all data and history into this bundle
+-- Then solidify it -- copies all data and history into this bundle
 IMPORT JOIN stations
 
 -- Or flatten all imported commits into one
@@ -417,7 +417,7 @@ Use `MIN BATCH` with a human-readable size such as `15M` or `3G` when you want s
 -- Default: fetch immediately
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv')
 
--- Define the source but skip the implicit fetch — recipients run FETCH themselves
+-- Define the source but skip the implicit fetch -- recipients run FETCH themselves
 CREATE SOURCE USING acme.weather NO FETCH
 
 -- Equivalent to the default, but explicit
@@ -439,12 +439,12 @@ FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN] [VERBOSE] [NO INDEX]
 
 `DRY RUN` previews what would be added, replaced, or removed without executing any changes.
 
-`VERBOSE` switches the output table from a per-source summary to a row per Add/Replace/Remove action — useful for spotting exactly which files / partitions a fetch will touch. Combine the two (`DRY RUN VERBOSE`) for a per-file preview.
+`VERBOSE` switches the output table from a per-source summary to a row per Add/Replace/Remove action -- useful for spotting exactly which files / partitions a fetch will touch. Combine the two (`DRY RUN VERBOSE`) for a per-file preview.
 
 `NO INDEX` skips the automatic index refresh that normally runs after a
 fetch. Use it when you want to defer the rebuild until you've finished
 several fetches in a row, then run [`REINDEX`](#reindex) once at the end.
-Indexes built before the fetch remain on disk untouched until you do —
+Indexes built before the fetch remain on disk untouched until you do --
 queries that hit only the previously-indexed blocks still use the index;
 queries that need data from the freshly-fetched blocks fall back to
 scanning until you reindex.
@@ -461,7 +461,7 @@ pack | connector | source_id | source_locations_added | source_locations_modifie
 
 The `source_locations_*` counts are **per-connector-location**, *not* per bundle block. With `MIN BATCH` (the default for `SAVE AS AUTO`/`PARQUET`, threshold 1 GiB), small files get merged into fewer batch blocks at fetch time, so the actual block count after fetch can be smaller than these numbers. Treat them as an upper bound; use `VERBOSE` for per-location detail.
 
-`rows_before`/`rows_after` are nullable — `NULL` means "unknown" (the connector did not declare `num_rows` for at least one Add/Replace location), distinct from a known zero.
+`rows_before`/`rows_after` are nullable -- `NULL` means "unknown" (the connector did not declare `num_rows` for at least one Add/Replace location), distinct from a known zero.
 
 `VERBOSE` (one row per action):
 
@@ -511,8 +511,8 @@ For fat connectors that ship binaries for several OS/arch targets, use the **pla
 
 **WITH options:**
 
-- `platform = '<os>/<arch>'` — single-platform form only. The map and glob forms reject this (the platform comes from the map key or captured filename).
-- `src = '<path-to-archive>'` — optional path to a source archive (e.g. a zip). Copied into the bundle (content-addressed) and shared by every entry produced by this statement. Recipients can extract it with [`EXPORT SOURCE`](#export-source).
+- `platform = '<os>/<arch>'` -- single-platform form only. The map and glob forms reject this (the platform comes from the map key or captured filename).
+- `src = '<path-to-archive>'` -- optional path to a source archive (e.g. a zip). Copied into the bundle (content-addressed) and shared by every entry produced by this statement. Recipients can extract it with [`EXPORT SOURCE`](#export-source).
 
 !!! note
     The `python` runtime is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
@@ -552,7 +552,7 @@ IMPORT CONNECTOR example.connector FROM 'ffi::./libexample.so'
 
 ### IMPORT TEMP CONNECTOR
 
-Creates a connector for the current session only. The entrypoint is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
+Creates a connector for the current session only. The entrypoint is **not** persisted -- it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
 IMPORT TEMP CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
@@ -735,7 +735,7 @@ An optional `WITH` clause can provide additional parameters like `platform`.
 **Scalar function examples:**
 
 ```sql
--- Rust shared library (scalar) — symbol defaults to function name 'double_val'
+-- Rust shared library (scalar) -- symbol defaults to function name 'double_val'
 IMPORT FUNCTION acme.double_val FROM 'ffi::./target/release/libmy_funcs.so'
 
 -- Explicit symbol in a multi-function library
@@ -772,7 +772,7 @@ IMPORT FUNCTION acme.percentile FROM 'docker::myorg/stats:latest'
 
 ### IMPORT TEMP FUNCTION
 
-Creates a function for the current session only. The entrypoint is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
+Creates a function for the current session only. The entrypoint is **not** persisted -- it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
 
 ```sql
 IMPORT TEMP FUNCTION <namespace.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
@@ -949,7 +949,7 @@ Returns per-column statistics for specified columns: min, max, average, null cou
 DESCRIBE DATA IN <col1> [AS <type>], <col2> [AS <type>], ...
 ```
 
-The optional `AS <type>` specifies an expected SQL data type (e.g., `BIGINT`, `DOUBLE`, `VARCHAR`). When provided, the `top_10_invalid` column shows values that fail `TRY_CAST` to that type — useful for detecting sentinel values like `-99` or `N/A` in data that should be numeric.
+The optional `AS <type>` specifies an expected SQL data type (e.g., `BIGINT`, `DOUBLE`, `VARCHAR`). When provided, the `top_10_invalid` column shows values that fail `TRY_CAST` to that type -- useful for detecting sentinel values like `-99` or `N/A` in data that should be numeric.
 
 The result is a table with one row per column:
 
@@ -1038,8 +1038,8 @@ SELECT * FROM search('<index_name>', '<query>')
 
 **Parameters:**
 
-- `index_name` — The name of the text index (created with `create_index()`)
-- `query` — The search query string using [Tantivy query syntax](https://docs.rs/tantivy/latest/tantivy/query/struct.QueryParser.html)
+- `index_name` -- The name of the text index (created with `create_index()`)
+- `query` -- The search query string using [Tantivy query syntax](https://docs.rs/tantivy/latest/tantivy/query/struct.QueryParser.html)
 
 **Examples:**
 
@@ -1114,10 +1114,10 @@ EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
 
 **Options:**
 
-- `ANALYZE` — Run the plan and show actual execution statistics
-- `VERBOSE` — Show more detailed plan information
-- `FORMAT format` — Output format: `INDENT` (default), `TREE`, or `GRAPHVIZ`
-- `sql` — Optional SQL statement to explain (if omitted, explains the bundle's dataframe)
+- `ANALYZE` -- Run the plan and show actual execution statistics
+- `VERBOSE` -- Show more detailed plan information
+- `FORMAT format` -- Output format: `INDENT` (default), `TREE`, or `GRAPHVIZ`
+- `sql` -- Optional SQL statement to explain (if omitted, explains the bundle's dataframe)
 
 **Examples:**
 
@@ -1205,7 +1205,7 @@ EXPORT DATA TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as 
 
 ### EXPORT EMPTY
 
-Creates a "empty" bundle at the target path — containing source definitions,
+Creates a "empty" bundle at the target path -- containing source definitions,
 always-update/always-delete rules, column operations, and structure, but no
 attached data. Recipients can open the empty bundle and run `FETCH` to pull
 the raw data themselves.

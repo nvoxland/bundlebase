@@ -1,5 +1,5 @@
 ---
-title: Python Quick Start — Bundlebase
+title: Python Quick Start -- Bundlebase
 description: Get started with the Bundlebase Python API. Attach Parquet, CSV, or JSON from local files or S3, filter and transform, commit, and query with SQL.
 ---
 
@@ -9,8 +9,8 @@ description: Get started with the Bundlebase Python API. Attach Parquet, CSV, or
 
 Bundlebase has two Python API styles:
 
-- **Sync** (`bundlebase.sync`) — for scripts and Jupyter notebooks. No `await` needed.
-- **Async** (`bundlebase`) — for concurrent operations and production code.
+- **Sync** (`bundlebase.sync`) -- for scripts and Jupyter notebooks. No `await` needed.
+- **Async** (`bundlebase`) -- for concurrent operations and production code.
 
 === "Sync API"
 
@@ -178,6 +178,6 @@ All mutation methods return `self`:
 
 ## Next steps
 
-- [Basic Concepts](../basic-concepts.md) — bundles, operations, and versioning
-- [User Guide](../../guide/attaching.md) — deep dive into advanced topics
-- [API Reference](../../api/python/index.md) — complete API documentation
+- [Basic Concepts](../basic-concepts.md) -- bundles, operations, and versioning
+- [User Guide](../../guide/attaching.md) -- attaching, filtering, joins, indexes, and more
+- [API Reference](../../api/python/index.md) -- API reference

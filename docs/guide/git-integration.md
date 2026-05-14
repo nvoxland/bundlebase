@@ -20,7 +20,7 @@ git commit -m "Track large data formats in LFS"
 ```
 
 Adjust the `git lfs track` patterns to match the formats you actually
-attach. Keep `_bundlebase/*.yaml` out of LFS — those are small and you
+attach. Keep `_bundlebase/*.yaml` out of LFS -- those are small and you
 want them in plain git for review.
 
 LFS is a recommendation, not a requirement: small bundles (a few
@@ -54,10 +54,10 @@ identical to bundles outside any git repo.
 ## Enabling git versioning
 
 `system.git_versioning` is a **stored-only** config: it must be saved to
-the bundle manifest, not passed at runtime. This is by design — the flag
-affects how `version` strings are recorded on attached files, so it has
-to travel with the bundle. Passing it via `config={...}` or `SET CONFIG`
-is rejected with an error pointing you at the right path.
+the bundle manifest, not passed at runtime. The flag affects how `version`
+strings are recorded on attached files, so it has to travel with the
+bundle. Passing it via `config={...}` or `SET CONFIG` is rejected with an
+error pointing you at the right path.
 
 ```python
 import bundlebase as bb
@@ -89,9 +89,8 @@ query doesn't see version-mismatch errors.
 
 If `system.git_versioning=true` but git can't produce an OID (file outside
 any working tree, or `git` not on PATH), bundlebase **errors out** rather
-than silently falling back. Opting into git versioning means you expect
-git to be there — a missing git context is a configuration problem to
-fix, not something to paper over.
+than falling back. Opting into git versioning means you expect git to be
+there, so a missing git context is a configuration problem to fix.
 
 Resolutions:
 

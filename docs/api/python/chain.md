@@ -4,7 +4,7 @@ Fluent method chaining for Bundlebase operations.
 
 ## Overview
 
-Bundlebase uses operation chains to enable fluent method chaining while maintaining clean async/await syntax. This allows you to queue multiple operations before execution.
+Bundlebase uses operation chains for fluent method chaining with async/await syntax. This lets you queue multiple operations before execution.
 
 ## Chain Classes
 
@@ -128,7 +128,7 @@ df = await c.to_pandas()
 
 ### 1. Clean Syntax
 
-Chaining enables clean, readable code:
+Chaining keeps the code readable:
 
 ```python
 # With chaining
@@ -257,7 +257,6 @@ Operation chains work by:
 2. **Deferring Execution**: No operations execute until the chain is awaited
 3. **Batch Execution**: All queued operations execute together when awaited
 
-This provides both clean syntax and good performance.
 
 ## Sync API Chains
 

@@ -45,7 +45,7 @@ You can optionally specify a `location` for the initial data and a `how` for the
 
 ## Joining With Another Bundle
 
-You can join with the query output of another committed bundle using a `bundle://` URL. This reads the target bundle's full query output — including any filters, column operations, and joins that have been applied.
+You can join with the query output of another committed bundle using a `bundle://` URL. This reads the target bundle's full query output, including any filters, column operations, and joins that have been applied.
 
 **For filesystem bundles**, use `bundle://` followed by the path:
 
@@ -92,7 +92,7 @@ You can join with the query output of another committed bundle using a `bundle:/
     ```
 
 !!! note
-    The target bundle must be committed. The joined data reflects the target's full query output at read time — including any filters, column operations, and joins that have been applied.
+    The target bundle must be committed. The joined data reflects the target's full query output at read time, including any filters, column operations, and joins that have been applied.
 
 ## Join Without Initial Data
 

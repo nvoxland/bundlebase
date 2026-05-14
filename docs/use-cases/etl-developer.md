@@ -11,7 +11,7 @@ You need to pull data from an external source regularly — a vendor drops CSV f
 
 Then three months later the vendor changes their column names. Or adds a subfolder. Or the SFTP credentials rotate. Or you need to add a second vendor with a slightly different format. The custom logic accumulates.
 
-Bundlebase flips the model. Instead of custom logic that knows about SFTP internals and then hands data to downstream consumers, you define the source once in a bundle. The bundle knows how to fetch; downstream systems just call `bb.open()`. The upstream plumbing is isolated in one place and the downstream interface never changes.
+With Bundlebase, you define the source once in a bundle. The bundle knows how to fetch; downstream systems just call `bb.open()`. The upstream plumbing is isolated in one place and the downstream interface stays the same.
 
 ## The scenario
 
@@ -180,7 +180,7 @@ Downstream          │  pandas  polars  SQL  Flight  numpy  │
 consumers           └─────────────────────────────────────┘
 ```
 
-Upstream complexity is encapsulated in the bundle. Downstream simplicity is guaranteed by the interface.
+Upstream details stay inside the bundle. Downstream consumers always see the same interface.
 
 ## What you get that custom ETL scripts don't
 

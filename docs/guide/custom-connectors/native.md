@@ -23,7 +23,7 @@ Native mode loads your connector in-process for zero-copy Arrow data transfer, e
 
 ### Python (PyO3 In-Process)
 
-Python connectors run directly inside the Bundlebase process via PyO3. Arrow data is transferred through shared memory — no serialization.
+Python connectors run directly inside the Bundlebase process via PyO3. Arrow data is transferred through shared memory; no serialization.
 
 ```python
 import bundlebase.sync as bb
@@ -48,9 +48,9 @@ bundle.create_source('example.connector')
 
 Each language has its own approach to generating the C ABI:
 
-- **Rust** — `export_source!` macro generates `extern "C"` functions
-- **Go** — cgo `//export` directives
-- **Java** — Project Panama (Java 22+): a thin C bootstrap starts the JVM once, then all ABI calls route through Panama upcall stubs for minimal overhead
+- **Rust** -- `export_source!` macro generates `extern "C"` functions
+- **Go** -- cgo `//export` directives
+- **Java** -- Project Panama (Java 22+): a thin C bootstrap starts the JVM once, then all ABI calls route through Panama upcall stubs for minimal overhead
 
 ## Runtime Values for Native Mode
 
@@ -114,7 +114,7 @@ int32_t bundlebase_stable_url(const char* location_json, const char* args_json,
 }
 ```
 
-`num_rows` is **required** on every location — set it to a non-negative integer when the connector can determine the row count cheaply (Parquet readers can read it from the footer; sources with a manifest can look it up), or to JSON `null` when counting would require fully parsing the data. `null` is faithfully preserved through to `FETCH ... DRY RUN`'s `rows_after` column so users can tell "0 rows" from "I don't know yet". A missing `num_rows` key is treated as a connector bug and rejected — declare it explicitly even when unknown.
+`num_rows` is **required** on every location. Set it to a non-negative integer when the connector can determine the row count cheaply (Parquet readers can read it from the footer; sources with a manifest can look it up), or to JSON `null` when counting would require fully parsing the data. `null` is preserved through to `FETCH ... DRY RUN`'s `rows_after` column so users can tell "0 rows" from "I don't know yet". A missing `num_rows` key is treated as a connector bug and rejected, so declare it explicitly even when unknown.
 
 **data location_json:**
 ```json
@@ -130,10 +130,10 @@ int32_t bundlebase_stable_url(const char* location_json, const char* args_json,
 
 Each SDK provides helpers that generate the C ABI functions for you:
 
-- **[Python](python.md#native-mode)** — `IMPORT TEMP CONNECTOR` with `runtime='python'`, `entrypoint='module:Class'` (no shared library needed)
-- **[Rust](rust.md#native-mode)** — `export_source!(ExampleConnector::new())` (use `runtime='ffi'`)
-- **[Go](go.md#native-mode)** — `ExportConnector(&ExampleConnector{})` (use `runtime='ffi'`)
-- **[Java](java.md#native-mode)** — `PluginExport.register(new ExampleConnector())` (use `runtime='ffi'`)
+- **[Python](python.md#native-mode)** -- `IMPORT TEMP CONNECTOR` with `runtime='python'`, `entrypoint='module:Class'` (no shared library needed)
+- **[Rust](rust.md#native-mode)** -- `export_source!(ExampleConnector::new())` (use `runtime='ffi'`)
+- **[Go](go.md#native-mode)** -- `ExportConnector(&ExampleConnector{})` (use `runtime='ffi'`)
+- **[Java](java.md#native-mode)** -- `PluginExport.register(new ExampleConnector())` (use `runtime='ffi'`)
 
 ## Connector Arguments
 
@@ -151,11 +151,11 @@ Extra arguments passed to `CREATE SOURCE` are forwarded to the connector's `disc
 
 ## Multi-platform Connectors
 
-`IMPORT CONNECTOR` registers one binary per `(name, platform)` pair. To ship a fat connector that runs on multiple OS/arch combinations, register all binaries up front — at fetch time the entry whose platform matches the host wins.
+`IMPORT CONNECTOR` registers one binary per `(name, platform)` pair. To ship a fat connector that runs on multiple OS/arch combinations, register all binaries up front. At fetch time the entry whose platform matches the host wins.
 
 Two SQL forms cover the common cases:
 
-**Explicit map** — list every platform you want to support:
+**Explicit map** -- list every platform you want to support:
 
 ```sql
 IMPORT CONNECTOR acme.weather FROM {
@@ -166,7 +166,7 @@ IMPORT CONNECTOR acme.weather FROM {
 };
 ```
 
-**Glob form** — let bundlebase scan a directory for matching files:
+**Glob form** -- let bundlebase scan a directory for matching files:
 
 ```sql
 IMPORT CONNECTOR acme.weather FROM 'ffi::./weather-{os}-{arch}.{ext}';
@@ -174,7 +174,7 @@ IMPORT CONNECTOR acme.weather FROM 'ffi::./weather-{os}-{arch}.{ext}';
 
 Placeholders: `{os}` (linux/darwin/windows), `{arch}` (amd64/arm64/...), `{ext}` (so/dylib/dll, validated against `{os}` if both appear).
 
-Each binary is copied into the bundle's content-addressed data directory and verified — fully via `dlopen` for the binary that matches your host, and via shared-library header inspection (ELF / Mach-O / PE magic + arch byte) for foreign-platform binaries the build host can't load. If no entry covers your host, the import succeeds with a warning so you can still build a bundle that targets only deployment hosts.
+Each binary is copied into the bundle's content-addressed data directory and verified: fully via `dlopen` for the binary that matches your host, and via shared-library header inspection (ELF / Mach-O / PE magic + arch byte) for foreign-platform binaries the build host can't load. If no entry covers your host, the import succeeds with a warning so you can still build a bundle that targets only deployment hosts.
 
 ## Bundling Connector Source
 
@@ -191,4 +191,4 @@ The archive is copied into the bundle's data directory (content-addressed), ship
 EXPORT SOURCE acme.weather TO '/tmp/weather-source.zip';
 ```
 
-When combined with the multi-platform forms, all entries share the same source archive — bundle once, ship for every platform.
+When combined with the multi-platform forms, all entries share the same source archive: bundle once, ship for every platform.

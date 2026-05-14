@@ -1,5 +1,5 @@
 ---
-title: Basic Concepts — Bundlebase
+title: Basic Concepts -- Bundlebase
 description: "Core Bundlebase concepts: what a bundle is, read-only vs mutable, lazy evaluation, supported data formats, and the Git-like commit and versioning system."
 ---
 
@@ -10,10 +10,10 @@ description: "Core Bundlebase concepts: what a bundle is, read-only vs mutable, 
 A bundle is:
 
 - Data from one or more sources (CSV, Parquet, JSON, HTTP APIs, cloud storage, SFTP)
-- The transformations applied to it — filters, column drops, renames, joins — recorded as operations
+- The transformations applied to it -- filters, column drops, renames, joins -- recorded as operations
 - A versioned snapshot committed to a path that anyone can open
 
-The key property is that **the data carries its own context**. A bundle knows its name, schema, transformation history, and where the data came from. A plain CSV or Parquet file knows none of that. You don't need a README alongside it, a schema document, or the person who made it — opening the bundle gives you everything.
+The key property is that **the data carries its own context**. A bundle knows its name, schema, transformation history, and where the data came from. A plain CSV or Parquet file knows none of that. You don't need a README alongside it, a schema document, or the person who made it -- opening the bundle gives you everything.
 
 === "Python"
 
@@ -47,7 +47,7 @@ The key property is that **the data carries its own context**. A bundle knows it
     ```
 
 !!! tip "If you know Docker"
-    The mental model is similar: create, attach, filter, commit is the recipe — `commit` is the push, `open` is the pull. The artifact carries its own context so consumers don't need to know how it was built.
+    The mental model is similar: create, attach, filter, commit is the recipe -- `commit` is the push, `open` is the pull. The artifact carries its own context so consumers don't need to know how it was built.
 
 ## Read-only vs mutable
 
@@ -60,17 +60,17 @@ The key property is that **the data carries its own context**. A bundle knows it
     ```python
     import bundlebase.sync as bb
 
-    # open() → read-only
+    # open() -> read-only
     bundle = bb.open("s3://my-bucket/my-bundle")
     df = bundle.to_pandas()       # query: yes
     schema = bundle.schema        # inspect: yes
 
-    # extend() → mutable copy, ready to modify
+    # extend() -> mutable copy, ready to modify
     bundle = bundle.extend()
     bundle.filter("active = true")
     bundle.commit("Active users only")
 
-    # create() → new mutable bundle
+    # create() -> new mutable bundle
     bundle = bb.create("s3://my-bucket/new-bundle")
     bundle.attach("data.parquet")
     bundle.commit("Initial load")
@@ -79,17 +79,17 @@ The key property is that **the data carries its own context**. A bundle knows it
 === "SQL"
 
     ```sql
-    -- OPEN → read-only
+    -- OPEN -> read-only
     OPEN 's3://my-bucket/my-bundle';
     SELECT * FROM bundle;    -- query: yes
     SHOW STATUS;             -- inspect: yes
 
-    -- EXTEND → mutable, ready to modify
+    -- EXTEND -> mutable, ready to modify
     EXTEND;
     FILTER WITH SELECT * FROM bundle WHERE active = true;
     COMMIT 'Active users only';
 
-    -- CREATE → new mutable bundle
+    -- CREATE -> new mutable bundle
     CREATE 's3://my-bucket/new-bundle';
     ATTACH 'data.parquet';
     COMMIT 'Initial load';
@@ -123,13 +123,13 @@ Operations are **recorded** when you write them, but not **executed** until you 
     SELECT * FROM bundle;                              -- pipeline executes here
     ```
 
-This lets Bundlebase optimize the entire pipeline before touching any data — pushing filters down to the source, skipping columns that aren't needed, and streaming results rather than loading everything into memory at once.
+This lets Bundlebase optimize the entire pipeline before touching any data -- pushing filters down to the source, skipping columns that aren't needed, and streaming results rather than loading everything into memory at once.
 
 ## Data sources and formats
 
 There are two ways to bring data into a bundle: **attach** and **source**.
 
-### Attach — specific files
+### Attach -- specific files
 
 `attach` pulls in a specific file or URL right now. Multiple attaches union together automatically, even across formats:
 
@@ -153,14 +153,14 @@ There are two ways to bring data into a bundle: **attach** and **source**.
     ATTACH 'february.parquet';   -- unioned with january
     ```
 
-### Source — automatic discovery
+### Source -- automatic discovery
 
-`create_source` defines a persistent watched location (an S3 prefix, a directory, a connector endpoint). Once defined, `fetch` discovers and attaches whatever files are new — no need to track which files you've already seen.
+`create_source` defines a persistent watched location (an S3 prefix, a directory, a connector endpoint). Once defined, `fetch` discovers and attaches whatever files are new -- no need to track which files you've already seen.
 
 === "Python"
 
     ```python
-    # Define once — watch this S3 prefix for Parquet files
+    # Define once -- watch this S3 prefix for Parquet files
     bundle.create_source("monthly_reports", {"url": "s3://exports/reports/", "patterns": "**/*.parquet"})
 
     # Each month: fetch picks up only the new files
@@ -179,13 +179,13 @@ There are two ways to bring data into a bundle: **attach** and **source**.
     COMMIT 'Added new monthly reports';
     ```
 
-Use `attach` when you know exactly what file you want. Use `source` when you want a bundle to stay in sync with a location over time — vendor drops, recurring exports, live data directories.
+Use `attach` when you know exactly what file you want. Use `source` when you want a bundle to stay in sync with a location over time -- vendor drops, recurring exports, live data directories.
 
-Supported built-in sources: local files, S3, GCS, Azure Blob, HTTP/HTTPS, SFTP. Custom connectors can extend this to any source — see [Extending Bundlebase](why-bundlebase.md#extending-bundlebase).
+Supported built-in sources: local files, S3, GCS, Azure Blob, HTTP/HTTPS, SFTP. Custom connectors can extend this to any source -- see [Extending Bundlebase](why-bundlebase.md#extending-bundlebase).
 
 ## Versioning and commits
 
-Every `commit` saves a named snapshot. The full history is stored in the bundle — no external tracking needed.
+Every `commit` saves a named snapshot. The full history is stored in the bundle -- no external tracking needed.
 
 === "Python"
 
@@ -244,6 +244,6 @@ Indexes enable fast lookups on specific columns without scanning the full datase
     SELECT * FROM bundle WHERE email = 'user@example.com';
     ```
 
-Indexes work regardless of the underlying storage format — including CSV. CSV columns are stored as text, but you can index them directly and equality, range, and `IN` lookups will use the index without any casting. For line-oriented formats like CSV and JSON, Bundlebase uses byte-offset reads to fetch only the matching rows rather than scanning the file.
+Indexes work regardless of the underlying storage format -- including CSV. CSV columns are stored as text, but you can index them directly and equality, range, and `IN` lookups will use the index without any casting. For line-oriented formats like CSV and JSON, Bundlebase uses byte-offset reads to fetch only the matching rows rather than scanning the file.
 
 Indexes are built lazily and Bundlebase uses cost-based optimization to decide when to use them. Learn more in the [Indexing Guide](../guide/indexing.md).

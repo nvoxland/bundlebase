@@ -50,8 +50,8 @@ await bundle.create_index(["title", "description", "tags"], "text", name="produc
 
 Use the `search()` table function to perform full-text search. It replaces `FROM bundle` in your SQL. You can call it with one or two arguments:
 
-- **`search('query')`** — When only one text index exists, you can omit the index name.
-- **`search('index_name', 'query')`** — Specify which index to search when multiple exist.
+- **`search('query')`** -- When only one text index exists, you can omit the index name.
+- **`search('index_name', 'query')`** -- Specify which index to search when multiple exist.
 
 Results include all columns from the bundle plus a `_score` column with the BM25 relevance score.
 
@@ -147,7 +147,7 @@ When creating a text index, you can specify a tokenizer to control how text is s
 | Tokenizer | Aliases | Description |
 |-----------|---------|-------------|
 | `simple` | | Splits on whitespace and lowercases. Good general-purpose default. |
-| `raw` | | No tokenization — treats the entire field value as a single token. Use for exact-match fields like IDs or codes. |
+| `raw` | | No tokenization -- treats the entire field value as a single token. Use for exact-match fields like IDs or codes. |
 | `en_stem` | `english_stem`, `english` | English stemming with stop word removal. Matches word variants (e.g., "running" matches "run"). |
 | `de_stem` | `german_stem`, `german` | German stemming with stop word removal. |
 | `fr_stem` | `french_stem`, `french` | French stemming with stop word removal. |

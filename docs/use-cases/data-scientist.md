@@ -32,7 +32,7 @@ You want to share a stable, versioned view of this with the engineering team who
         .attach("exports/2026-01.csv")
         .attach("exports/2026-02.csv")
         .attach("exports/2026-03.csv")
-        .normalize_column_names()          # fixes "Ticket ID", "ticket_id", "TicketId" → consistent
+        .normalize_column_names()          # fixes "Ticket ID", "ticket_id", "TicketId" -> consistent
         .filter("customer_tier = 'enterprise' AND status = 'resolved'")
         .drop_column("internal_notes")     # strip content you don't want shared
         .drop_column("assignee_email"))

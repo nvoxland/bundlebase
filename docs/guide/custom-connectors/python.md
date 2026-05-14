@@ -177,7 +177,7 @@ class MyConnector(Connector):
 
 ### Returning Row-Oriented Dicts
 
-You can also return `list[dict]` — the schema ensures correct types:
+You can also return `list[dict]`; the schema ensures correct types:
 
 ```python
 def data(self, location, **kwargs):
@@ -333,7 +333,7 @@ bundle.create_source('example.connector')
 bundle.fetch("base", "add")
 ```
 
-The same `Connector` class works for both native and IPC mode — no code changes needed. The only difference is how you create the connector:
+The same `Connector` class works for both native and IPC mode; no code changes needed. The only difference is how you create the connector:
 
 | Mode | Registration | Data Transfer |
 |------|-------------|---------------|

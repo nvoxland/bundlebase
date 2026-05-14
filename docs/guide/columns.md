@@ -2,7 +2,7 @@
 
 ## Identifiers and Case Sensitivity
 
-**Bundlebase is always case-sensitive.** Column names preserve their exact case — `Revenue`, `revenue`, and `REVENUE` are three different columns. This is intentional: bundlebase works with disparate data sources (CSVs, APIs, Parquet files, databases) that each have their own casing conventions, so no normalization is assumed.
+**Bundlebase is always case-sensitive.** Column names preserve their exact case: `Revenue`, `revenue`, and `REVENUE` are three different columns. This is intentional: bundlebase works with disparate data sources (CSVs, APIs, Parquet files, databases) that each have their own casing conventions, so no normalization is assumed.
 
 **Quoted identifiers:** Use double quotes for column names containing spaces, dots, slashes, or other special characters:
 

@@ -1,6 +1,6 @@
 # Async API
 
-The async API provides a modern async/await interface for Bundlebase operations.
+The async API provides an async/await interface for Bundlebase operations.
 
 ## Factory Functions
 

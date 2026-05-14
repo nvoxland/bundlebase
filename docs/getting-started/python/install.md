@@ -1,5 +1,5 @@
 ---
-title: Python Install — Bundlebase
+title: Python Install -- Bundlebase
 description: Install Bundlebase as a Python library for scripts, notebooks, and applications.
 ---
 
@@ -31,8 +31,8 @@ Requires Python 3.13+.
     pip install "bundlebase[jupyter]"
     ```
 
-pandas, polars, and numpy are optional — install whichever you export to. The base install includes only PyArrow.
+pandas, polars, and numpy are optional -- install whichever you export to. The base install includes only PyArrow.
 
 ## Next step
 
-[Python Quick Start](quick-start.md) — create a bundle, attach data, query with SQL.
+[Python Quick Start](quick-start.md) -- create a bundle, attach data, query with SQL.

@@ -119,7 +119,7 @@ Multiple files union together automatically, even across formats:
     bundle.rename_column("fname", "first_name")
     bundle.rename_column("lname", "last_name")
 
-    # Normalize messy names: "Customer Id" → "customer_id", "Phone 1" → "phone_1"
+    # Normalize messy names: "Customer Id" -> "customer_id", "Phone 1" -> "phone_1"
     bundle.normalize_column_names()
 
     # Cast CSV text to typed columns
