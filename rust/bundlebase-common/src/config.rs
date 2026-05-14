@@ -9,6 +9,7 @@ mod scope;
 pub use scope::Scope;
 
 use crate::BundlebaseError;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 
 /// Identifies which config layer a value came from.
@@ -118,31 +119,23 @@ impl ConfigScope {
         self
     }
 
-    /// Define a non-secure configuration key within this scope.
+    /// Define a configuration key within this scope.
+    ///
+    /// Defaults: persistence is `Either` (any source allowed) and `secure`
+    /// is false (display value unmasked). Use the `.stored_only()`,
+    /// `.runtime_only()`, and `.secure()` builders on the returned key to
+    /// adjust.
     ///
     /// ```rust,ignore
     /// pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
+    /// pub const S3_SECRET_CFG: ConfigKey =
+    ///     S3_SCOPE.define("secret_access_key").runtime_only().secure();
     /// ```
     pub const fn define(self, key: &'static str) -> ConfigKey {
         ConfigKey {
             key,
             secure: false,
-            scope: self,
-            default_value: None,
-            default_fn: None,
-        }
-    }
-
-    /// Define a secure (secret) configuration key within this scope.
-    ///
-    /// Values for secure keys are masked in display output.
-    /// ```rust,ignore
-    /// pub const S3_SECRET: ConfigKey = S3_SCOPE.define_secure("secret_access_key");
-    /// ```
-    pub const fn define_secure(self, key: &'static str) -> ConfigKey {
-        ConfigKey {
-            key,
-            secure: true,
+            persistence: ConfigPersistence::Either,
             scope: self,
             default_value: None,
             default_fn: None,
@@ -174,7 +167,26 @@ impl std::fmt::Display for ConfigScope {
     }
 }
 
-/// Defines a known configuration key and whether it is secure.
+/// Where a config key's value is allowed to come from.
+///
+/// `secure` is independent of this — it only affects display masking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigPersistence {
+    /// Any source allowed: Stored (manifest), Passed, Env, Runtime. Default.
+    Either,
+    /// Must come from a `SaveConfigOp` in the bundle manifest. Passed,
+    /// Env, and Runtime sources are rejected. Use for settings that
+    /// affect bundle content/format and must travel with the bundle (e.g.
+    /// `system.git_versioning`).
+    StoredOnly,
+    /// Must come from Passed/Env/Runtime. `SaveConfigOp` is rejected. Use
+    /// for trust/safety toggles a bundle must not be able to enable for
+    /// itself (e.g. `system.allow_external_code`), and for secrets that
+    /// should never be written to a manifest.
+    RuntimeOnly,
+}
+
+/// Defines a known configuration key.
 ///
 /// Each service/provider defines its own slice of `ConfigKey` entries.
 /// Duplicate keys across modules are fine (e.g., `access_key` in S3 and Azure).
@@ -182,8 +194,11 @@ impl std::fmt::Display for ConfigScope {
 pub struct ConfigKey {
     /// Configuration key name (e.g., "region", "secret_access_key")
     pub key: &'static str,
-    /// Whether this key holds a secret (password, token, etc.)
+    /// Whether this key's value should be masked in `SHOW CONFIG` output.
+    /// Independent of `persistence`.
     pub secure: bool,
+    /// Which sources are allowed to provide a value for this key.
+    pub persistence: ConfigPersistence,
     /// Which provider scope this key belongs to
     pub scope: ConfigScope,
     /// Static default value, set via `with_default()`.
@@ -226,6 +241,132 @@ impl ConfigKey {
         }
         self.default_value
     }
+
+    /// Restrict this key to the `Stored` source (manifest only).
+    pub const fn stored_only(mut self) -> Self {
+        self.persistence = ConfigPersistence::StoredOnly;
+        self
+    }
+
+    /// Restrict this key to non-`Stored` sources (Passed/Env/Runtime).
+    pub const fn runtime_only(mut self) -> Self {
+        self.persistence = ConfigPersistence::RuntimeOnly;
+        self
+    }
+
+    /// Mark this key's value as a secret, so `SHOW CONFIG` displays
+    /// `*****` instead of the actual value. Source policy is independent —
+    /// most secure keys also want `.runtime_only()`.
+    pub const fn secure(mut self) -> Self {
+        self.secure = true;
+        self
+    }
+
+    /// Validate that `source` is an allowed source for this key's
+    /// persistence policy. `ConfigSource::Default` is always allowed.
+    /// `StoredOnly` rejects non-Stored sources; `RuntimeOnly` rejects
+    /// Stored; `Either` is unrestricted.
+    pub fn validate_source(&self, source: &ConfigSource) -> Result<(), BundlebaseError> {
+        if source == &ConfigSource::Default {
+            return Ok(());
+        }
+        match self.persistence {
+            ConfigPersistence::Either => Ok(()),
+            ConfigPersistence::StoredOnly => {
+                if source == &ConfigSource::Stored {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Config key '{}.{}' must be set in the bundle manifest \
+                         (use SAVE CONFIG). It cannot be set via {}.",
+                        self.scope.name,
+                        self.key,
+                        source.as_str()
+                    )
+                    .into())
+                }
+            }
+            ConfigPersistence::RuntimeOnly => {
+                if source == &ConfigSource::Stored {
+                    Err(format!(
+                        "Config key '{}.{}' cannot be saved in the bundle manifest. \
+                         Set it at runtime via passed config, environment variable, \
+                         or SET CONFIG.",
+                        self.scope.name, self.key
+                    )
+                    .into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+/// Function signature for a config change hook. Receives a type-erased
+/// reference to the builder driving the change (callers pass
+/// `&BundleBuilder as &dyn Any` from the `bundlebase` crate) plus the old
+/// and new config values (either may be `None` if the key was previously
+/// unset or is being cleared) and returns a boxed future. The hook runs
+/// after the `SaveConfigOp` has been applied, so reads of the new value
+/// reflect the transition.
+///
+/// The caller guarantees `old != new` — hooks don't need to recheck.
+/// The hook downcasts the `&dyn Any` to whatever concrete builder type
+/// it knows about (typically `&BundleBuilder` from the `bundlebase`
+/// crate) and does whatever it wants with old/new.
+pub type ConfigChangeHookFn = for<'a> fn(
+    &'a (dyn std::any::Any + Send + Sync),
+    Option<&'a str>,
+    Option<&'a str>,
+) -> BoxFuture<'a, Result<(), BundlebaseError>>;
+
+/// Subscribe to value transitions on a config key.
+///
+/// Hooks fire after the `SaveConfigOp` has been applied to the
+/// in-progress builder change, only when `old != new`. Multiple hooks
+/// can be registered on the same key; they fire in registration order.
+/// Use for keys whose value affects derived state that has to be
+/// reconciled on flip (e.g. `system.git_versioning` triggers
+/// `refresh_block_versions` from the `bundlebase` crate).
+///
+/// Built-in hooks are registered during config registry initialization;
+/// downstream crates can call this at any time to add their own.
+pub mod change_hook {
+    use super::{ConfigChangeHookFn, ConfigKey};
+    use parking_lot::RwLock;
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+
+    type HookKey = (&'static str, &'static str);
+    type HookMap = RwLock<HashMap<HookKey, Vec<ConfigChangeHookFn>>>;
+
+    fn registry() -> &'static HookMap {
+        static R: OnceLock<HookMap> = OnceLock::new();
+        R.get_or_init(|| RwLock::new(HashMap::new()))
+    }
+
+    /// Register `hook` to fire when the given key's value transitions.
+    /// Idempotent at the key level — calling multiple times appends
+    /// additional listeners.
+    pub fn add(key: &ConfigKey, hook: ConfigChangeHookFn) {
+        registry()
+            .write()
+            .entry((key.scope.name, key.key))
+            .or_default()
+            .push(hook);
+    }
+
+    /// All hooks registered for the given scope name + key name, in
+    /// registration order.
+    pub fn get(scope_name: &str, key_name: &str) -> Vec<ConfigChangeHookFn> {
+        registry()
+            .read()
+            .iter()
+            .find(|(&(s, k), _)| s == scope_name && k == key_name)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Declares `pub const` config keys and generates a function returning `&'static [ConfigKey]`.
@@ -234,7 +375,8 @@ impl ConfigKey {
 /// ```rust,ignore
 /// config_keys!(s3_keys, {
 ///     pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
-///     pub const S3_SECRET_CFG: ConfigKey = S3_SCOPE.define_secure("secret");
+///     pub const S3_SECRET_CFG: ConfigKey =
+///         S3_SCOPE.define("secret").runtime_only().secure();
 /// });
 /// ```
 #[macro_export]
@@ -277,28 +419,56 @@ macro_rules! config_scopes {
 /// This trait abstracts config access so that crates like `bundlebase-io` can
 /// read configuration without depending on the full `BundleConfig` implementation.
 pub trait ConfigProvider: Send + Sync {
-    /// Get the winning value for a key, scoped to a parsed Scope.
-    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError>;
+    /// Get the winning value for a key, looking up under the given
+    /// (possibly sub-namespaced) scope. Use for providers like S3
+    /// where a key can be set at `s3` and overridden at `s3/bucket-foo`.
+    fn get_in_scope(
+        &self,
+        scope: &Scope,
+        key: &ConfigKey,
+    ) -> Result<Option<String>, BundlebaseError>;
 
-    /// Like `get`, but returns an error if the key is not set.
-    fn get_required(
+    /// Get the winning value for a key in the key's own provider scope.
+    /// Convenience for non-namespaced configs (like `system.*`) where
+    /// the scope is fully determined by the key constant.
+    fn get(&self, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+        let scope = Scope::try_from(key.scope.name)?;
+        self.get_in_scope(&scope, key)
+    }
+
+    /// Like `get_in_scope`, but errors if the key has no value.
+    fn get_required_in_scope(
         &self,
         scope: &Scope,
         key: &ConfigKey,
         context: &str,
     ) -> Result<String, BundlebaseError> {
-        self.get(scope, key)?.ok_or_else(|| {
+        self.get_in_scope(scope, key)?.ok_or_else(|| {
             BundlebaseError::from(format!(
                 "{}: No configuration set for /{}:{}",
                 context, key.scope.name, key.key
             ))
         })
     }
+
+    /// Like `get`, but errors if the key has no value.
+    fn get_required(
+        &self,
+        key: &ConfigKey,
+        context: &str,
+    ) -> Result<String, BundlebaseError> {
+        let scope = Scope::try_from(key.scope.name)?;
+        self.get_required_in_scope(&scope, key, context)
+    }
 }
 
 /// Blanket impl for Arc<T> where T: ConfigProvider
 impl<T: ConfigProvider + ?Sized> ConfigProvider for Arc<T> {
-    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
-        (**self).get(scope, key)
+    fn get_in_scope(
+        &self,
+        scope: &Scope,
+        key: &ConfigKey,
+    ) -> Result<Option<String>, BundlebaseError> {
+        (**self).get_in_scope(scope, key)
     }
 }

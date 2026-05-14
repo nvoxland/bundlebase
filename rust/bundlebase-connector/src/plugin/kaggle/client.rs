@@ -23,9 +23,9 @@ impl KaggleClient {
     ) -> Result<Self, BundlebaseError> {
         let scope = dataset_scope(dataset)?;
 
-        let base_url = config.get_required(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
-        let username = config.get(&scope, &USERNAME_CFG)?;
-        let key = config.get(&scope, &API_KEY_CFG)?;
+        let base_url = config.get_required_in_scope(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
+        let username = config.get_in_scope(&scope, &USERNAME_CFG)?;
+        let key = config.get_in_scope(&scope, &API_KEY_CFG)?;
 
         Self::new(&base_url, username, key)
     }

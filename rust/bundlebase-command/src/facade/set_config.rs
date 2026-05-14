@@ -119,7 +119,11 @@ impl BundleFacadeCommand for SetConfigCommand {
             .set_config(&self.scope, &self.key, &self.value)
             .await?;
 
-        let is_secure = bundlebase::bundle_config::is_key_secure(&self.scope, &self.key);
+        let is_secure = bundlebase::bundle_config::BundleConfig::get_config_key(
+            &self.scope,
+            &self.key,
+        )
+        .map_or(false, |spec| spec.secure);
         let display_value = if is_secure {
             "'*****'".to_string()
         } else {

@@ -57,7 +57,9 @@ config_keys!(configs, {
             read_kaggle_json_field("username")
         });
     pub const API_KEY_CFG: ConfigKey = KAGGLE_SCOPE
-        .define_secure("key")
+        .define("key")
+        .runtime_only()
+        .secure()
         .with_default_fn("key in ~/.kaggle/kaggle.json", || {
             read_kaggle_json_field("key")
         });

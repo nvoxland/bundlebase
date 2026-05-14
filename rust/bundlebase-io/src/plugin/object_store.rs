@@ -78,9 +78,11 @@ config_keys!(s3_keys, {
     pub const S3_CHECKSUM_ALGORITHM_CFG: ConfigKey = S3_SCOPE.define("checksum_algorithm");
     pub const S3_COPY_IF_NOT_EXISTS_CFG: ConfigKey = S3_SCOPE.define("copy_if_not_exists");
     pub const S3_CONDITIONAL_PUT_CFG: ConfigKey = S3_SCOPE.define("conditional_put");
-    pub const S3_SECRET_ACCESS_KEY_CFG: ConfigKey = S3_SCOPE.define_secure("secret_access_key");
-    pub const S3_SESSION_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("session_token");
-    pub const S3_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("token");
+    pub const S3_SECRET_ACCESS_KEY_CFG: ConfigKey =
+        S3_SCOPE.define("secret_access_key").runtime_only().secure();
+    pub const S3_SESSION_TOKEN_CFG: ConfigKey =
+        S3_SCOPE.define("session_token").runtime_only().secure();
+    pub const S3_TOKEN_CFG: ConfigKey = S3_SCOPE.define("token").runtime_only().secure();
 });
 
 // ── GCS configuration keys ──────────────────────────────────────────
@@ -90,8 +92,10 @@ config_keys!(gcs_keys, {
     pub const GCS_SERVICE_ACCOUNT_PATH_CFG: ConfigKey = GCS_SCOPE.define("service_account_path");
     pub const GCS_APPLICATION_CREDENTIALS_CFG: ConfigKey =
         GCS_SCOPE.define("application_credentials");
-    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey =
-        GCS_SCOPE.define_secure("service_account_key");
+    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey = GCS_SCOPE
+        .define("service_account_key")
+        .runtime_only()
+        .secure();
 });
 
 // ── Azure configuration keys ────────────────────────────────────────
@@ -103,10 +107,14 @@ config_keys!(azure_keys, {
     pub const AZURE_TENANT_ID_CFG: ConfigKey = AZURE_SCOPE.define("tenant_id");
     pub const AZURE_AUTHORITY_HOST_CFG: ConfigKey = AZURE_SCOPE.define("authority_host");
     pub const AZURE_USE_EMULATOR_CFG: ConfigKey = AZURE_SCOPE.define("use_emulator");
-    pub const AZURE_ACCESS_KEY_CFG: ConfigKey = AZURE_SCOPE.define_secure("access_key");
-    pub const AZURE_SAS_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("sas_token");
-    pub const AZURE_BEARER_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("bearer_token");
-    pub const AZURE_CLIENT_SECRET_CFG: ConfigKey = AZURE_SCOPE.define_secure("client_secret");
+    pub const AZURE_ACCESS_KEY_CFG: ConfigKey =
+        AZURE_SCOPE.define("access_key").runtime_only().secure();
+    pub const AZURE_SAS_TOKEN_CFG: ConfigKey =
+        AZURE_SCOPE.define("sas_token").runtime_only().secure();
+    pub const AZURE_BEARER_TOKEN_CFG: ConfigKey =
+        AZURE_SCOPE.define("bearer_token").runtime_only().secure();
+    pub const AZURE_CLIENT_SECRET_CFG: ConfigKey =
+        AZURE_SCOPE.define("client_secret").runtime_only().secure();
 });
 
 // ============================================================================
@@ -177,7 +185,7 @@ pub(crate) fn build_object_store(
             let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
 
             for spec in s3_keys() {
-                if let Some(value) = config.get(&scope, spec)? {
+                if let Some(value) = config.get_in_scope(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -188,7 +196,7 @@ pub(crate) fn build_object_store(
             let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
 
             for spec in gcs_keys() {
-                if let Some(value) = config.get(&scope, spec)? {
+                if let Some(value) = config.get_in_scope(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -199,7 +207,7 @@ pub(crate) fn build_object_store(
             let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
 
             for spec in azure_keys() {
-                if let Some(value) = config.get(&scope, spec)? {
+                if let Some(value) = config.get_in_scope(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -225,6 +233,9 @@ pub struct ObjectStoreFile {
     url: Url,
     store: Arc<dyn ObjectStore>,
     path: ObjectPath,
+    /// Held so we can consult config in async hot paths like `version()`
+    /// without threading a `&dyn ConfigProvider` through `IOReadFile`.
+    config: Arc<dyn ConfigProvider>,
 }
 
 impl Debug for ObjectStoreFile {
@@ -243,7 +254,7 @@ impl ObjectStoreFile {
         config: Arc<dyn ConfigProvider>,
     ) -> Result<ObjectStoreFile, BundlebaseError> {
         let (store, path) = parse_url(url, &config)?;
-        Self::new(url, store, &path)
+        Self::new(url, store, &path, config)
     }
 
     /// Creates a file from the passed string.
@@ -269,11 +280,13 @@ impl ObjectStoreFile {
         url: &Url,
         store: Arc<dyn ObjectStore>,
         path: &ObjectPath,
+        config: Arc<dyn ConfigProvider>,
     ) -> Result<Self, BundlebaseError> {
         Ok(Self {
             url: url.clone(),
             store,
             path: path.clone(),
+            config,
         })
     }
 
@@ -375,6 +388,19 @@ impl IOReadFile for ObjectStoreFile {
 
     async fn version(&self) -> Result<String, BundlebaseError> {
         let meta = self.store.head(&self.path).await?;
+
+        if self.url.scheme() == "file" && is_git_versioning_enabled(&*self.config)? {
+            return match git_oid_for_url(&self.url).await {
+                Some(oid) => Ok(oid),
+                None => Err(format!(
+                    "system.git_versioning is enabled but git could not produce an OID for {}. \
+                     Verify the file is inside a git working tree and that `git` is on PATH, \
+                     or unset system.git_versioning to fall back to mtime-based versions.",
+                    self.url
+                )
+                .into()),
+            };
+        }
         // Priority: Version (S3 style) → ETag (HTTP standard) → LastModified (hashed timestamp)
         let version = if meta
             .version
@@ -525,7 +551,12 @@ impl ObjectStoreDir {
         // Reuse the existing store instead of creating a new one
         // This is important for stores like TarObjectStore where the URL might not
         // indicate the store type
-        ObjectStoreFile::new(&file_url, self.store.clone(), &object_path)
+        ObjectStoreFile::new(
+            &file_url,
+            self.store.clone(),
+            &object_path,
+            self.config.clone(),
+        )
     }
 
     /// Get an IODir for a subdirectory within this directory.
@@ -632,6 +663,29 @@ fn file_url(path: &str) -> Result<Url, BundlebaseError> {
 
     Url::from_file_path(normalized.as_path())
         .map_err(|_| BundlebaseError::from(format!("Invalid file path: {}", path)))
+}
+
+/// Returns the git blob OID of a `file://` URL's target if and only if the
+/// file is a clean tracked file in a git working tree. Returns `None` for
+/// any other scheme, or when git can't produce a confident answer.
+///
+/// Used by `version()` so that local files inside a git checkout get a
+/// stable, content-addressed change-detection token instead of a
+/// last-modified-time hash. The xxh3 content hash recorded in attach ops is
+/// untouched — only the `version` change-detection field is affected.
+/// Returns `true` if the `system.git_versioning` config is set to `"true"`.
+fn is_git_versioning_enabled(config: &dyn ConfigProvider) -> Result<bool, BundlebaseError> {
+    use bundlebase_common::system_config::GIT_VERSIONING_CFG;
+    let value = config.get(&GIT_VERSIONING_CFG)?;
+    Ok(value.as_deref() == Some("true"))
+}
+
+async fn git_oid_for_url(url: &Url) -> Option<String> {
+    if url.scheme() != "file" {
+        return None;
+    }
+    let path = url.to_file_path().ok()?;
+    crate::plugin::git_version::working_tree_oid(&path).await
 }
 
 /// Resolve `.` and `..` components in `path` lexically (without touching the
@@ -842,6 +896,109 @@ mod tests {
     fn test_compute_store_url(#[case] url: &str, #[case] expected: &str) {
         let url = Url::parse(url).unwrap();
         assert_eq!(expected, compute_store_url(&url).as_str());
+    }
+
+    fn config_with_git_versioning() -> Arc<dyn ConfigProvider> {
+        let cfg = crate::test_utils::TestConfigProvider::new();
+        cfg.set("system", "git_versioning", "true");
+        Arc::new(cfg)
+    }
+
+    #[tokio::test]
+    async fn version_uses_git_oid_when_enabled_in_repo() {
+        // With system.git_versioning=true and a file in a working tree,
+        // version() returns the git blob OID (40-char sha1 hex).
+        use std::process::Command as StdCommand;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        StdCommand::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap();
+        let path = repo.join("data.csv");
+        std::fs::write(&path, b"a,b\n1,2\n").unwrap();
+
+        let url = Url::from_file_path(&path).unwrap();
+        let file = ObjectStoreFile::from_url(&url, config_with_git_versioning()).unwrap();
+        let version = file.version().await.unwrap();
+        assert_eq!(
+            version.len(),
+            40,
+            "expected 40-char sha1 hex, got {:?}",
+            version
+        );
+        assert!(
+            version.chars().all(|c| c.is_ascii_hexdigit()),
+            "expected hex OID, got {:?}",
+            version
+        );
+
+        // And it should match what `git hash-object` produces directly.
+        let expected = StdCommand::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["hash-object", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let expected_oid = String::from_utf8(expected.stdout).unwrap().trim().to_string();
+        assert_eq!(version, expected_oid);
+    }
+
+    #[tokio::test]
+    async fn version_does_not_use_git_when_disabled() {
+        // Default config does not enable git_versioning. Even if the file
+        // is in a git working tree, the version must not be the git OID —
+        // we verify by comparing against `git hash-object` and asserting
+        // they differ (the fallback is an mtime-derived ETag/hash).
+        use std::process::Command as StdCommand;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        StdCommand::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap();
+        let path = repo.join("data.csv");
+        std::fs::write(&path, b"a,b\n1,2\n").unwrap();
+
+        let url = Url::from_file_path(&path).unwrap();
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config()).unwrap();
+        let version = file.version().await.unwrap();
+
+        let oid_output = StdCommand::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["hash-object", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let oid = String::from_utf8(oid_output.stdout).unwrap().trim().to_string();
+        assert_ne!(
+            version, oid,
+            "git lookup must not happen when system.git_versioning is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn version_errors_when_enabled_but_outside_repo() {
+        // Enabled, but the file is outside any working tree. The user
+        // explicitly opted into git versioning, so a missing git context is
+        // a fatal error rather than a silent fallback.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.csv");
+        std::fs::write(&path, b"a,b\n1,2\n").unwrap();
+
+        let url = Url::from_file_path(&path).unwrap();
+        let file = ObjectStoreFile::from_url(&url, config_with_git_versioning()).unwrap();
+        let err = file.version().await.expect_err("expected error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("system.git_versioning"),
+            "expected error to mention the config key, got {:?}",
+            msg
+        );
     }
 
     #[test]

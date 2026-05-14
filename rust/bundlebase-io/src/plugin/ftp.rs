@@ -25,7 +25,7 @@ config_scopes!(ftp_scopes, {
 
 config_keys!(ftp_keys, {
     pub const FTP_USERNAME_CFG: ConfigKey = FTP_SCOPE.define("username");
-    pub const FTP_PASSWORD_CFG: ConfigKey = FTP_SCOPE.define_secure("password");
+    pub const FTP_PASSWORD_CFG: ConfigKey = FTP_SCOPE.define("password").runtime_only().secure();
 });
 
 /// Parse an FTP URL into its components.
@@ -156,9 +156,9 @@ impl FtpFile {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = bundlebase_common::Scope::try_from(url)?;
         let user = config
-            .get(&scope, &FTP_USERNAME_CFG)?
+            .get_in_scope(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
+        let password = config.get_in_scope(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -291,9 +291,9 @@ impl FtpDir {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = bundlebase_common::Scope::try_from(url)?;
         let user = config
-            .get(&scope, &FTP_USERNAME_CFG)?
+            .get_in_scope(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
+        let password = config.get_in_scope(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,

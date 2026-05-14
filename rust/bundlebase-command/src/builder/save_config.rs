@@ -5,6 +5,7 @@ use crate::parser::{extract_identifier, quote_identifier};
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::SaveConfigOp;
+use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle_config::Scope;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
@@ -90,10 +91,43 @@ impl BundleBuilderCommand for SaveConfigCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        // Look up the ConfigKey so we can capture the previously-active
+        // value (for the hooks' `old` argument) and know the canonical
+        // scope name to look up hooks under.
+        let key_spec =
+            bundlebase::bundle_config::BundleConfig::get_config_key(&self.scope, &self.key);
+        let old_value = key_spec
+            .and_then(|spec| builder.config().get(&self.scope, &spec).ok().flatten());
+
         let op = SaveConfigOp::setup(&self.scope, &self.key, &self.value);
         builder.apply_operation(op.into()).await?;
 
-        let display_value = if bundlebase::bundle_config::is_key_secure(&self.scope, &self.key) {
+        // Fire any change hooks subscribed to this key, in registration
+        // order — but only when the value actually transitioned. Hooks
+        // can assume old != new.
+        if let Some(scope_name) = key_spec.map(|spec| spec.scope.name) {
+            let hooks = bundlebase_common::config::change_hook::get(scope_name, &self.key);
+            if !hooks.is_empty() {
+                let new_value = Some(self.value.as_str());
+                if old_value.as_deref() != new_value {
+                    for hook in hooks {
+                        hook(
+                            builder as &(dyn std::any::Any + Send + Sync),
+                            old_value.as_deref(),
+                            new_value,
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+
+        let is_secure = bundlebase::bundle_config::BundleConfig::get_config_key(
+            &self.scope,
+            &self.key,
+        )
+        .map_or(false, |spec| spec.secure);
+        let display_value = if is_secure {
             "*****".to_string()
         } else {
             self.value.clone()

@@ -50,9 +50,19 @@ pub struct ConfigValueDetails {
 // ConfigKey is now defined in bundlebase_common::config.
 // These validation methods remain here since they need the config registry.
 
-/// Check whether a key is secure for a given scope.
-pub fn is_key_secure(scope: &Scope, key: &str) -> bool {
-    BundleConfig::get_config_key(scope, key).map_or(false, |spec| spec.secure)
+/// Validate that the source is allowed for a key's persistence policy.
+/// Thin wrapper around `ConfigKey::validate_source` that does the
+/// registry lookup; returns `Ok(())` for unknown keys (validation is
+/// opt-in per registered key).
+pub fn validate_key_source(
+    scope: &Scope,
+    key: &str,
+    source: &ConfigSource,
+) -> Result<(), BundlebaseError> {
+    match BundleConfig::get_config_key(scope, key) {
+        Some(spec) => spec.validate_source(source),
+        None => Ok(()),
+    }
 }
 
 /// Validate that a config key is recognized for a specific scope.
@@ -218,6 +228,7 @@ impl BundleConfig {
         source: ConfigSource,
     ) -> Result<(), BundlebaseError> {
         validate_key_exists(scope, key)?;
+        validate_key_source(scope, key, &source)?;
 
         let mut inner = self.inner.write();
         let scope_str = scope.as_str().to_string();
@@ -452,7 +463,8 @@ impl BundleConfig {
                 let is_active = winners
                     .get(&winner_key)
                     .map_or(false, |(p, _)| *p == priority);
-                let is_secure = is_key_secure(&scope, &entry.key);
+                let is_secure = BundleConfig::get_config_key(&scope, &entry.key)
+                    .map_or(false, |spec| spec.secure);
                 result.push(ConfigValueDetails {
                     key: entry.key.clone(),
                     value: entry.value.clone(),
@@ -611,7 +623,11 @@ impl Clone for BundleConfig {
 
 /// Implement ConfigProvider for BundleConfig so IO crates can use it via the trait.
 impl ConfigProvider for BundleConfig {
-    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+    fn get_in_scope(
+        &self,
+        scope: &Scope,
+        key: &ConfigKey,
+    ) -> Result<Option<String>, BundlebaseError> {
         // Delegate to the inherent method
         BundleConfig::get(self, scope, key)
     }
@@ -1250,7 +1266,7 @@ mod tests {
                 &Scope::try_from("s3://bucket/").unwrap(),
                 "secret_access_key",
                 "SECRETKEY",
-                ConfigSource::Stored,
+                ConfigSource::Passed,
             )
             .unwrap();
         config
@@ -1278,28 +1294,31 @@ mod tests {
     }
 
     #[test]
-    fn test_is_key_secure() {
+    fn test_registered_keys_have_correct_secure_flag() {
         let s3 = Scope::try_from("s3").unwrap();
         let gcs = Scope::try_from("gs").unwrap();
         let azure = Scope::try_from("azure").unwrap();
+        let is_secure = |scope: &Scope, key: &str| {
+            BundleConfig::get_config_key(scope, key).map_or(false, |spec| spec.secure)
+        };
 
         // Secure keys (scoped)
-        assert!(is_key_secure(&s3, "secret_access_key"));
-        assert!(is_key_secure(&s3, "session_token"));
-        assert!(is_key_secure(&azure, "access_key"));
-        assert!(is_key_secure(&gcs, "service_account_key"));
-        assert!(is_key_secure(&azure, "client_secret"));
+        assert!(is_secure(&s3, "secret_access_key"));
+        assert!(is_secure(&s3, "session_token"));
+        assert!(is_secure(&azure, "access_key"));
+        assert!(is_secure(&gcs, "service_account_key"));
+        assert!(is_secure(&azure, "client_secret"));
 
         // Non-secure keys
-        assert!(!is_key_secure(&s3, "region"));
-        assert!(!is_key_secure(&azure, "account"));
-        assert!(!is_key_secure(&s3, "bucket"));
+        assert!(!is_secure(&s3, "region"));
+        assert!(!is_secure(&azure, "account"));
+        assert!(!is_secure(&s3, "bucket"));
 
         // Secure key but wrong scope — not secure
-        assert!(!is_key_secure(&gcs, "secret_access_key"));
+        assert!(!is_secure(&gcs, "secret_access_key"));
 
         // Unknown key — not secure
-        assert!(!is_key_secure(&s3, "nonexistent_key"));
+        assert!(!is_secure(&s3, "nonexistent_key"));
     }
 
     #[test]
@@ -1572,6 +1591,70 @@ mod tests {
         // "account" is in Azure scope
         assert!(validate_key_exists(&Scope::try_from("azure").unwrap(), "account").is_ok());
         assert!(validate_key_exists(&Scope::try_from("s3").unwrap(), "account").is_err());
+    }
+
+    #[test]
+    fn test_validate_key_source_either_allows_any_source() {
+        // "region" is `Either` — every source is fine.
+        let scope = Scope::try_from("s3").unwrap();
+        for source in [
+            ConfigSource::Stored,
+            ConfigSource::Passed,
+            ConfigSource::Env,
+            ConfigSource::Runtime,
+            ConfigSource::Default,
+        ] {
+            assert!(
+                validate_key_source(&scope, "region", &source).is_ok(),
+                "source {:?} should be allowed for region",
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_key_source_stored_only_rejects_runtime_sources() {
+        // `system.git_versioning` is StoredOnly.
+        let scope = Scope::try_from("system").unwrap();
+        assert!(validate_key_source(&scope, "git_versioning", &ConfigSource::Stored).is_ok());
+        for source in [
+            ConfigSource::Passed,
+            ConfigSource::Env,
+            ConfigSource::Runtime,
+        ] {
+            let err = validate_key_source(&scope, "git_versioning", &source)
+                .expect_err("StoredOnly must reject non-Stored sources");
+            assert!(
+                err.to_string().contains("must be set in the bundle manifest"),
+                "got: {}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_key_source_runtime_only_rejects_stored() {
+        // `system.allow_external_code` is RuntimeOnly.
+        let scope = Scope::try_from("system").unwrap();
+        let err = validate_key_source(&scope, "allow_external_code", &ConfigSource::Stored)
+            .expect_err("RuntimeOnly must reject Stored");
+        assert!(
+            err.to_string()
+                .contains("cannot be saved in the bundle manifest"),
+            "got: {}",
+            err
+        );
+        for source in [
+            ConfigSource::Passed,
+            ConfigSource::Env,
+            ConfigSource::Runtime,
+        ] {
+            assert!(
+                validate_key_source(&scope, "allow_external_code", &source).is_ok(),
+                "source {:?} should be allowed for allow_external_code",
+                source
+            );
+        }
     }
 
     // ── URL-to-name conversion tests ─────────────────────────────────

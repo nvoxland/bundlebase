@@ -55,6 +55,7 @@ use std::collections::{HashMap, HashSet};
 pub use verification::{FileVerificationResult, VerificationResults};
 
 use crate::bundle::bundle_schema::BundleSchema;
+use crate::bundle::operation::UpdateVersionOp;
 use crate::bundle_config::PassedBundleConfig;
 use crate::bundle_config::Scope;
 use crate::catalog::CATALOG_NAME;
@@ -66,10 +67,14 @@ use crate::io::{
     read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage,
     IOReadWriteDir, EMPTY_URL,
 };
+use crate::io::readable_file_from_path;
 use crate::object_id::ColumnId;
 use crate::source::ConnectorRegistry;
 use crate::ConfigProvider;
 use crate::{BundleConfig, BundlebaseError};
+use bundlebase_io::IOReadFile;
+use futures::future::BoxFuture;
+use std::any::Any;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::datasource::object_store::ObjectStoreUrl;
@@ -84,6 +89,70 @@ use std::sync::{Arc, Weak};
 use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
+
+
+pub(crate) fn register_config_hooks() {
+    bundlebase_common::config::change_hook::add(
+        &bundlebase_common::system_config::GIT_VERSIONING_CFG,
+        refresh_block_versions,
+    );
+}
+
+/// Change hook bound to `system.git_versioning`. Walks every attached
+/// block, recomputes the source file's `version()` under the *current*
+/// config, and emits an `UpdateVersionOp` for any block whose recorded
+/// version has drifted. Has full `BundleBuilder` access via downcast —
+/// free to do anything it wants with `old`/`new`.
+///
+/// Hooks fire only on transitions inside a builder session — replaying
+/// historical SaveConfigOps when opening a bundle does not invoke them
+/// (the resulting state is already settled in the manifest).
+fn refresh_block_versions<'a>(
+    ctx: &'a (dyn Any + Send + Sync),
+    _old: Option<&'a str>,
+    _new: Option<&'a str>,
+) -> BoxFuture<'a, Result<(), BundlebaseError>> {
+    Box::pin(async move {
+        let builder = ctx.downcast_ref::<BundleBuilder>().ok_or_else(|| {
+            BundlebaseError::from("refresh_block_versions: ctx must be a BundleBuilder")
+        })?;
+
+        let block_locations = builder.bundle().build_block_location_map();
+        let mut updates: Vec<(BlockId, String, String)> = Vec::new();
+
+        for (block_id, location) in block_locations {
+            // Only local-file locations are affected by version-policy flips.
+            if !location.starts_with("file:") && location.contains("://") {
+                continue;
+            }
+
+            let block = match builder.bundle().find_block_by_current_location(&location) {
+                Some(b) => b,
+                None => continue,
+            };
+            let recorded = block.version();
+
+            let file =
+                readable_file_from_path(&location, builder.data_dir(), builder.config()).await?;
+            let new_version = file.version().await?;
+
+            if new_version != recorded {
+                updates.push((block_id, location, new_version));
+            }
+        }
+
+        for (block_id, location, new_version) in updates {
+            log::info!(
+                "refresh_block_versions: refreshing version for block at {} -> {}",
+                location,
+                new_version
+            );
+            let op = UpdateVersionOp::setup(block_id, new_version);
+            builder.apply_operation(op.into()).await?;
+        }
+        Ok(())
+    })
+}
 
 /// A stored report template with markdown content.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -50,6 +50,8 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(system::system_scopes());
     registry.register_keys(system::system_keys());
 
+    crate::bundle::register_config_hooks();
+
     use bundlebase_io::plugin;
     registry.register_scopes(plugin::object_store::object_store_scopes());
     registry.register_keys(plugin::object_store::s3_keys());

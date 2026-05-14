@@ -7,6 +7,7 @@
 //! - `tar`: tar+file://
 
 pub mod ftp;
+pub(crate) mod git_version;
 pub mod object_store;
 pub mod sftp;
 pub mod tar;

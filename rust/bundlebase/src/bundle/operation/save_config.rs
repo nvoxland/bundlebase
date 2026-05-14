@@ -43,13 +43,11 @@ impl SaveConfigOp {
 impl Operation for SaveConfigOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
         crate::bundle_config::validate_key_exists(&self.scope, &self.key)?;
-        if crate::bundle_config::is_key_secure(&self.scope, &self.key) {
-            return Err(format!(
-                "Cannot save secure config key '{}'. Use environment variables or pass config at runtime instead.",
-                self.key
-            )
-            .into());
-        }
+        crate::bundle_config::validate_key_source(
+            &self.scope,
+            &self.key,
+            &crate::bundle_config::ConfigSource::Stored,
+        )?;
         Ok(())
     }
 
@@ -74,11 +72,9 @@ impl Operation for SaveConfigOp {
     }
 
     fn describe(&self) -> String {
-        let display_value = if crate::bundle_config::is_key_secure(&self.scope, &self.key) {
-            "*****"
-        } else {
-            &self.value
-        };
+        let is_secure = crate::bundle_config::BundleConfig::get_config_key(&self.scope, &self.key)
+            .map_or(false, |spec| spec.secure);
+        let display_value = if is_secure { "*****" } else { &self.value };
         format!(
             "SAVE CONFIG [{}]: {} = {}",
             self.scope, self.key, display_value
@@ -190,8 +186,8 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("Cannot save secure config key"),
-            "Expected secure key rejection error, got: {}",
+            err_msg.contains("cannot be saved in the bundle manifest"),
+            "Expected runtime-only rejection error, got: {}",
             err_msg
         );
 
@@ -218,6 +214,49 @@ mod tests {
         );
         let result = op.check(bundle.bundle()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_runtime_only_non_secure_key() {
+        // `system.allow_external_code` is RuntimeOnly but not secure. It
+        // must still be rejected by SaveConfigOp::check — the security
+        // property is "bundle can't grant itself permissions," which has
+        // nothing to do with masking.
+        let bundle = crate::BundleBuilder::create("memory:///test_runtime_only", None)
+            .await
+            .expect("Failed to create test bundle");
+
+        let op = SaveConfigOp::setup(
+            &Scope::try_from("system").unwrap(),
+            "allow_external_code",
+            "true",
+        );
+        let result = op.check(bundle.bundle()).await;
+        let err = result.expect_err("RuntimeOnly key must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cannot be saved in the bundle manifest"),
+            "expected RuntimeOnly rejection, got {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_accepts_stored_only_key() {
+        // `system.git_versioning` is StoredOnly — SaveConfigOp::check
+        // must accept it (this is the only path it's allowed to take).
+        let bundle = crate::BundleBuilder::create("memory:///test_stored_only", None)
+            .await
+            .expect("Failed to create test bundle");
+
+        let op = SaveConfigOp::setup(
+            &Scope::try_from("system").unwrap(),
+            "git_versioning",
+            "true",
+        );
+        op.check(bundle.bundle())
+            .await
+            .expect("StoredOnly key must pass SaveConfigOp::check");
     }
 
     #[tokio::test]
