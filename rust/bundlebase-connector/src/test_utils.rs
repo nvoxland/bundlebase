@@ -26,7 +26,11 @@ impl TestConfigProvider {
 }
 
 impl ConfigProvider for TestConfigProvider {
-    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+    fn get_in_scope(
+        &self,
+        scope: &Scope,
+        key: &ConfigKey,
+    ) -> Result<Option<String>, BundlebaseError> {
         let values = self.values.read();
         if let Some(v) = values.get(&(scope.as_str().to_string(), key.key.to_string())) {
             return Ok(Some(v.clone()));
