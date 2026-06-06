@@ -567,8 +567,8 @@ impl BundleBuilder {
                 },
                 from: from.clone(),
                 view: None,
-                min_version: Some(version_str.clone()),
-                max_version: Some(version_str),
+                min_version: Some(version_str),
+                max_version: None,
             };
             write_yaml(init_file.as_ref(), &init_commit).await?;
         };

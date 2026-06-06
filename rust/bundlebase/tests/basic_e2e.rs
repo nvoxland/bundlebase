@@ -48,10 +48,9 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     assert_eq!(
         init_content.trim(),
         format!(
-            "id: {}\nminVersion: '{}'\nmaxVersion: '{}'",
+            "id: {}\nminVersion: '{}'",
             bundle.bundle().id(),
             fmt_version,
-            fmt_version
         )
         .trim()
     );

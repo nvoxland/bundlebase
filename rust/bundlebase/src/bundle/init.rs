@@ -31,8 +31,8 @@ impl InitCommit {
             },
             from: from.cloned(),
             view: None,
-            min_version: Some(version.clone()),
-            max_version: Some(version),
+            min_version: Some(version),
+            max_version: None,
         }
     }
 
@@ -42,8 +42,8 @@ impl InitCommit {
             id: None,
             from: None,
             view: Some(view_id.to_string()),
-            min_version: Some(version.clone()),
-            max_version: Some(version),
+            min_version: Some(version),
+            max_version: None,
         }
     }
 }
