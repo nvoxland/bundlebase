@@ -6,7 +6,7 @@ categories:
 
 # Using Bundlebase with Git LFS
 
-A bundlebase bundle is just a directory: small YAML manifests next to whatever
+A Bundlebase bundle is just a directory: small YAML manifests next to whatever
 raw data files you imported. That layout happens to fit git + git-lfs almost
 exactly, and the combination is more useful than I initially expected.
 
@@ -71,7 +71,7 @@ git checkout -b try-stricter-validation
 git add . && git commit -m "Try stricter email validation"
 ```
 
-If it works, merge to main. If not, throw the branch away. The bundlebase
+If it works, merge to main. If not, throw the branch away. The Bundlebase
 commit history on that branch is preserved as part of the git history, so
 "what did we try and abandon" is also recorded.
 
@@ -87,14 +87,14 @@ lazily. `git clone --filter=blob:none` plus `git lfs pull` for just the
 commits you need is a reasonable workflow on big repos.
 
 **Git OIDs as the change-detection token (opt-in).** `SAVE CONFIG` the
-`system.git_versioning` key to `true` and bundlebase will use the git
+`system.git_versioning` key to `true` and Bundlebase will use the git
 blob OID of each local source file as that file's `version` instead of the
 mtime-derived hash. The OID is stable across machines and re-clones,
 doesn't churn when a file is touched without changing, and stays the same
 across the untracked → `git add` → `git commit` transitions. It also works
 uniformly for materialized files and unmaterialized LFS pointers — the
 pointer file's own OID changes if and only if the data it references
-changes. The xxh3 content hash bundlebase records per attached file is
+changes. The xxh3 content hash Bundlebase records per attached file is
 unchanged; this only affects the change-detection `version` field. Off by
 default, and stored-only — the flag lives in the bundle manifest and
 travels with the bundle, so collaborators don't need to remember a magic
@@ -104,7 +104,7 @@ config when they `open()`.
 
 1. `main` holds the canonical, agreed-upon cleaned bundle.
 2. Each ad-hoc question or experiment gets a branch.
-3. The branch adds bundlebase commits on top of main.
+3. The branch adds Bundlebase commits on top of main.
 4. Merge back to main only the experiments that produced something everyone
    agrees on.
 
@@ -131,16 +131,16 @@ looking at exactly the same filtered state. No "send me the file" step.
 
 ## Notes
 
-**Two layers of "commit" is confusing at first.** A bundlebase commit is an
+**Two layers of "commit" is confusing at first.** A Bundlebase commit is an
 entry in `_bundlebase/`. A git commit is an entry in `.git/`. They overlap
-but don't have to — you can stage three bundlebase commits and then make a
+but don't have to — you can stage three Bundlebase commits and then make a
 single git commit covering all of them, or vice versa. I usually try to keep
 them 1:1 but it's not enforced and probably can't be.
 
 **Merging diverged data is "pick one".** If two branches both edit the same
 underlying CSV in incompatible ways, git-lfs will give you a conflict on the
 pointer file, and resolving it is just choosing which blob wins. There is no
-actual three-way merge of tabular data, and bundlebase doesn't try to invent
+actual three-way merge of tabular data, and Bundlebase doesn't try to invent
 one. For now, treat data branches like feature branches: rebase early,
 merge often, don't let them diverge for weeks.
 
@@ -181,7 +181,7 @@ await c.drop_column("internal_notes")
 await c.commit("Import Q1 orders, drop internal notes")
 ```
 
-The `system.git_versioning` flag is what tells bundlebase to use git blob
+The `system.git_versioning` flag is what tells Bundlebase to use git blob
 OIDs as the change-detection version on local files. It's off by default;
 without it you'd still get a working bundle, just with mtime-derived
 versions instead of content-addressed ones. The flag is stored-only — it
@@ -221,10 +221,10 @@ how to clone.
 For datasets in the megabytes-to-low-gigabytes range with a small team, yes,
 this is a good fit. The combination is more than the sum of the parts: git
 gives you the history and branching of the *operations*, LFS gives you a
-practical place to put the *bytes*, and bundlebase gives you a meaningful
+practical place to put the *bytes*, and Bundlebase gives you a meaningful
 diff between the two.
 
-For terabyte-scale data, a shared object store with bundlebase pointing at it
+For terabyte-scale data, a shared object store with Bundlebase pointing at it
 is going to scale better than git-lfs. But I'd still keep the YAML manifests
 in regular git — the audit trail is worth it on its own.
 

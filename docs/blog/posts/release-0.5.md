@@ -35,7 +35,7 @@ bundle.commit("Loaded Zillow data from Kaggle")
 
 It handles ZIP extraction automatically, supports glob patterns for filtering files, and tracks dataset versions so re-fetches only pull what's changed.
 
-Auth uses your existing `~/.kaggle/kaggle.json` by default. You can also configure credentials through bundlebase's config system under the `kaggle` scope:
+Auth uses your existing `~/.kaggle/kaggle.json` by default. You can also configure credentials through Bundlebase's config system under the `kaggle` scope:
 
 ```python
 bundle.set_config("kaggle", "username", "my-user")

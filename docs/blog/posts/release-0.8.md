@@ -63,7 +63,7 @@ MCP server now supports multiple bundles concurrently in one session.
 
 ## Data Exploration
 
-Whether you are driving bundlebase with an agent or own your own, I added new features to help explore and understand your data.
+Whether you are driving Bundlebase with an agent or own your own, I added new features to help explore and understand your data.
 
 - [`DESCRIBE DATA IN`](../../sql-reference/index.md#describe-data) statement provides column profiling: min, max, null count, distinct count
 - [PDF reports](../../guide/reports.md) — embed live charts and tables in a markdown file, generate a PDF
@@ -75,7 +75,7 @@ Whether you are driving bundlebase with an agent or own your own, I added new fe
 
 TSV has been added as an attachable file format
 
-Excel and standard JSON files can be returned by connectors, and bundlebase auto-converts them into a supported internal format.
+Excel and standard JSON files can be returned by connectors, and Bundlebase auto-converts them into a supported internal format.
 
 
 ## Standalone CLI Binaries

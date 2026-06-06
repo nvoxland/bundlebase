@@ -25,7 +25,7 @@ You can now serve a bundle over the network using SQL. Any SQL client can connec
 bundlebase-cli --bundle /data/my_bundle --mode flight --port 50051
 ```
 
-The server supports the full range of bundlebase commands (ATTACH, FILTER, CREATE VIEW, etc.) in addition to regular SQL queries. There's also a `--read-only` flag if you just want to expose data without allowing mutations.
+The server supports the full range of Bundlebase commands (ATTACH, FILTER, CREATE VIEW, etc.) in addition to regular SQL queries. There's also a `--read-only` flag if you just want to expose data without allowing mutations.
 
 Authentication is required. It ships with default credentials of `admin/password` for now, and will support configuring that in the future.
 
