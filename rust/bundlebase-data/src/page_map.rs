@@ -805,6 +805,55 @@ fn scan_newline_offsets(
     result
 }
 
+/// Streaming counter of logical lines, for chunk-at-a-time row counting with
+/// O(1) memory. Blank/whitespace-only lines are skipped, matching
+/// [`PageMap::build`] and the Arrow parsers' row numbering. With `quote_aware`
+/// set, newlines inside double-quoted values (CSV `newlines_in_values`) are
+/// treated as in-record rather than as line boundaries; quote state is tracked
+/// by parity, which also handles `""`-escaped quotes.
+pub(crate) struct LogicalLineCounter {
+    quote_aware: bool,
+    in_quotes: bool,
+    line_has_content: bool,
+    count: usize,
+}
+
+impl LogicalLineCounter {
+    pub(crate) fn new(quote_aware: bool) -> Self {
+        Self {
+            quote_aware,
+            in_quotes: false,
+            line_has_content: false,
+            count: 0,
+        }
+    }
+
+    pub(crate) fn update(&mut self, chunk: &[u8]) {
+        for &b in chunk {
+            if self.quote_aware && b == b'"' {
+                self.in_quotes = !self.in_quotes;
+            }
+            if b == b'\n' && !self.in_quotes {
+                if self.line_has_content {
+                    self.count += 1;
+                    self.line_has_content = false;
+                }
+            } else if !b.is_ascii_whitespace() {
+                self.line_has_content = true;
+            }
+        }
+    }
+
+    /// Total logical lines seen; a final line without a trailing newline counts.
+    pub(crate) fn finish(self) -> usize {
+        if self.line_has_content {
+            self.count + 1
+        } else {
+            self.count
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1111,6 +1160,44 @@ mod tests {
         let data = b"row0\n\nrow1\n  \nrow2\n";
         let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2]);
         assert_eq!(offsets, vec![0, 6, 14]);
+    }
+
+    #[test]
+    fn test_logical_line_counter_skips_blank_lines() {
+        let mut counter = LogicalLineCounter::new(false);
+        counter.update(b"row1\n\nrow2\n   \nrow3");
+        assert_eq!(counter.finish(), 3);
+    }
+
+    #[test]
+    fn test_logical_line_counter_trailing_newline() {
+        let mut counter = LogicalLineCounter::new(false);
+        counter.update(b"row1\nrow2\n");
+        assert_eq!(counter.finish(), 2);
+    }
+
+    #[test]
+    fn test_logical_line_counter_quoted_newlines() {
+        let mut counter = LogicalLineCounter::new(true);
+        counter.update(b"a,\"multi\nline\"\nb,\"x\"\n");
+        assert_eq!(counter.finish(), 2);
+    }
+
+    #[test]
+    fn test_logical_line_counter_quotes_split_across_chunks() {
+        let mut counter = LogicalLineCounter::new(true);
+        counter.update(b"a,\"mul");
+        counter.update(b"ti\nline\"\nb");
+        counter.update(b",2\n");
+        assert_eq!(counter.finish(), 2);
+    }
+
+    #[test]
+    fn test_logical_line_counter_not_quote_aware() {
+        // Without quote awareness, quoted newlines count as boundaries.
+        let mut counter = LogicalLineCounter::new(false);
+        counter.update(b"a,\"multi\nline\"\n");
+        assert_eq!(counter.finish(), 2);
     }
 
     #[test]

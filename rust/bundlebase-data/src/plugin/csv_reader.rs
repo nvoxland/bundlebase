@@ -389,41 +389,29 @@ impl DataReader for CsvReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
+        use crate::page_map::LogicalLineCounter;
         use object_store::GetOptions;
 
         let object_store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
 
-        // Stream the file counting newlines — O(1) memory, no buffering.
+        // Stream the file counting logical rows — O(1) memory, no buffering.
+        // Quote-aware so newlines inside quoted values don't count as rows,
+        // and blank lines are skipped to match the parser's row numbering.
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut stream = get_result.into_stream();
 
-        let mut row_count: usize = 0;
+        let mut counter = LogicalLineCounter::new(true);
         let mut file_size: usize = 0;
-        let mut last_byte: u8 = b'\n';
-        let mut header_seen = false;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            for &b in chunk.iter() {
-                if b == b'\n' {
-                    if header_seen {
-                        row_count += 1;
-                    } else {
-                        header_seen = true;
-                    }
-                }
-            }
+            counter.update(&chunk);
             file_size += chunk.len();
-            if !chunk.is_empty() {
-                last_byte = chunk[chunk.len() - 1];
-            }
         }
 
-        // Account for final line without trailing newline
-        if file_size > 0 && last_byte != b'\n' && header_seen {
-            row_count += 1;
-        }
+        // The first logical line is the header.
+        let row_count = counter.finish().saturating_sub(1);
 
         let stats = Statistics {
             num_rows: Precision::Exact(row_count),
@@ -1013,6 +1001,92 @@ mod tests {
             17160, bytes,
             "CSV statistics should return correct file size in bytes. Got {} bytes",
             bytes
+        );
+
+        Ok(())
+    }
+
+    /// Statistics must count logical rows like the parser does — blank and
+    /// whitespace-only lines produce no row.
+    #[tokio::test]
+    async fn test_statistics_skips_blank_lines() -> Result<(), BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        use bundlebase_io::plugin::object_store::ObjectStoreFile;
+
+        let url = Url::parse("memory:///test_csv_stats_blank/data.csv")?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
+        file.write(bytes::Bytes::from_static(
+            b"id,name\n1,a\n\n2,b\n   \n3,c\n",
+        ))
+        .await?;
+
+        let plugin = CsvPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        let rows = stats
+            .num_rows
+            .get_value()
+            .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
+
+        assert_eq!(
+            &3, rows,
+            "blank/whitespace-only lines must not count as rows"
+        );
+
+        Ok(())
+    }
+
+    /// Statistics must not count newlines inside quoted values as rows.
+    #[tokio::test]
+    async fn test_statistics_newlines_in_values_counts_logical_rows(
+    ) -> Result<(), BundlebaseError> {
+        let plugin = CsvPlugin::default();
+        let mut options = HashMap::new();
+        options.insert("newlines_in_values".to_string(), "true".to_string());
+
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                test_datafile("newlines-in-values.csv"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                Some(&options),
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        let rows = stats
+            .num_rows
+            .get_value()
+            .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
+
+        // newlines-in-values.csv has 3 logical rows spread over 6 physical lines
+        assert_eq!(
+            &3, rows,
+            "newlines inside quoted values must not count as rows"
         );
 
         Ok(())

@@ -310,39 +310,28 @@ impl DataReader for JsonlReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
+        use crate::page_map::LogicalLineCounter;
         use object_store::GetOptions;
 
         let object_store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
 
-        // Stream the file counting newlines — O(1) memory, no buffering.
+        // Stream the file counting logical rows — O(1) memory, no buffering.
+        // Blank lines are skipped to match the parser's row numbering.
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut stream = get_result.into_stream();
 
-        let mut row_count: usize = 0;
+        let mut counter = LogicalLineCounter::new(false);
         let mut file_size: usize = 0;
-        let mut last_byte: u8 = b'\n';
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            for &b in chunk.iter() {
-                if b == b'\n' {
-                    row_count += 1;
-                }
-            }
+            counter.update(&chunk);
             file_size += chunk.len();
-            if !chunk.is_empty() {
-                last_byte = chunk[chunk.len() - 1];
-            }
-        }
-
-        // Account for final line without trailing newline
-        if file_size > 0 && last_byte != b'\n' {
-            row_count += 1;
         }
 
         let stats = Statistics {
-            num_rows: Precision::Exact(row_count),
+            num_rows: Precision::Exact(counter.finish()),
             total_byte_size: Precision::Exact(file_size),
             ..Default::default()
         };
@@ -1075,6 +1064,46 @@ mod tests {
             280, bytes,
             "JSON statistics should return correct file size in bytes. Got {} bytes",
             bytes
+        );
+
+        Ok(())
+    }
+
+    /// Statistics must count logical rows like the parser does — blank and
+    /// whitespace-only lines produce no row, and a final line without a
+    /// trailing newline still counts.
+    #[tokio::test]
+    async fn test_statistics_skips_blank_lines() -> Result<(), BundlebaseError> {
+        let content = "{\"id\":\"0\"}\n\n{\"id\":\"1\"}\n   \n{\"id\":\"2\"}";
+        write_jsonl("memory:///test_jsonl_stats_blank/data.jsonl", content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_jsonl_stats_blank/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        let rows = stats
+            .num_rows
+            .get_value()
+            .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
+
+        assert_eq!(
+            &3, rows,
+            "blank/whitespace-only lines must not count as rows"
         );
 
         Ok(())
