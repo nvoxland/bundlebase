@@ -584,9 +584,12 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        // Write tombstone file if there are pending deletes
-        let deleted_ids = std::mem::take(&mut *self.pending_deletes.write());
-        let delete_wheres = std::mem::take(&mut *self.pending_delete_wheres.write());
+        // Write tombstone file if there are pending deletes.
+        // The pending sets are only snapshotted here — they are cleared once
+        // the commit has fully succeeded, so a failed commit leaves them
+        // pending and the commit can be retried without losing them.
+        let deleted_ids = self.pending_deletes.read().clone();
+        let delete_wheres = self.pending_delete_wheres.read().clone();
         if !deleted_ids.is_empty() {
             use crate::bundle::operation::DeleteOp;
             use crate::bundle::tombstone;
@@ -617,9 +620,10 @@ impl BundleBuilder {
             }
         }
 
-        // Write update overlay file if there are pending updates from UPDATE commands
-        let pending_upd = std::mem::take(&mut *self.pending_updates.write());
-        let update_wheres = std::mem::take(&mut *self.pending_update_wheres.write());
+        // Write update overlay file if there are pending updates from UPDATE
+        // commands. Snapshot only — cleared after the commit succeeds.
+        let pending_upd = self.pending_updates.read().clone();
+        let update_wheres = self.pending_update_wheres.read().clone();
         if !pending_upd.is_empty() {
             use crate::bundle::operation::UpdateDataOp;
             use crate::bundle::update_overlay;
@@ -683,31 +687,43 @@ impl BundleBuilder {
 
         // Create versioned filename: {5-digit-version}{12-char-hash}.yaml
         let filename = format!("{:05}{}.yaml", next_version, hash_short);
-        let manifest_file = manifest_dir.writable_file(filename.as_str())?;
 
-        // Write as stream
-        let data = bytes::Bytes::from(yaml);
-        let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_file.write_stream(Box::pin(stream)).await?;
-
-        // Update metadata to reflect the committed version.
-        // The bundle state (operations, version, schema) is already correct in memory —
-        // we just need to record the commit, advance the manifest version, and apply
-        // any commit-time operations (DeleteOp, UpdateDataOp) that were added to the
-        // manifest but not yet applied to the in-memory bundle.
-        *self.bundle.last_manifest_version.write() = next_version;
-
-        // Apply commit-time operations that were created during commit serialization
-        // (tombstone DeleteOps and overlay UpdateDataOps)
-        for change in &commit_struct.changes {
-            for op in &change.operations {
-                let is_commit_time_op =
-                    matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
-                if is_commit_time_op {
-                    self.bundle.apply_operation(op.clone()).await?;
-                }
+        // Apply commit-time operations (tombstone DeleteOps and overlay
+        // UpdateDataOps) to the in-memory bundle BEFORE writing the manifest.
+        // The manifest write is the commit point: if anything fails before
+        // it, disk still holds the previous version, so the in-memory state
+        // can be restored from disk and the commit retried.
+        let applied_commit_time_ops = match self.apply_commit_time_ops(&commit_struct).await {
+            Ok(applied) => applied,
+            Err(e) => {
+                self.restore_after_failed_commit(&e).await?;
+                return Err(e);
             }
+        };
+
+        // Write the manifest — the commit point. Until this write succeeds,
+        // nothing on disk references the tombstone/overlay files written
+        // above (a failure merely orphans them) and the builder's status and
+        // pending sets are untouched.
+        let manifest_result: Result<(), BundlebaseError> = async {
+            let manifest_file = manifest_dir.writable_file(filename.as_str())?;
+            let data = bytes::Bytes::from(yaml);
+            let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
+            manifest_file.write_stream(Box::pin(stream)).await
         }
+        .await;
+        if let Err(e) = manifest_result {
+            if applied_commit_time_ops {
+                // Roll back the in-memory effects of the commit-time ops.
+                self.restore_after_failed_commit(&e).await?;
+            }
+            return Err(e);
+        }
+
+        // The commit is durable — update the in-memory bookkeeping.
+        // The bundle state (operations, version, schema) is already correct in memory —
+        // we just need to record the commit and advance the manifest version.
+        *self.bundle.last_manifest_version.write() = next_version;
 
         // Set data_dir on the commit to match what open_recursive would have set,
         // so that from() derivation works correctly for extended bundles.
@@ -715,12 +731,55 @@ impl BundleBuilder {
         commit_with_metadata.data_dir = Some(self.bundle.data_dir().url().clone());
         self.bundle.commits.write().push(commit_with_metadata);
 
-        // Clear status since the operations have been persisted
+        // Clear status and pending deletes/updates now that the operations
+        // have been persisted
         self.status.write().clear();
+        self.pending_deletes.write().clear();
+        self.pending_delete_wheres.write().clear();
+        self.pending_updates.write().clear();
+        self.pending_update_wheres.write().clear();
 
         info!("Committed version {}", self.bundle.version());
 
         Ok(self)
+    }
+
+    /// Apply commit-time operations (tombstone `DeleteOp`s and overlay
+    /// `UpdateDataOp`s) created during commit serialization to the in-memory
+    /// bundle. Returns whether any were applied.
+    async fn apply_commit_time_ops(
+        &self,
+        commit_struct: &commit::BundleCommit,
+    ) -> Result<bool, BundlebaseError> {
+        let mut applied = false;
+        for change in &commit_struct.changes {
+            for op in &change.operations {
+                let is_commit_time_op =
+                    matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
+                if is_commit_time_op {
+                    self.bundle.apply_operation(op.clone()).await?;
+                    applied = true;
+                }
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Roll the in-memory bundle back to its pre-commit state after a
+    /// mid-commit failure. The uncommitted status and pending deletes/updates
+    /// are left untouched so the commit can simply be retried.
+    async fn restore_after_failed_commit(
+        &self,
+        cause: &BundlebaseError,
+    ) -> Result<(), BundlebaseError> {
+        if let Err(restore_err) = self.restore_uncommitted_state().await {
+            return Err(format!(
+                "Commit failed ({}) and restoring the pre-commit state also failed: {}",
+                cause, restore_err
+            )
+            .into());
+        }
+        Ok(())
     }
 
     /// Resets all uncommitted operations, reverting to the last committed state.
@@ -768,22 +827,31 @@ impl BundleBuilder {
     /// // Bundle now has only the attach change pending
     /// ```
     pub async fn undo(&self) -> Result<String, BundlebaseError> {
-        if self.status().is_empty() {
-            return Err("No uncommitted changes to undo".into());
-        }
-
         // Remove the last change and capture its description
         let undone = self
             .status
             .write()
             .pop_change()
-            .expect("status was non-empty");
+            .ok_or("No uncommitted changes to undo")?;
         let description = undone.description.clone();
 
-        // Reload the bundle from the last committed state
+        // Reload the bundle from the last committed state and reapply the
+        // remaining uncommitted changes
+        self.restore_uncommitted_state().await?;
+
+        info!("UNDONE: {}", description);
+
+        Ok(description)
+    }
+
+    /// Reload the bundle from its last committed state and reapply all
+    /// uncommitted changes currently tracked in `status`.
+    ///
+    /// Used to recover a consistent live state after a failed command or a
+    /// failed commit, and as the shared machinery behind `undo()`.
+    async fn restore_uncommitted_state(&self) -> Result<(), BundlebaseError> {
         self.reload_bundle().await?;
 
-        // Reapply all remaining operations
         let changes = self.status.read().changes().clone();
         for change in &changes {
             for op in &change.operations {
@@ -791,9 +859,28 @@ impl BundleBuilder {
             }
         }
 
-        info!("UNDONE: {}", description);
+        Ok(())
+    }
 
-        Ok(description)
+    /// Discard the in-progress change after a failed command and, if any of
+    /// its operations were already applied to the live bundle, roll the
+    /// bundle back so the session does not keep phantom state that `commit()`
+    /// would never persist.
+    async fn discard_failed_change_and_restore(
+        &self,
+        cause: &BundlebaseError,
+    ) -> Result<(), BundlebaseError> {
+        let discarded = self.in_progress_change.write().take();
+        if discarded.is_some_and(|c| !c.operations.is_empty()) {
+            if let Err(restore_err) = self.restore_uncommitted_state().await {
+                return Err(format!(
+                    "Command failed ({}) and restoring the pre-command state also failed: {}",
+                    cause, restore_err
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     /// Check that a SQL string does not reference any temporary-only functions.
@@ -1290,7 +1377,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Err(e) = self.auto_reindex_if_attach_or_replace().await {
-                        self.in_progress_change.write().take();
+                        self.discard_failed_change_and_restore(&e).await?;
                         return Err(e);
                     }
                     self.prune_stale_index_entries_if_block_versions_changed();
@@ -1307,7 +1394,9 @@ impl BundleBuilder {
             }
             Err(e) => {
                 if !is_nested {
-                    *self.in_progress_change.write() = None;
+                    // Discard the failed change and roll back any operations
+                    // it already applied to the live bundle.
+                    self.discard_failed_change_and_restore(&e).await?;
                 }
                 Err(e)
             }
@@ -1363,7 +1452,7 @@ impl BundleBuilder {
                 debug!("Command succeeded: {}", description);
                 if !is_nested {
                     if let Err(e) = self.auto_reindex_if_attach_or_replace().await {
-                        self.in_progress_change.write().take();
+                        self.discard_failed_change_and_restore(&e).await?;
                         return Err(e);
                     }
                     self.prune_stale_index_entries_if_block_versions_changed();
@@ -1380,8 +1469,9 @@ impl BundleBuilder {
             Err(e) => {
                 debug!("Command failed: {}: {}", description, e);
                 if !is_nested {
-                    // On failure, discard the in-progress change
-                    self.in_progress_change.write().take();
+                    // Discard the failed change and roll back any operations
+                    // it already applied to the live bundle.
+                    self.discard_failed_change_and_restore(e).await?;
                 }
             }
         }
@@ -1852,6 +1942,7 @@ impl BundleFacade for BundleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::IOReadFile;
 
     #[tokio::test]
     async fn test_create_empty_bundle() {
@@ -1895,6 +1986,309 @@ mod tests {
             err_msg.contains("already exists"),
             "Error should mention bundle already exists: {}",
             err_msg
+        );
+    }
+
+    /// IOReadWriteDir wrapper that delegates to an inner dir but fails any
+    /// write to a file whose name ends with `fail_suffix`. Used to inject
+    /// storage failures mid-commit.
+    #[derive(Debug)]
+    struct FailingWritesDir {
+        inner: Arc<dyn IOReadWriteDir>,
+        fail_suffix: String,
+    }
+
+    #[async_trait]
+    impl crate::io::IOReadDir for FailingWritesDir {
+        fn url(&self) -> &Url {
+            self.inner.url()
+        }
+
+        async fn list_files(&self) -> Result<Vec<crate::io::FileInfo>, BundlebaseError> {
+            self.inner.list_files().await
+        }
+
+        fn subdir(&self, name: &str) -> Result<Box<dyn crate::io::IOReadDir>, BundlebaseError> {
+            self.inner.subdir(name)
+        }
+
+        fn file(&self, name: &str) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
+            self.inner.file(name)
+        }
+    }
+
+    #[async_trait]
+    impl IOReadWriteDir for FailingWritesDir {
+        fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+            Ok(Box::new(FailingWritesDir {
+                inner: Arc::from(self.inner.writable_subdir(name)?),
+                fail_suffix: self.fail_suffix.clone(),
+            }))
+        }
+
+        fn writable_file(
+            &self,
+            name: &str,
+        ) -> Result<Box<dyn crate::io::IOReadWriteFile>, BundlebaseError> {
+            let inner = self.inner.writable_file(name)?;
+            if name.ends_with(&self.fail_suffix) {
+                Ok(Box::new(FailingWritesFile { inner }))
+            } else {
+                Ok(inner)
+            }
+        }
+
+        async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError> {
+            self.inner.rename(from, to).await
+        }
+    }
+
+    /// IOReadWriteFile wrapper whose write methods always fail.
+    #[derive(Debug)]
+    struct FailingWritesFile {
+        inner: Box<dyn crate::io::IOReadWriteFile>,
+    }
+
+    #[async_trait]
+    impl crate::io::IOReadFile for FailingWritesFile {
+        fn url(&self) -> &Url {
+            self.inner.url()
+        }
+
+        async fn exists(&self) -> Result<bool, BundlebaseError> {
+            self.inner.exists().await
+        }
+
+        async fn open_stream(
+            &self,
+        ) -> Result<
+            Option<futures::stream::BoxStream<'static, Result<bytes::Bytes, BundlebaseError>>>,
+            BundlebaseError,
+        > {
+            self.inner.open_stream().await
+        }
+
+        async fn metadata(&self) -> Result<Option<crate::io::FileInfo>, BundlebaseError> {
+            self.inner.metadata().await
+        }
+
+        async fn version(&self) -> Result<String, BundlebaseError> {
+            self.inner.version().await
+        }
+    }
+
+    #[async_trait]
+    impl crate::io::IOReadWriteFile for FailingWritesFile {
+        async fn write(&self, _data: bytes::Bytes) -> Result<(), BundlebaseError> {
+            Err(format!("injected write failure for '{}'", self.url()).into())
+        }
+
+        async fn write_stream(
+            &self,
+            _source: futures::stream::BoxStream<'static, Result<bytes::Bytes, std::io::Error>>,
+        ) -> Result<(), BundlebaseError> {
+            Err(format!("injected write failure for '{}'", self.url()).into())
+        }
+
+        async fn delete(&self) -> Result<(), BundlebaseError> {
+            self.inner.delete().await
+        }
+    }
+
+    /// Attach the userdata.parquet test file inside a tracked change.
+    async fn attach_userdata(builder: &BundleBuilder) {
+        use crate::bundle::operation::AttachBlockOp;
+        use crate::connector::AttachFormat;
+        use crate::test_utils::test_datafile;
+
+        let datafile = test_datafile("userdata.parquet");
+        let pack_id = builder.resolve_pack_id(None).unwrap();
+        let op = AttachBlockOp::setup(
+            &pack_id,
+            datafile,
+            AttachFormat::Parquet,
+            None,
+            None,
+            None,
+            builder,
+            None,
+        )
+        .await
+        .unwrap();
+        builder
+            .do_change("attach userdata", move |b| {
+                Box::pin(async move { b.apply_operation(op.into()).await })
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_failed_commit_preserves_pending_deletes() {
+        use crate::bundle::operation::FilterOp;
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        // Mimic a DELETE command: collect matching RowIds, mark them deleted,
+        // and apply the immediate-exclusion filter.
+        let where_clause = builder.translate_sql("salary > 100000");
+        let rowids = builder.select_row_ids(&where_clause).await.unwrap();
+        assert!(!rowids.is_empty(), "expected matching rows to delete");
+        let deleted_count = rowids.len();
+        builder.mark_deleted(rowids, &where_clause);
+        let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", where_clause);
+        builder
+            .do_change("delete rows", move |b| {
+                Box::pin(async move {
+                    b.apply_operation(FilterOp::new(&filter_query, vec![]).into())
+                        .await
+                })
+            })
+            .await
+            .unwrap();
+
+        // Inject a failure for manifest writes (*.yaml). The tombstone file
+        // (*.rowids) still writes successfully, so the commit fails after the
+        // tombstone step but before the manifest is persisted.
+        let real_dir = builder.bundle.data_dir();
+        *builder.bundle.data_dir.write() = Arc::new(FailingWritesDir {
+            inner: Arc::clone(&real_dir),
+            fail_suffix: ".yaml".to_string(),
+        });
+
+        let result = builder.commit("delete high salaries").await;
+        assert!(result.is_err(), "commit should fail with injected failure");
+
+        // The failed commit must not lose the pending deletes, the
+        // uncommitted status, or advance the in-memory commit bookkeeping.
+        assert_eq!(
+            builder.pending_deletes.read().len(),
+            deleted_count,
+            "pending deletes must survive a failed commit"
+        );
+        assert!(
+            !builder.pending_delete_wheres.read().is_empty(),
+            "pending delete WHERE clauses must survive a failed commit"
+        );
+        assert!(
+            !builder.status().is_empty(),
+            "uncommitted changes must survive a failed commit"
+        );
+        assert_eq!(
+            *builder.bundle.last_manifest_version.read(),
+            1,
+            "manifest version must not advance on a failed commit"
+        );
+        assert_eq!(
+            builder.bundle.commits.read().len(),
+            1,
+            "no commit may be recorded for a failed commit"
+        );
+
+        // Restore the real dir; retrying the commit must persist the deletes.
+        *builder.bundle.data_dir.write() = real_dir;
+        builder.commit("delete high salaries").await.unwrap();
+        assert!(builder.pending_deletes.read().is_empty());
+        assert!(builder.status().is_empty());
+
+        let last_commit = builder.bundle.commits.read().last().cloned().unwrap();
+        let delete_ops = last_commit
+            .changes
+            .iter()
+            .flat_map(|c| c.operations.iter())
+            .filter(|op| matches!(op, AnyOperation::Delete(_)))
+            .count();
+        assert_eq!(
+            delete_ops, 1,
+            "retried commit must persist exactly one DeleteOp"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_failed_command_restores_bundle_state() {
+        use crate::bundle::operation::FilterOp;
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let ops_before = builder.bundle.operations.read().clone();
+        let version_before = builder.bundle.version();
+
+        // A command that applies an operation and then fails must leave no
+        // trace of the operation in the live bundle.
+        let filter_query = format!(
+            "SELECT * FROM bundle WHERE {}",
+            builder.translate_sql("salary > 0")
+        );
+        let result = builder
+            .do_change("filter then fail", move |b| {
+                Box::pin(async move {
+                    b.apply_operation(FilterOp::new(&filter_query, vec![]).into())
+                        .await?;
+                    Err("simulated failure".into())
+                })
+            })
+            .await;
+        assert!(result.is_err());
+
+        assert_eq!(
+            *builder.bundle.operations.read(),
+            ops_before,
+            "failed command must not leave phantom applied operations"
+        );
+        assert_eq!(
+            builder.bundle.version(),
+            version_before,
+            "failed command must not change the bundle version"
+        );
+        assert!(builder.status().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_failed_command_restores_uncommitted_bundle_state() {
+        use crate::bundle::operation::AttachBlockOp;
+        use crate::connector::AttachFormat;
+        use crate::test_utils::{empty_bundle, test_datafile};
+
+        let builder = empty_bundle().await;
+
+        // Run a command (via run_command) that attaches data and then fails.
+        let result = builder
+            .run_command("attach then fail".to_string(), async {
+                let datafile = test_datafile("userdata.parquet");
+                let pack_id = builder.resolve_pack_id(None)?;
+                let op = AttachBlockOp::setup(
+                    &pack_id,
+                    datafile,
+                    AttachFormat::Parquet,
+                    None,
+                    None,
+                    None,
+                    &builder,
+                    None,
+                )
+                .await?;
+                builder.apply_operation(op.into()).await?;
+                Err::<(), BundlebaseError>("simulated failure".into())
+            })
+            .await;
+        assert!(result.is_err());
+
+        assert_eq!(
+            builder.bundle.operations.read().len(),
+            0,
+            "failed command must not leave phantom attached data"
+        );
+        let schema = builder.bundle.schema().await.unwrap();
+        assert_eq!(
+            schema.field(0).name(),
+            "no_data",
+            "schema must be restored to the empty-bundle sentinel"
         );
     }
 }

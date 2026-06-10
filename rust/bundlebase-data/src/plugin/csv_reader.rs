@@ -335,6 +335,27 @@ impl DataReader for CsvReader {
         row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         if let Some(ids) = row_ids {
+            // With newlines_in_values, physical newline positions diverge from
+            // logical rows, so byte-offset reads would return wrong rows. Fall
+            // back to a full scan — filters are Inexact pushdown and get
+            // re-applied above the scan, so this stays correct.
+            if self
+                .inner
+                .config()
+                .newlines_in_values
+                .load(Ordering::Acquire)
+            {
+                return self.inner.data_source(projection, filters, limit).await;
+            }
+
+            // Match the full-scan path: a changed source file must error with
+            // a version mismatch, not resolve byte offsets against new bytes.
+            self.inner
+                .file()
+                .validate_version()
+                .await
+                .map_err(DataFusionError::External)?;
+
             let row_numbers: Vec<u32> = ids.iter().map(|id| id.row_number()).collect();
             let byte_offsets = resolve_row_numbers_to_byte_offsets(
                 self.inner.file().as_object_store_file(),
@@ -440,6 +461,18 @@ impl DataReader for CsvReader {
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         use crate::page_map::DEFAULT_PAGE_SIZE;
         use futures::stream;
+
+        // With newlines_in_values, raw-newline scanning can split records
+        // mid-field, so a byte-offset layout would misalign logical rows.
+        // Skip layout creation entirely — reads fall back to full scans.
+        if self
+            .inner
+            .config()
+            .newlines_in_values
+            .load(Ordering::Acquire)
+        {
+            return Ok(None);
+        }
 
         let object_store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
@@ -1149,6 +1182,152 @@ mod tests {
             3,
             batch.num_rows(),
             "Should have 3 data rows (newlines in values don't create extra rows)"
+        );
+
+        Ok(())
+    }
+
+    /// With newlines_in_values, physical newline positions diverge from logical
+    /// rows, so index reads must fall back to a full scan (filters are Inexact
+    /// pushdown and re-applied above the scan).
+    #[tokio::test]
+    async fn test_newlines_in_values_index_read_falls_back_to_full_scan(
+    ) -> Result<(), BundlebaseError> {
+        let plugin = CsvPlugin::default();
+        let mut options = HashMap::new();
+        options.insert("newlines_in_values".to_string(), "true".to_string());
+
+        let binding = test_context();
+        let schema_reader = plugin
+            .reader(
+                test_datafile("newlines-in-values.csv"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                Some(&options),
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+        let schema = schema_reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+
+        let reader = plugin
+            .reader(
+                test_datafile("newlines-in-values.csv"),
+                &BlockId::generate(),
+                &binding,
+                Some(schema),
+                None,
+                None,
+                Some(&options),
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let alias = crate::ObjectIdAlias::from(1u16);
+        let row_ids = vec![RowId::new(alias, 1)];
+        let ds = reader.data_source(None, &[], None, Some(&row_ids)).await?;
+        let results = ds.open(0, binding.ctx.task_ctx())?;
+        let batches = results.collect::<Vec<_>>().await;
+
+        let mut total_rows = 0;
+        for batch in batches {
+            let batch = batch.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            total_rows += batch.num_rows();
+        }
+        assert_eq!(
+            3, total_rows,
+            "newlines_in_values must fall back to a full scan of all 3 logical rows"
+        );
+
+        Ok(())
+    }
+
+    /// With newlines_in_values, raw-newline page boundaries can split records,
+    /// so no layout should be built at all.
+    #[tokio::test]
+    async fn test_newlines_in_values_skips_layout_build() -> Result<(), BundlebaseError> {
+        let plugin = CsvPlugin::default();
+        let mut options = HashMap::new();
+        options.insert("newlines_in_values".to_string(), "true".to_string());
+
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                test_datafile("newlines-in-values.csv"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                Some(&options),
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let layout = reader.build_layout(binding.dir.as_ref()).await?;
+        assert!(
+            layout.is_none(),
+            "no layout should be built when newlines_in_values is set"
+        );
+
+        Ok(())
+    }
+
+    /// The index (byte-offset) path must validate the file version like the
+    /// full-scan path does, instead of reading the changed file's bytes.
+    #[tokio::test]
+    async fn test_index_read_validates_file_version() -> Result<(), BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        use bundlebase_io::plugin::object_store::ObjectStoreFile;
+        use bundlebase_io::IOReadFile;
+
+        let url = Url::parse("memory:///test_csv_version/data.csv")?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
+        file.write(bytes::Bytes::from_static(b"id,name\n1,a\n2,b\n"))
+            .await?;
+        let version = file.version().await?;
+
+        let schema: SchemaRef = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, true),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+
+        let plugin = CsvPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                Some(schema),
+                None,
+                Some(version),
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        // Modify the source file after the reader captured the expected version.
+        file.write(bytes::Bytes::from_static(b"id,name\n9,z\n"))
+            .await?;
+
+        let alias = crate::ObjectIdAlias::from(1u16);
+        let row_ids = vec![RowId::new(alias, 0)];
+        let result = reader.data_source(None, &[], None, Some(&row_ids)).await;
+
+        let err = match result {
+            Ok(_) => panic!("index read on a changed file must error, not return rows"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("Version mismatch"),
+            "expected version mismatch error, got: {}",
+            err
         );
 
         Ok(())

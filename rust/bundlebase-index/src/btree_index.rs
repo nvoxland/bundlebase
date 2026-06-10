@@ -9,7 +9,11 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 const MAGIC: &[u8; 8] = b"BBBTRI01";
-const VERSION: u8 = 1;
+/// Format version 1 stored per-entry row-id counts as u16, which silently
+/// wrapped for values with more than 65,535 matching rows. Version 2 stores
+/// row-id counts as u32. Version 1 files are still readable: any v1 file that
+/// was written correctly necessarily had all counts < 65,536.
+const VERSION: u8 = 2;
 const TARGET_BLOCK_SIZE: usize = 64 * 1024; // 64KB blocks
 
 /// Indexed value supporting common Arrow data types
@@ -236,20 +240,41 @@ struct IndexBlock {
 }
 
 impl IndexBlock {
-    fn serialize(&self) -> Bytes {
+    fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         let mut buf = BytesMut::new();
 
         // Entry count
-        buf.put_u32(self.entries.len() as u32);
+        let entry_count = u32::try_from(self.entries.len()).map_err(|_| {
+            format!(
+                "Index block has too many entries to serialize: {}",
+                self.entries.len()
+            )
+        })?;
+        buf.put_u32(entry_count);
 
         // Entries
         for entry in &self.entries {
             // Value
+            if let IndexedValue::Utf8(s) = &entry.value {
+                if s.len() > u32::MAX as usize {
+                    return Err(format!(
+                        "Indexed string value too large to serialize: {} bytes",
+                        s.len()
+                    )
+                    .into());
+                }
+            }
             let value_bytes = entry.value.serialize();
             buf.put(value_bytes);
 
             // RowId count
-            buf.put_u16(entry.row_ids.len() as u16);
+            let row_id_count = u32::try_from(entry.row_ids.len()).map_err(|_| {
+                format!(
+                    "Too many rows for a single indexed value to serialize: {}",
+                    entry.row_ids.len()
+                )
+            })?;
+            buf.put_u32(row_id_count);
 
             // RowIds
             for row_id in &entry.row_ids {
@@ -257,10 +282,10 @@ impl IndexBlock {
             }
         }
 
-        buf.freeze()
+        Ok(buf.freeze())
     }
 
-    fn deserialize(data: &[u8]) -> Result<Self, BundlebaseError> {
+    fn deserialize(data: &[u8], version: u8) -> Result<Self, BundlebaseError> {
         let mut cursor = Cursor::new(data);
 
         let entry_count = cursor.get_u32() as usize;
@@ -268,7 +293,12 @@ impl IndexBlock {
 
         for _ in 0..entry_count {
             let value = IndexedValue::deserialize(&mut cursor)?;
-            let row_id_count = cursor.get_u16() as usize;
+            // Version 1 stored row-id counts as u16; version 2+ uses u32
+            let row_id_count = if version >= 2 {
+                cursor.get_u32() as usize
+            } else {
+                cursor.get_u16() as usize
+            };
 
             let mut row_ids = Vec::with_capacity(row_id_count);
             for _ in 0..row_id_count {
@@ -429,7 +459,7 @@ impl BTreeIndex {
             });
 
             // Estimate block size for offset calculation
-            current_offset += block.serialize().len() as u64;
+            current_offset += block.serialize()?.len() as u64;
         }
 
         Ok(BTreeIndex {
@@ -485,7 +515,7 @@ impl BTreeIndex {
                                     blocks: &mut Vec<IndexBlock>,
                                     total_entries: &mut u64,
                                     total_rows: &mut u64| {
-            let entry_size = value.size_bytes() + 2 + (row_ids.len() * 8);
+            let entry_size = value.size_bytes() + 4 + (row_ids.len() * 8);
 
             // Check if we need to start a new block
             if *block_size + entry_size > TARGET_BLOCK_SIZE && !block_entries.is_empty() {
@@ -569,7 +599,7 @@ impl BTreeIndex {
                 file_offset: current_offset,
             });
 
-            current_offset += block.serialize().len() as u64;
+            current_offset += block.serialize()?.len() as u64;
         }
 
         Ok(BTreeIndex {
@@ -598,7 +628,7 @@ impl BTreeIndex {
         let mut current_size = 0;
 
         for (value, row_ids) in sorted_entries {
-            let entry_size = value.size_bytes() + 2 + (row_ids.len() * 8);
+            let entry_size = value.size_bytes() + 4 + (row_ids.len() * 8);
 
             if current_size + entry_size > TARGET_BLOCK_SIZE && !current_block.is_empty() {
                 blocks.push(IndexBlock {
@@ -626,10 +656,16 @@ impl BTreeIndex {
         let mut buf = BytesMut::new();
 
         // Header (32 bytes)
+        let block_count = u32::try_from(self.blocks.len()).map_err(|_| {
+            format!(
+                "Index has too many blocks to serialize: {}",
+                self.blocks.len()
+            )
+        })?;
         buf.put_slice(MAGIC); // 8 bytes
         buf.put_u8(VERSION); // 1 byte
         buf.put_u8(self.data_type_to_u8()); // 1 byte
-        buf.put_u32(self.blocks.len() as u32); // 4 bytes
+        buf.put_u32(block_count); // 4 bytes
         buf.put_u64(self.total_entries); // 8 bytes
         buf.put_u64(self.total_rows); // 8 bytes
         buf.put_u16(0); // 2 bytes reserved
@@ -642,7 +678,7 @@ impl BTreeIndex {
 
         for (i, block) in self.blocks.iter().enumerate() {
             updated_directory.entries[i].file_offset = current_offset;
-            current_offset += block.serialize().len() as u64;
+            current_offset += block.serialize()?.len() as u64;
         }
 
         // Directory
@@ -650,7 +686,7 @@ impl BTreeIndex {
 
         // Blocks
         for block in &self.blocks {
-            buf.put(block.serialize());
+            buf.put(block.serialize()?);
         }
 
         Ok(buf.freeze())
@@ -669,7 +705,7 @@ impl BTreeIndex {
 
         // Header
         let version = cursor.get_u8();
-        if version != VERSION {
+        if version == 0 || version > VERSION {
             return Err(format!("Unsupported index version: {}", version).into());
         }
 
@@ -697,7 +733,7 @@ impl BTreeIndex {
             };
 
             let block_data = &data.as_ref()[offset..next_offset];
-            let block = IndexBlock::deserialize(block_data)?;
+            let block = IndexBlock::deserialize(block_data, version)?;
 
             // Update directory with actual min/max from block
             if let (Some(first), Some(last)) = (block.entries.first(), block.entries.last()) {
@@ -972,6 +1008,100 @@ mod tests {
         let result = deserialized.lookup_exact(&IndexedValue::Int64(1));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].as_u64(), 100);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_over_65535_rowids() {
+        // A low-cardinality column can map a single value to >65,535 rows.
+        // The serialized row-id count must not wrap (u16 would truncate 70,000
+        // to 4,464 and corrupt the rest of the block).
+        let mut value_map = HashMap::new();
+        let many_rows: Vec<RowId> = (0..70_000u64).map(RowId::from).collect();
+        value_map.insert(IndexedValue::Int64(1), many_rows);
+        value_map.insert(IndexedValue::Int64(2), vec![RowId::from(999_999u64)]);
+
+        let index = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let bytes = index.serialize().unwrap();
+        let deserialized = BTreeIndex::deserialize(bytes, "test_col".to_string()).unwrap();
+
+        // All 70,000 row ids must survive the round trip intact
+        let result = deserialized.lookup_exact(&IndexedValue::Int64(1));
+        assert_eq!(result.len(), 70_000);
+        for (i, row_id) in result.iter().enumerate() {
+            assert_eq!(row_id.as_u64(), i as u64);
+        }
+
+        // The entry after the large one must also survive
+        let result = deserialized.lookup_exact(&IndexedValue::Int64(2));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_u64(), 999_999);
+    }
+
+    #[test]
+    fn test_index_block_roundtrip_large_rowid_list() {
+        // Direct block-level round trip: a large entry followed by another
+        // entry in the SAME block. With a wrapped u16 count the cursor would
+        // misalign and decode the second entry as garbage.
+        let block = IndexBlock {
+            entries: vec![
+                BlockEntryValue {
+                    value: IndexedValue::Int64(1),
+                    row_ids: (0..70_000u64).map(RowId::from).collect(),
+                },
+                BlockEntryValue {
+                    value: IndexedValue::Int64(2),
+                    row_ids: vec![RowId::from(7u64)],
+                },
+            ],
+        };
+
+        let bytes = block.serialize().unwrap();
+        let decoded = IndexBlock::deserialize(&bytes, VERSION).unwrap();
+
+        assert_eq!(decoded.entries.len(), 2);
+        assert_eq!(decoded.entries[0].value, IndexedValue::Int64(1));
+        assert_eq!(decoded.entries[0].row_ids.len(), 70_000);
+        assert_eq!(decoded.entries[0].row_ids[69_999].as_u64(), 69_999);
+        assert_eq!(decoded.entries[1].value, IndexedValue::Int64(2));
+        assert_eq!(decoded.entries[1].row_ids, vec![RowId::from(7u64)]);
+    }
+
+    #[test]
+    fn test_deserialize_version_1_format() {
+        // Hand-build a version 1 index file (u16 row-id counts) and verify it
+        // still deserializes correctly for backward compatibility.
+        let mut buf = BytesMut::new();
+
+        // Header (32 bytes)
+        buf.put_slice(MAGIC);
+        buf.put_u8(1); // version 1
+        buf.put_u8(1); // data type tag: Int64
+        buf.put_u32(1); // block count
+        buf.put_u64(1); // total entries
+        buf.put_u64(2); // total rows
+        buf.put_u16(0); // reserved
+
+        // Directory (24 bytes per block; min/max are skipped on read)
+        buf.put_u64(0); // min placeholder
+        buf.put_u64(0); // max placeholder
+        buf.put_u64(32 + 24); // block file offset
+
+        // Block: 1 entry, Int64(5) -> [10, 11] with v1 u16 row-id count
+        buf.put_u32(1); // entry count
+        buf.put_u8(1); // value type tag: Int64
+        buf.put_i64(5); // value
+        buf.put_u16(2); // row-id count (u16 in version 1)
+        buf.put_u64(10);
+        buf.put_u64(11);
+
+        let index = BTreeIndex::deserialize(buf.freeze(), "test_col".to_string()).unwrap();
+
+        assert_eq!(index.cardinality(), 1);
+        assert_eq!(index.total_rows(), 2);
+        let result = index.lookup_exact(&IndexedValue::Int64(5));
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_u64(), 10);
+        assert_eq!(result[1].as_u64(), 11);
     }
 
     #[test]

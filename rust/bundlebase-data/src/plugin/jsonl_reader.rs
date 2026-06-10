@@ -200,6 +200,14 @@ impl DataReader for JsonlReader {
         row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         if let Some(ids) = row_ids {
+            // Match the full-scan path: a changed source file must error with
+            // a version mismatch, not resolve byte offsets against new bytes.
+            self.inner
+                .file()
+                .validate_version()
+                .await
+                .map_err(DataFusionError::External)?;
+
             let row_numbers: Vec<u32> = ids.iter().map(|id| id.row_number()).collect();
             let byte_offsets = resolve_row_numbers_to_byte_offsets(
                 self.inner.file().as_object_store_file(),
@@ -813,6 +821,207 @@ mod tests {
             "First name should be Gilbert"
         );
         assert_eq!("Alexa", name_array.value(1), "Second name should be Alexa");
+
+        Ok(())
+    }
+
+    /// Write JSONL content to a memory-store file and return the file handle.
+    async fn write_jsonl(
+        path: &str,
+        content: &str,
+    ) -> Result<ObjectStoreFile, BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        let url = Url::parse(path)?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
+        file.write(bytes::Bytes::from(content.as_bytes().to_vec()))
+            .await?;
+        Ok(file)
+    }
+
+    /// Read the given logical row numbers via the index (byte-offset) path and
+    /// return the values of `column` in stream order.
+    async fn read_rows_by_numbers(
+        reader: &dyn DataReader,
+        row_numbers: &[u32],
+        column: &str,
+    ) -> Result<Vec<String>, BundlebaseError> {
+        let alias = crate::ObjectIdAlias::from(1u16);
+        let row_ids: Vec<RowId> = row_numbers.iter().map(|&n| RowId::new(alias, n)).collect();
+        let ds = reader.data_source(None, &[], None, Some(&row_ids)).await?;
+        let ctx = test_context().ctx;
+        let stream = ds.open(0, ctx.task_ctx())?;
+        let batches: Vec<_> = stream.collect::<Vec<_>>().await;
+
+        let mut values = Vec::new();
+        for batch in batches {
+            let batch = batch.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let idx = batch.schema().index_of(column)?;
+            let arr: StringArray = downcast_array(batch.column(idx).as_ref());
+            for i in 0..arr.len() {
+                values.push(arr.value(i).to_string());
+            }
+        }
+        Ok(values)
+    }
+
+    /// Index-path reads must not drop rows longer than the 4KB read-ahead.
+    #[tokio::test]
+    async fn test_index_read_row_larger_than_read_ahead() -> Result<(), BundlebaseError> {
+        let big = "x".repeat(8192);
+        let content = format!(
+            "{{\"id\":\"0\",\"val\":\"small\"}}\n{{\"id\":\"1\",\"val\":\"{}\"}}\n{{\"id\":\"2\",\"val\":\"last\"}}\n",
+            big
+        );
+        write_jsonl("memory:///test_big_row/data.jsonl", &content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_big_row/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let ids = read_rows_by_numbers(reader.as_ref(), &[0, 1, 2], "id").await?;
+        assert_eq!(
+            vec!["0", "1", "2"],
+            ids,
+            "rows longer than the read-ahead buffer must not be dropped"
+        );
+
+        let vals = read_rows_by_numbers(reader.as_ref(), &[1], "val").await?;
+        assert_eq!(1, vals.len());
+        assert_eq!(big, vals[0], "long row content must be read in full");
+
+        Ok(())
+    }
+
+    /// Index-path reads must include the final line of a file with no trailing newline.
+    #[tokio::test]
+    async fn test_index_read_includes_final_line_without_trailing_newline(
+    ) -> Result<(), BundlebaseError> {
+        let content = "{\"id\":\"0\"}\n{\"id\":\"1\"}\n{\"id\":\"2\"}";
+        write_jsonl("memory:///test_no_trailing_newline/data.jsonl", content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_no_trailing_newline/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let ids = read_rows_by_numbers(reader.as_ref(), &[0, 1, 2], "id").await?;
+        assert_eq!(
+            vec!["0", "1", "2"],
+            ids,
+            "the final line without a trailing newline must not be dropped"
+        );
+
+        Ok(())
+    }
+
+    /// Logical row numbers skip blank lines (the parser produces no row for them),
+    /// so byte-offset resolution must skip them too.
+    #[tokio::test]
+    async fn test_index_read_blank_lines_resolve_correct_rows() -> Result<(), BundlebaseError> {
+        let content = "{\"id\":\"0\"}\n\n{\"id\":\"1\"}\n   \n{\"id\":\"2\"}\n";
+        write_jsonl("memory:///test_blank_lines/data.jsonl", content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_blank_lines/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let ids = read_rows_by_numbers(reader.as_ref(), &[2], "id").await?;
+        assert_eq!(
+            vec!["2"],
+            ids,
+            "logical row 2 must resolve to the third non-blank line"
+        );
+
+        Ok(())
+    }
+
+    /// The index (byte-offset) path must validate the file version like the
+    /// full-scan path does, instead of silently reading the changed file.
+    #[tokio::test]
+    async fn test_index_read_validates_file_version() -> Result<(), BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        use bundlebase_io::IOReadFile;
+
+        let file = write_jsonl(
+            "memory:///test_jsonl_version/data.jsonl",
+            "{\"id\":\"0\"}\n{\"id\":\"1\"}\n",
+        )
+        .await?;
+        let version = file.version().await?;
+
+        // Pass a schema so the reader takes the cached-schema fast path,
+        // mirroring query-time behavior.
+        let schema: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, true),
+        ]));
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_jsonl_version/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                Some(schema),
+                None,
+                Some(version),
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        // Modify the source file after the reader captured the expected version.
+        file.write(bytes::Bytes::from_static(b"{\"id\":\"9\"}\n{\"id\":\"8\"}\n"))
+            .await?;
+
+        let alias = crate::ObjectIdAlias::from(1u16);
+        let row_ids = vec![RowId::new(alias, 0)];
+        let result = reader.data_source(None, &[], None, Some(&row_ids)).await;
+
+        let err = match result {
+            Ok(_) => panic!("index read on a changed file must error, not return rows"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            err.contains("Version mismatch"),
+            "expected version mismatch error, got: {}",
+            err
+        );
 
         Ok(())
     }

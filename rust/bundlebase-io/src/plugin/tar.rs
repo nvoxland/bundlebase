@@ -185,38 +185,45 @@ impl TarObjectStore {
         Ok(())
     }
 
-    /// Reads a file from the tar archive using the indexed offset for O(1) seeking.
-    fn read_entry(&self, path: &ObjectPath) -> ObjectStoreResult<Bytes> {
+    /// Looks up an entry in the index, returning its offset, size, and mtime.
+    fn lookup_entry(&self, path: &ObjectPath) -> ObjectStoreResult<TarEntry> {
         self.ensure_indexed()?;
 
-        // Look up the entry in the index
         let index = self.index.read();
-        let entry = index
+        index
             .entries
             .get(path)
+            .cloned()
             .ok_or_else(|| object_store::Error::NotFound {
                 path: path.to_string(),
                 source: "File not found in tar index".into(),
-            })?;
+            })
+    }
 
-        let offset = entry.offset;
-        let size = entry.size;
-        drop(index); // Release lock before file I/O
-
-        // Open file and seek directly to the data
+    /// Reads `range` bytes of an entry's data using the indexed offset for
+    /// O(1) seeking. `range` is relative to the start of the entry's data,
+    /// which begins at byte `offset` within the tar file.
+    fn read_entry_range(&self, offset: u64, range: std::ops::Range<u64>) -> ObjectStoreResult<Bytes> {
+        // Open file and seek directly to the requested slice of the data
         let mut file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
             store: "TarObjectStore",
             source: Box::new(e),
         })?;
 
-        file.seek(std::io::SeekFrom::Start(offset))
+        file.seek(std::io::SeekFrom::Start(offset + range.start))
             .map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
                 source: Box::new(e),
             })?;
 
-        // Read exactly `size` bytes
-        let mut buffer = vec![0u8; size as usize];
+        // Read exactly the requested number of bytes
+        let len = usize::try_from(range.end - range.start).map_err(|e| {
+            object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            }
+        })?;
+        let mut buffer = vec![0u8; len];
         file.read_exact(&mut buffer)
             .map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
@@ -381,25 +388,43 @@ impl ObjectStore for TarObjectStore {
     async fn get_opts(
         &self,
         location: &ObjectPath,
-        _options: GetOptions,
+        options: GetOptions,
     ) -> ObjectStoreResult<GetResult> {
-        self.ensure_indexed()?;
+        let entry = self.lookup_entry(location)?;
 
-        let bytes = self.read_entry(location)?;
-        let size = bytes.len() as u64;
+        let meta = ObjectMeta {
+            location: location.clone(),
+            last_modified: entry.modified,
+            size: entry.size,
+            e_tag: None,
+            version: None,
+        };
+        options.check_preconditions(&meta)?;
+
+        let range = match options.range {
+            Some(r) => r
+                .as_range(entry.size)
+                .map_err(|source| object_store::Error::Generic {
+                    store: "TarObjectStore",
+                    source: Box::new(source),
+                })?,
+            None => 0..entry.size,
+        };
+
+        let payload = if options.head {
+            // HEAD requests transfer no content; metadata comes from the index.
+            object_store::GetResultPayload::Stream(Box::pin(stream::empty()))
+        } else {
+            let bytes = self.read_entry_range(entry.offset, range.clone())?;
+            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
+                Ok(bytes)
+            })))
+        };
 
         Ok(GetResult {
-            payload: object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
-                Ok(bytes)
-            }))),
-            meta: ObjectMeta {
-                location: location.clone(),
-                last_modified: chrono::Utc::now(),
-                size,
-                e_tag: None,
-                version: None,
-            },
-            range: 0..size,
+            payload,
+            meta,
+            range,
             attributes: Default::default(),
         })
     }
@@ -672,25 +697,19 @@ impl ReadOnlyTarObjectStore {
         Ok(())
     }
 
-    /// Read an entry's data via a single range request.
-    async fn read_entry(&self, path: &ObjectPath) -> ObjectStoreResult<Bytes> {
+    /// Looks up an entry in the index, returning its offset, size, and mtime.
+    async fn lookup_entry(&self, path: &ObjectPath) -> ObjectStoreResult<TarEntry> {
         self.ensure_indexed().await?;
 
-        let (offset, size) = {
-            let index = self.index.read();
-            let entry = index
-                .entries
-                .get(path)
-                .ok_or_else(|| object_store::Error::NotFound {
-                    path: path.to_string(),
-                    source: "File not found in remote tar index".into(),
-                })?;
-            (entry.offset, entry.size)
-        };
-
-        self.inner_store
-            .get_range(&self.archive_path, offset..offset + size)
-            .await
+        let index = self.index.read();
+        index
+            .entries
+            .get(path)
+            .cloned()
+            .ok_or_else(|| object_store::Error::NotFound {
+                path: path.to_string(),
+                source: "File not found in remote tar index".into(),
+            })
     }
 }
 
@@ -726,23 +745,51 @@ impl ObjectStore for ReadOnlyTarObjectStore {
     async fn get_opts(
         &self,
         location: &ObjectPath,
-        _options: GetOptions,
+        options: GetOptions,
     ) -> ObjectStoreResult<GetResult> {
-        let bytes = self.read_entry(location).await?;
-        let size = bytes.len() as u64;
+        let entry = self.lookup_entry(location).await?;
+
+        let meta = ObjectMeta {
+            location: location.clone(),
+            last_modified: entry.modified,
+            size: entry.size,
+            e_tag: None,
+            version: None,
+        };
+        options.check_preconditions(&meta)?;
+
+        let range = match options.range {
+            Some(r) => r
+                .as_range(entry.size)
+                .map_err(|source| object_store::Error::Generic {
+                    store: "ReadOnlyTarObjectStore",
+                    source: Box::new(source),
+                })?,
+            None => 0..entry.size,
+        };
+
+        let payload = if options.head {
+            // HEAD requests transfer no content; metadata comes from the index.
+            object_store::GetResultPayload::Stream(Box::pin(stream::empty()))
+        } else {
+            // Issue a sub-range read against the backing store rather than
+            // fetching the whole entry.
+            let bytes = self
+                .inner_store
+                .get_range(
+                    &self.archive_path,
+                    entry.offset + range.start..entry.offset + range.end,
+                )
+                .await?;
+            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
+                Ok(bytes)
+            })))
+        };
 
         Ok(GetResult {
-            payload: object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
-                Ok(bytes)
-            }))),
-            meta: ObjectMeta {
-                location: location.clone(),
-                last_modified: chrono::DateTime::UNIX_EPOCH,
-                size,
-                e_tag: None,
-                version: None,
-            },
-            range: 0..size,
+            payload,
+            meta,
+            range,
             attributes: Default::default(),
         })
     }
@@ -1890,5 +1937,391 @@ mod tests {
         assert!(!factory.supports_write(&Url::parse("tar+gs://bucket/data.tar/file.txt").unwrap()));
         assert!(!factory
             .supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
+    }
+
+    // Range / head support tests (TarObjectStore)
+
+    use object_store::GetRange;
+
+    /// Build a local tar store with two entries so that range offsets within
+    /// the second entry differ from offsets within the archive.
+    async fn multi_entry_local_store() -> (TarObjectStore, tempfile::TempDir) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let tar_path = temp_dir.path().join("multi.tar");
+        let store = TarObjectStore::new(tar_path).unwrap();
+        store
+            .put(
+                &ObjectPath::from("first.txt"),
+                PutPayload::from_bytes(Bytes::from_static(b"0123456789")),
+            )
+            .await
+            .unwrap();
+        store
+            .put(
+                &ObjectPath::from("second.txt"),
+                PutPayload::from_bytes(Bytes::from_static(b"abcdefghijklmnopqrstuvwxyz")),
+            )
+            .await
+            .unwrap();
+        (store, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_get_opts_bounded_range() {
+        let (store, _dir) = multi_entry_local_store().await;
+        let options = GetOptions {
+            range: Some(GetRange::Bounded(2..7)),
+            ..Default::default()
+        };
+        let result = store
+            .get_opts(&ObjectPath::from("second.txt"), options)
+            .await
+            .unwrap();
+        assert_eq!(result.range, 2..7);
+        assert_eq!(result.meta.size, 26);
+        let bytes = result.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"cdefg");
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_get_opts_offset_and_suffix_ranges() {
+        let (store, _dir) = multi_entry_local_store().await;
+        let path = ObjectPath::from("second.txt");
+
+        let result = store
+            .get_opts(
+                &path,
+                GetOptions {
+                    range: Some(GetRange::Offset(20)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.range, 20..26);
+        assert_eq!(&result.bytes().await.unwrap()[..], b"uvwxyz");
+
+        let result = store
+            .get_opts(
+                &path,
+                GetOptions {
+                    range: Some(GetRange::Suffix(4)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.range, 22..26);
+        assert_eq!(&result.bytes().await.unwrap()[..], b"wxyz");
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_get_range_and_get_ranges() {
+        let (store, _dir) = multi_entry_local_store().await;
+        let path = ObjectPath::from("second.txt");
+
+        let bytes = store.get_range(&path, 3..8).await.unwrap();
+        assert_eq!(&bytes[..], b"defgh");
+
+        let ranges = store.get_ranges(&path, &[0..3, 10..14]).await.unwrap();
+        assert_eq!(&ranges[0][..], b"abc");
+        assert_eq!(&ranges[1][..], b"klmn");
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_head_returns_no_payload() {
+        let (store, _dir) = multi_entry_local_store().await;
+        let result = store
+            .get_opts(
+                &ObjectPath::from("first.txt"),
+                GetOptions {
+                    head: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.meta.size, 10);
+        let chunks: Vec<_> = result.into_stream().collect::<Vec<_>>().await;
+        let total: usize = chunks.into_iter().map(|c| c.unwrap().len()).sum();
+        assert_eq!(total, 0, "head must not return payload bytes");
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_get_opts_range_start_beyond_size_errors() {
+        let (store, _dir) = multi_entry_local_store().await;
+        let result = store
+            .get_opts(
+                &ObjectPath::from("first.txt"),
+                GetOptions {
+                    range: Some(GetRange::Bounded(100..200)),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let err = result.expect_err("range starting beyond entry size must error");
+        assert!(
+            !matches!(err, object_store::Error::NotFound { .. }),
+            "expected invalid-range error, got NotFound: {}",
+            err
+        );
+        assert!(
+            err.to_string().contains("Wanted range starting at"),
+            "expected StartTooLarge error, got: {}",
+            err
+        );
+    }
+
+    // Range / head support tests (ReadOnlyTarObjectStore)
+
+    /// Build a manifest-prefixed tar archive (as written by export_tar()).
+    fn build_manifest_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut tar_buffer = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_buffer);
+
+            let manifest = serde_json::Value::Array(
+                entries
+                    .iter()
+                    .map(|(name, data)| serde_json::json!({"name": name, "size": data.len()}))
+                    .collect(),
+            );
+            let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+            let mut header = Header::new_gnu();
+            header.set_size(manifest_bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_bytes[..])
+                .unwrap();
+
+            for (name, data) in entries {
+                let mut header = Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_mtime(0);
+                header.set_cksum();
+                builder.append_data(&mut header, *name, *data).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        tar_buffer
+    }
+
+    /// Wraps an InMemory store and records the `GetOptions.range` of every
+    /// `get_opts` request (all reads, including `get_range`, flow through it).
+    #[derive(Debug)]
+    struct RangeRecordingStore {
+        inner: object_store::memory::InMemory,
+        requests: Arc<RwLock<Vec<Option<GetRange>>>>,
+    }
+
+    impl Display for RangeRecordingStore {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "RangeRecordingStore({})", self.inner)
+        }
+    }
+
+    #[async_trait]
+    impl ObjectStore for RangeRecordingStore {
+        async fn put_opts(
+            &self,
+            location: &ObjectPath,
+            payload: PutPayload,
+            opts: PutOptions,
+        ) -> ObjectStoreResult<PutResult> {
+            self.inner.put_opts(location, payload, opts).await
+        }
+
+        async fn put_multipart_opts(
+            &self,
+            location: &ObjectPath,
+            opts: object_store::PutMultipartOptions,
+        ) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
+            self.inner.put_multipart_opts(location, opts).await
+        }
+
+        async fn get_opts(
+            &self,
+            location: &ObjectPath,
+            options: GetOptions,
+        ) -> ObjectStoreResult<GetResult> {
+            self.requests.write().push(options.range.clone());
+            self.inner.get_opts(location, options).await
+        }
+
+        fn delete_stream(
+            &self,
+            locations: BoxStream<'static, ObjectStoreResult<ObjectPath>>,
+        ) -> BoxStream<'static, ObjectStoreResult<ObjectPath>> {
+            self.inner.delete_stream(locations)
+        }
+
+        fn list(
+            &self,
+            prefix: Option<&ObjectPath>,
+        ) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
+            self.inner.list(prefix)
+        }
+
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&ObjectPath>,
+        ) -> ObjectStoreResult<ListResult> {
+            self.inner.list_with_delimiter(prefix).await
+        }
+
+        async fn copy_opts(
+            &self,
+            from: &ObjectPath,
+            to: &ObjectPath,
+            options: CopyOptions,
+        ) -> ObjectStoreResult<()> {
+            self.inner.copy_opts(from, to, options).await
+        }
+    }
+
+    /// Build a ReadOnlyTarObjectStore over a two-entry manifest archive,
+    /// recording all range requests made against the backing store.
+    async fn readonly_store_with_recorder() -> (
+        ReadOnlyTarObjectStore,
+        Arc<RwLock<Vec<Option<GetRange>>>>,
+    ) {
+        let tar_buffer = build_manifest_tar(&[
+            ("hello.txt", b"hello"),
+            ("data/alpha.bin", b"abcdefghijklmnopqrstuvwxyz"),
+        ]);
+
+        let mem_store = object_store::memory::InMemory::new();
+        let archive_path = ObjectPath::from("test.tar");
+        mem_store
+            .put(
+                &archive_path,
+                PutPayload::from_bytes(Bytes::from(tar_buffer)),
+            )
+            .await
+            .unwrap();
+
+        let requests = Arc::new(RwLock::new(Vec::new()));
+        let recorder = RangeRecordingStore {
+            inner: mem_store,
+            requests: requests.clone(),
+        };
+        (
+            ReadOnlyTarObjectStore::new(Arc::new(recorder), archive_path),
+            requests,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_get_opts_bounded_range() {
+        let (store, requests) = readonly_store_with_recorder().await;
+        let options = GetOptions {
+            range: Some(GetRange::Bounded(2..7)),
+            ..Default::default()
+        };
+        let result = store
+            .get_opts(&ObjectPath::from("data/alpha.bin"), options)
+            .await
+            .unwrap();
+        assert_eq!(result.range, 2..7);
+        assert_eq!(result.meta.size, 26);
+        assert_eq!(&result.bytes().await.unwrap()[..], b"cdefg");
+
+        // The payload read should be a sub-range request against the backing
+        // store, not a fetch of the whole entry.
+        let recorded = requests.read().clone();
+        let last = recorded
+            .last()
+            .cloned()
+            .flatten()
+            .expect("payload read should carry a range");
+        match last {
+            GetRange::Bounded(r) => assert_eq!(r.end - r.start, 5, "expected 5-byte sub-range"),
+            other => panic!("expected bounded sub-range request, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_get_opts_offset_and_suffix_ranges() {
+        let (store, _requests) = readonly_store_with_recorder().await;
+        let path = ObjectPath::from("data/alpha.bin");
+
+        let result = store
+            .get_opts(
+                &path,
+                GetOptions {
+                    range: Some(GetRange::Offset(20)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.range, 20..26);
+        assert_eq!(&result.bytes().await.unwrap()[..], b"uvwxyz");
+
+        let result = store
+            .get_opts(
+                &path,
+                GetOptions {
+                    range: Some(GetRange::Suffix(4)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.range, 22..26);
+        assert_eq!(&result.bytes().await.unwrap()[..], b"wxyz");
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_get_range_and_get_ranges() {
+        let (store, _requests) = readonly_store_with_recorder().await;
+        let path = ObjectPath::from("data/alpha.bin");
+
+        let bytes = store.get_range(&path, 3..8).await.unwrap();
+        assert_eq!(&bytes[..], b"defgh");
+
+        let ranges = store.get_ranges(&path, &[0..3, 10..14]).await.unwrap();
+        assert_eq!(&ranges[0][..], b"abc");
+        assert_eq!(&ranges[1][..], b"klmn");
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_head_does_not_fetch_payload() {
+        let (store, requests) = readonly_store_with_recorder().await;
+        let meta = store.head(&ObjectPath::from("hello.txt")).await.unwrap();
+        assert_eq!(meta.size, 5);
+
+        // Only the two indexing requests (first tar header + manifest data)
+        // should have hit the backing store; head must not fetch the payload.
+        let recorded = requests.read().clone();
+        assert_eq!(
+            recorded.len(),
+            2,
+            "head must not fetch entry payload, got requests: {:?}",
+            recorded
+        );
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_get_opts_range_start_beyond_size_errors() {
+        let (store, _requests) = readonly_store_with_recorder().await;
+        let result = store
+            .get_opts(
+                &ObjectPath::from("hello.txt"),
+                GetOptions {
+                    range: Some(GetRange::Bounded(10..20)),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let err = result.expect_err("range starting beyond entry size must error");
+        assert!(
+            err.to_string().contains("Wanted range starting at"),
+            "expected StartTooLarge error, got: {}",
+            err
+        );
     }
 }

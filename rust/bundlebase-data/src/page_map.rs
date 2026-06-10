@@ -348,6 +348,7 @@ impl PageMap {
         let mut row_count: u32 = 0;
         let mut page_start: u64 = 0;
         let mut skip_first = skip_first_line;
+        let mut line_start: usize = 0;
 
         // Start first page
         pages.push(PageGroup {
@@ -364,6 +365,16 @@ impl PageMap {
                 // Adjust page start past the header
                 page_start = (i + 1) as u64;
                 pages[0].physical_start = page_start;
+                line_start = i + 1;
+                continue;
+            }
+
+            // Blank/whitespace-only lines produce no logical row in the parsers
+            // (JSONL skips them, CSV never emits them), so they are not counted
+            // here either — row offsets must align with logical row numbers.
+            let is_blank = bytes[line_start..i].iter().all(|b| b.is_ascii_whitespace());
+            line_start = i + 1;
+            if is_blank {
                 continue;
             }
             row_count += 1;
@@ -384,8 +395,13 @@ impl PageMap {
             }
         }
 
-        // Handle final line without newline
-        if !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' && !skip_first {
+        // Handle final line without newline (skipping blank trailing content)
+        if line_start < bytes.len()
+            && !skip_first
+            && !bytes[line_start..]
+                .iter()
+                .all(|b| b.is_ascii_whitespace())
+        {
             row_count += 1;
         }
 
@@ -740,6 +756,10 @@ async fn resolve_without_layout(
 
 /// Scan bytes for newlines and return byte offsets for the requested row numbers.
 ///
+/// Blank/whitespace-only lines are skipped — logical row numbers come from the
+/// parsed stream, which never emits rows for them, so byte offsets must align
+/// with the non-blank lines only.
+///
 /// `bytes` is the content to scan.
 /// `base_offset` is the absolute byte offset of `bytes[0]` in the file.
 /// `base_row` is the logical row number of the first row in `bytes`.
@@ -757,30 +777,29 @@ fn scan_newline_offsets(
     let mut result = Vec::with_capacity(target_rows.len());
     let mut current_row = base_row;
     let mut target_idx = 0;
-    let mut line_start: u64 = base_offset;
+    let mut line_start: usize = 0;
 
-    // If the first target is the first row in this range, emit its offset immediately
-    if target_rows[target_idx] == current_row {
-        result.push(line_start);
-        target_idx += 1;
-        if target_idx >= target_rows.len() {
-            return result;
-        }
-    }
-
-    for (i, &byte) in bytes.iter().enumerate() {
-        if byte == b'\n' {
-            current_row += 1;
-            line_start = base_offset + (i as u64) + 1;
-
-            if target_idx < target_rows.len() && target_rows[target_idx] == current_row {
-                result.push(line_start);
+    for nl in memchr::memchr_iter(b'\n', bytes) {
+        let is_blank = bytes[line_start..nl].iter().all(|b| b.is_ascii_whitespace());
+        if !is_blank {
+            if target_rows[target_idx] == current_row {
+                result.push(base_offset + line_start as u64);
                 target_idx += 1;
                 if target_idx >= target_rows.len() {
-                    break;
+                    return result;
                 }
             }
+            current_row += 1;
         }
+        line_start = nl + 1;
+    }
+
+    // Final line without a trailing newline
+    if line_start < bytes.len()
+        && !bytes[line_start..].iter().all(|b| b.is_ascii_whitespace())
+        && target_rows[target_idx] == current_row
+    {
+        result.push(base_offset + line_start as u64);
     }
 
     result
@@ -1067,6 +1086,31 @@ mod tests {
                 row_end
             );
         }
+    }
+
+    #[test]
+    fn test_build_skips_blank_lines() {
+        // Blank/whitespace-only lines produce no logical row in the parsers,
+        // so they must not be counted as rows here either.
+        let data = b"row1\n\nrow2\n   \nrow3\n";
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        assert_eq!(result.total_rows, 3);
+    }
+
+    #[test]
+    fn test_build_skips_blank_final_line_without_newline() {
+        let data = b"row1\nrow2\n   ";
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn test_scan_newline_offsets_skips_blank_lines() {
+        // "row0\n" (0-4), "\n" (5), "row1\n" (6-10), "  \n" (11-13), "row2\n" (14-18)
+        // Logical rows are the non-blank lines: starts at 0, 6, 14.
+        let data = b"row0\n\nrow1\n  \nrow2\n";
+        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2]);
+        assert_eq!(offsets, vec![0, 6, 14]);
     }
 
     #[test]

@@ -97,10 +97,23 @@ impl MaybeVersionedFile {
         }
     }
 
+    /// Validate the file's version if this is a versioned file.
+    /// No-op for plain files.
+    ///
+    /// Must be called before reading data via [`Self::as_object_store_file`],
+    /// which bypasses version validation.
+    pub async fn validate_version(&self) -> Result<(), BundlebaseError> {
+        match self {
+            MaybeVersionedFile::Plain(_) => Ok(()),
+            MaybeVersionedFile::Versioned(f) => f.validate_if_needed().await,
+        }
+    }
+
     /// Get the underlying ObjectStoreFile reference.
     ///
     /// For versioned files, this returns the inner ObjectStoreFile.
-    /// Note: When using a versioned file, ensure validation has been done first.
+    /// Note: When using a versioned file, ensure validation has been done first
+    /// (see [`Self::validate_version`]).
     pub fn as_object_store_file(&self) -> &ObjectStoreFile {
         match self {
             MaybeVersionedFile::Plain(f) => f,

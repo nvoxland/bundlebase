@@ -161,7 +161,7 @@ pub fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
 
             let mut fields_value = Vec::new();
             for f in fields.iter() {
-                let serialized_field = serialize_field_internal(f).expect("should deserialize");
+                let serialized_field = serialize_field_internal(f)?;
                 let field_value =
                     serde_yaml_ng::to_value(serialized_field).map_err(|e| e.to_string())?;
                 fields_value.push(field_value);
@@ -172,8 +172,23 @@ pub fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
             Ok(Value::Mapping(map))
         }
 
-        // For other complex types, use a simple string representation
-        _ => serde_yaml_ng::to_value(dt).map_err(|e| e.to_string()),
+        // Other types fall through to arrow's derived Serialize. Simple unit
+        // variants (Int32, Utf8, ...) serialize to plain strings which
+        // `deserialize_data_type` can read back. Anything else (Dictionary,
+        // Map, Union, ...) would serialize as a YAML-tagged value that cannot
+        // be deserialized, silently corrupting the manifest for all future
+        // opens — reject it explicitly instead.
+        _ => {
+            let value = serde_yaml_ng::to_value(dt).map_err(|e| e.to_string())?;
+            if value.is_string() {
+                Ok(value)
+            } else {
+                Err(format!(
+                    "DataType {:?} is not supported in persisted schemas",
+                    dt
+                ))
+            }
+        }
     }
 }
 
@@ -310,8 +325,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                         .get(&Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in List".to_string())?;
 
-                    let field =
-                        deserialize_field_internal(element_value).expect("should deserialize");
+                    let field = deserialize_field_internal(element_value)?;
                     Ok(DataType::List(Arc::new(field)))
                 }
                 "LargeList" => {
@@ -319,8 +333,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                         .get(&Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in LargeList".to_string())?;
 
-                    let field =
-                        deserialize_field_internal(element_value).expect("should deserialize");
+                    let field = deserialize_field_internal(element_value)?;
                     Ok(DataType::LargeList(Arc::new(field)))
                 }
                 "FixedSizeList" => {
@@ -328,8 +341,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                         .get(&Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in FixedSizeList".to_string())?;
 
-                    let field =
-                        deserialize_field_internal(element_value).expect("should deserialize");
+                    let field = deserialize_field_internal(element_value)?;
 
                     let size = map
                         .get(&Value::String("size".to_string()))
@@ -362,10 +374,17 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
 }
 
 fn serialize_field_internal(field: &Field) -> Result<SerializedField, String> {
-    let metadata_map = serde_yaml_ng::to_value(field.metadata())
-        .ok()
-        .and_then(|v| v.as_mapping().cloned())
-        .filter(|m| !m.is_empty());
+    let metadata_map = if field.metadata().is_empty() {
+        None
+    } else {
+        let value = serde_yaml_ng::to_value(field.metadata()).map_err(|e| e.to_string())?;
+        Some(
+            value
+                .as_mapping()
+                .cloned()
+                .ok_or_else(|| "field metadata did not serialize to a mapping".to_string())?,
+        )
+    };
 
     Ok(SerializedField {
         name: field.name().clone(),
@@ -390,7 +409,7 @@ fn deserialize_field_internal(value: &Value) -> Result<Field, String> {
         .get(&Value::String("data_type".to_string()))
         .ok_or_else(|| "missing 'data_type' field".to_string())?;
 
-    let data_type = deserialize_data_type(data_type_value).expect("should deserialize");
+    let data_type = deserialize_data_type(data_type_value)?;
 
     let nullable = map
         .get(&Value::String("nullable".to_string()))
@@ -448,18 +467,25 @@ pub fn serialize_schema<S>(schema: &Arc<Schema>, serializer: S) -> Result<S::Ok,
 where
     S: Serializer,
 {
+    let value = serialize_schema_internal(schema).map_err(serde::ser::Error::custom)?;
+    value.serialize(serializer)
+}
+
+/// Serialize a Schema to a YAML value, propagating per-field errors.
+///
+/// A field that fails to serialize must fail the whole schema — silently
+/// dropping it would persist a manifest schema missing columns, corrupting
+/// the bundle for all future opens.
+pub(crate) fn serialize_schema_internal(schema: &Schema) -> Result<Value, String> {
     let mut map = Mapping::new();
 
-    // Serialize fields
-    let fields_values: Vec<Value> = schema
-        .fields()
-        .iter()
-        .filter_map(|f| {
-            serialize_field_internal(f)
-                .ok()
-                .and_then(|sf| serde_yaml_ng::to_value(sf).ok())
-        })
-        .collect();
+    let mut fields_values: Vec<Value> = Vec::with_capacity(schema.fields().len());
+    for f in schema.fields() {
+        let field_value = serialize_field_internal(f)
+            .and_then(|sf| serde_yaml_ng::to_value(sf).map_err(|e| e.to_string()))
+            .map_err(|e| format!("Failed to serialize schema field '{}': {}", f.name(), e))?;
+        fields_values.push(field_value);
+    }
 
     map.insert(
         Value::String("fields".to_string()),
@@ -468,14 +494,11 @@ where
 
     let schema_metadata = schema.metadata();
     if !schema_metadata.is_empty() {
-        let metadata_value =
-            serde_yaml_ng::to_value(schema_metadata).map_err(serde::ser::Error::custom)?;
+        let metadata_value = serde_yaml_ng::to_value(schema_metadata).map_err(|e| e.to_string())?;
         map.insert(Value::String("metadata".to_string()), metadata_value);
     }
 
-    serde_yaml_ng::to_value(&map)
-        .map_err(serde::ser::Error::custom)
-        .and_then(|v| v.serialize(serializer))
+    Ok(Value::Mapping(map))
 }
 
 /// Serialize Option<Arc<Schema>>
@@ -787,26 +810,7 @@ mod tests {
         ];
         let schema = Arc::new(Schema::new(fields));
 
-        // Manually serialize using serialize_schema_internal logic
-        let mut map = Mapping::new();
-        let fields_values: Vec<Value> = schema
-            .fields()
-            .iter()
-            .filter_map(|f| {
-                serialize_field_internal(f)
-                    .ok()
-                    .and_then(|sf| serde_yaml_ng::to_value(sf).ok())
-            })
-            .collect();
-        map.insert(
-            Value::String("fields".to_string()),
-            Value::Sequence(fields_values),
-        );
-        map.insert(
-            Value::String("metadata".to_string()),
-            Value::Mapping(Mapping::new()),
-        );
-        let serialized = Value::Mapping(map);
+        let serialized = serialize_schema_internal(&schema).expect("should serialize");
 
         let deserialized = deserialize_schema_internal(&serialized).unwrap();
 
@@ -915,5 +919,49 @@ mod tests {
         let value = Value::Null;
         let result = deserialize_schema_internal(&value);
         assert!(result.is_err(), "null should fail schema deserialization");
+    }
+
+    #[test]
+    fn test_serialize_data_type_unsupported_errors() {
+        // Dictionary falls through to arrow's derived Serialize, which emits a
+        // YAML-tagged value that deserialize_data_type cannot read back. It
+        // must be rejected at serialization time instead of silently
+        // producing a manifest entry that corrupts future opens.
+        let dt = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+        let result = serialize_data_type(&dt);
+        let err = result.expect_err("non-roundtrippable DataType must fail to serialize");
+        assert!(
+            err.contains("Dictionary"),
+            "error should name the unsupported type: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_serialize_schema_unsupported_field_errors_with_field_name() {
+        #[derive(serde::Serialize)]
+        struct Holder {
+            #[serde(serialize_with = "serialize_schema")]
+            schema: Arc<Schema>,
+        }
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new(
+                "dict_col",
+                DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+                true,
+            ),
+        ]));
+
+        let result = serde_yaml_ng::to_string(&Holder { schema });
+        let err = result
+            .expect_err("schema with an unsupported field type must fail to serialize, not silently drop the field");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("dict_col"),
+            "error should name the failing field: {}",
+            msg
+        );
     }
 }

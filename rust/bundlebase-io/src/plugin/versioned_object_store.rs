@@ -34,7 +34,10 @@ impl VersionedObjectStoreFile {
         }
     }
 
-    async fn validate_if_needed(&self) -> Result<(), BundlebaseError> {
+    /// Validate the file's current version against the expected version.
+    /// Cached after the first successful check. Call this before any access
+    /// path that bypasses validation (e.g. [`Self::inner`]).
+    pub async fn validate_if_needed(&self) -> Result<(), BundlebaseError> {
         if self.validated.load(Ordering::Acquire) {
             return Ok(());
         }

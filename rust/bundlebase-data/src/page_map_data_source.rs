@@ -12,7 +12,7 @@ use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
 use futures::stream::{self, StreamExt};
-use object_store::{GetOptions, GetRange, ObjectStore};
+use object_store::{GetOptions, GetRange, ObjectStore, ObjectStoreExt};
 use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
@@ -25,6 +25,17 @@ pub enum LineOrientedFormat {
     Csv,
     /// JSON Lines format (newline-delimited JSON)
     JsonLines,
+}
+
+/// Outcome of locating one row's line within a fetched buffer.
+enum LineSlot {
+    /// Full line found (trimmed, non-empty)
+    Complete(String),
+    /// Line is blank/whitespace-only, or the offset lies beyond the buffer
+    Skip,
+    /// No newline within the buffer — the line continues past the fetched
+    /// range. Holds the bytes from the row start to the end of the buffer.
+    Incomplete(Vec<u8>),
 }
 
 /// Custom DataSource that reads only specified rows or page ranges from line-oriented files.
@@ -137,34 +148,98 @@ impl PageMapDataSource {
         }
     }
 
-    /// Extract lines at specific byte offsets from a fetched byte range
-    /// Works for both CSV and JSON Lines since both are line-oriented
-    /// `batch_start` is the absolute byte offset of the start of `bytes` in the file
-    /// `row_offsets` are absolute byte offsets of individual rows in the file
-    /// Lines truncated by the read-ahead buffer (no newline found) are skipped
-    fn extract_lines(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<String> {
+    /// Extract lines at specific byte offsets from a fetched byte range.
+    /// Works for both CSV and JSON Lines since both are line-oriented.
+    /// `batch_start` is the absolute byte offset of the start of `bytes` in the file.
+    /// `row_offsets` are absolute byte offsets of individual rows in the file.
+    ///
+    /// Operates on raw bytes (UTF-8 conversion happens per line) so that
+    /// invalid UTF-8 sequences cannot misalign byte-offset indexing.
+    fn extract_line_slots(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<LineSlot> {
         if bytes.is_empty() || row_offsets.is_empty() {
             return Vec::new();
         }
 
-        let text = String::from_utf8_lossy(bytes);
-        let mut lines = Vec::new();
+        let mut slots = Vec::with_capacity(row_offsets.len());
 
         for &offset in row_offsets {
             let pos = (offset - batch_start) as usize;
-            if pos >= text.len() {
-                continue; // offset beyond buffer
+            if pos >= bytes.len() {
+                slots.push(LineSlot::Skip); // offset beyond buffer
+                continue;
             }
-            if let Some(end) = text[pos..].find('\n') {
-                let trimmed = text[pos..pos + end].trim();
-                if !trimmed.is_empty() {
-                    lines.push(trimmed.to_string());
+            match memchr::memchr(b'\n', &bytes[pos..]) {
+                Some(end) => {
+                    let text = String::from_utf8_lossy(&bytes[pos..pos + end]);
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        slots.push(LineSlot::Skip);
+                    } else {
+                        slots.push(LineSlot::Complete(trimmed.to_string()));
+                    }
                 }
+                // No newline in the buffer — the line continues past the
+                // fetched range; the caller must read the remainder.
+                None => slots.push(LineSlot::Incomplete(bytes[pos..].to_vec())),
             }
-            // No newline → line truncated by read-ahead buffer, skip
         }
 
-        lines
+        slots
+    }
+
+    /// Test-facing wrapper over [`Self::extract_line_slots`] that returns only
+    /// the lines fully contained in the buffer.
+    #[cfg(test)]
+    fn extract_lines(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<String> {
+        Self::extract_line_slots(bytes, batch_start, row_offsets)
+            .into_iter()
+            .filter_map(|slot| match slot {
+                LineSlot::Complete(line) => Some(line),
+                LineSlot::Skip | LineSlot::Incomplete(_) => None,
+            })
+            .collect()
+    }
+
+    /// Continue reading a line whose terminating newline lies beyond the
+    /// fetched buffer. Issues follow-up range reads (doubling each time) from
+    /// `from` until a newline or EOF; EOF terminates the line.
+    async fn read_line_continuation(
+        object_store: &Arc<dyn ObjectStore>,
+        file_path: &object_store::path::Path,
+        mut from: u64,
+        mut acc: Vec<u8>,
+    ) -> datafusion::common::Result<Vec<u8>> {
+        let file_size = object_store
+            .head(file_path)
+            .await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+            .size;
+
+        let mut chunk = Self::LINE_READ_AHEAD_BYTES;
+        while from < file_size {
+            let end = file_size.min(from + chunk);
+            let options = GetOptions {
+                range: Some(GetRange::Bounded(from..end)),
+                ..Default::default()
+            };
+            let bytes = object_store
+                .get_opts(file_path, options)
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?
+                .bytes()
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+            if let Some(nl) = memchr::memchr(b'\n', &bytes) {
+                acc.extend_from_slice(&bytes[..nl]);
+                return Ok(acc);
+            }
+            acc.extend_from_slice(&bytes);
+            from = end;
+            chunk = chunk.saturating_mul(2);
+        }
+
+        Ok(acc)
     }
 
     /// Read-ahead per row for line-oriented index reads.
@@ -431,7 +506,39 @@ impl DataSource for PageMapDataSource {
                             .await
                             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-                        let lines = Self::extract_lines(&bytes, batch_start, &batch_offsets);
+                        // A shorter-than-requested response means the range was
+                        // clamped at EOF — EOF then terminates any unterminated line.
+                        let requested_len = (batch_end - batch_start) as usize;
+                        let reached_eof = bytes.len() < requested_len;
+                        let buffer_end = batch_start + bytes.len() as u64;
+
+                        let slots =
+                            Self::extract_line_slots(&bytes, batch_start, &batch_offsets);
+                        let mut lines = Vec::with_capacity(slots.len());
+                        for slot in slots {
+                            match slot {
+                                LineSlot::Complete(line) => lines.push(line),
+                                LineSlot::Skip => {}
+                                LineSlot::Incomplete(partial) => {
+                                    let full = if reached_eof {
+                                        partial
+                                    } else {
+                                        Self::read_line_continuation(
+                                            &object_store,
+                                            &file_path,
+                                            buffer_end,
+                                            partial,
+                                        )
+                                        .await?
+                                    };
+                                    let text = String::from_utf8_lossy(&full);
+                                    let trimmed = text.trim();
+                                    if !trimmed.is_empty() {
+                                        lines.push(trimmed.to_string());
+                                    }
+                                }
+                            }
+                        }
 
                         if lines.is_empty() {
                             return Ok(RecordBatch::new_empty(empty_schema));
@@ -919,6 +1026,20 @@ mod tests {
         // First line extracted, second offset is beyond buffer and skipped
         assert_eq!(1, lines.len());
         assert_eq!("only_line", lines[0]);
+    }
+
+    #[test]
+    fn test_extract_lines_invalid_utf8_alignment() {
+        // 0xFF is invalid UTF-8. Byte offsets index the file's raw bytes, so
+        // extraction must not be misaligned by a lossy UTF-8 conversion
+        // (each invalid sequence becomes a 3-byte U+FFFD).
+        // "bad\xFFline\n" is 9 bytes, so the second line starts at offset 9.
+        let data = b"bad\xFFline\nrow2,x\n";
+
+        let lines = PageMapDataSource::extract_lines(data, 0, &[0, 9]);
+
+        assert_eq!(2, lines.len());
+        assert_eq!("row2,x", lines[1]);
     }
 
     #[test]
