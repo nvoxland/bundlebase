@@ -36,8 +36,8 @@ public class MySource implements Connector {
     @Override
     public List<Location> discover(List<String> attachedLocations, Map<String, String> args) {
         return List.of(
-            new Location("data1.parquet", true, "parquet", "v1"),
-            new Location("data2.parquet", true, "parquet", "v1")
+            new Location("data1.parquet", true, "parquet", "v1", 100L),  // row count known
+            new Location("data2.parquet", true, "parquet", "v1")         // row count unknown
         );
     }
 

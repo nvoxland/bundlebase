@@ -94,6 +94,9 @@ public class Serve {
             m.put("must_copy", loc.mustCopy());
             m.put("format", loc.format());
             m.put("version", loc.version());
+            // bundlebase requires the num_rows key on every location;
+            // a null value means "unknown row count".
+            m.put("num_rows", loc.numRows());
             locList.add(m);
         }
 

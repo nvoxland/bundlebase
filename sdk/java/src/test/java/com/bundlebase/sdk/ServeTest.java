@@ -38,7 +38,7 @@ public class ServeTest {
             @Override
             public List<Location> discover(List<String> attached, Map<String, String> args) {
                 return List.of(
-                    new Location("f1.csv", true, "csv", "v1"),
+                    new Location("f1.csv", true, "csv", "v1", 2L),
                     new Location("f2.csv", false, "csv", "v2")
                 );
             }
@@ -76,6 +76,28 @@ public class ServeTest {
         JsonNode locations = resp.get("result").get("locations");
         assertEquals(2, locations.size());
         assertEquals("f1.csv", locations.get(0).get("location").asText());
+    }
+
+    @Test
+    public void testDiscoverIncludesNumRows() throws Exception {
+        // bundlebase requires every discover location to carry a num_rows key:
+        // an integer when known, explicit null when unknown.
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        input.write(makeRequest("discover", Map.of("attached_locations", List.of()), 1));
+        input.write(makeRequest("shutdown", null, 2));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        Serve.run(simpleSource(), new ByteArrayInputStream(input.toByteArray()), output);
+
+        String[] lines = output.toString().split("\n");
+        JsonNode locations = MAPPER.readTree(lines[0]).get("result").get("locations");
+        assertEquals(2, locations.size());
+        // f1.csv declares a row count
+        assertTrue("num_rows key must be present", locations.get(0).has("num_rows"));
+        assertEquals(2, locations.get(0).get("num_rows").asLong());
+        // f2.csv has an unknown row count — key must still be present, as null
+        assertTrue("num_rows key must be present", locations.get(1).has("num_rows"));
+        assertTrue("unknown num_rows must serialize as null", locations.get(1).get("num_rows").isNull());
     }
 
     @Test

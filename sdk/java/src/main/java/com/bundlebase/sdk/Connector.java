@@ -31,8 +31,9 @@ public interface Connector {
      *   <li>{@code null} — no data for this location</li>
      * </ul>
      *
-     * <p>When returning row-oriented or column-oriented data, define a {@link #schema()}
-     * for explicit type control. Without a schema, types are inferred as strings.
+     * <p>When returning row-oriented or column-oriented data, a {@link #schema()}
+     * is required. Returning dict data without a schema throws
+     * {@link IllegalArgumentException}.
      *
      * @param location the location to fetch data for
      * @param args extra arguments from the source configuration
@@ -41,18 +42,19 @@ public interface Connector {
     Object data(Location location, Map<String, String> args);
 
     /**
-     * Optional schema for automatic dict-to-Arrow conversion.
+     * Schema for automatic dict-to-Arrow conversion.
      *
-     * <p>Return a map of column names to type strings. When {@link #data} returns
-     * {@code List<Map>} or {@code Map<String, List>}, this schema controls
-     * the Arrow types used.
+     * <p>Return a map of column names to type strings. Required when
+     * {@link #data} returns {@code List<Map>} or {@code Map<String, List>};
+     * those conversions throw {@link IllegalArgumentException} without it.
      *
      * <p>Supported types: Utf8, Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64,
      * Float16, Float32, Float64, Boolean, Date32, Date64, Timestamp, Binary.
      *
      * <p>Example: {@code Map.of("name", "Utf8", "age", "Int32", "score", "Float64")}
      *
-     * @return schema map, or null to use type inference
+     * @return schema map, or null when {@link #data} returns
+     *         {@code VectorSchemaRoot} directly
      */
     default Map<String, String> schema() {
         return null;

@@ -45,7 +45,7 @@ func (s *MySource) Data(location sdk.Location, args map[string]string) ([]arrow.
 }
 
 func main() {
-	sdk.Serve(&MySource())
+	sdk.Serve(&MySource{})
 }
 ```
 

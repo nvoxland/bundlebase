@@ -103,11 +103,13 @@ class Protocol {
         if (node == null || !node.isObject()) {
             return new Location("");
         }
+        JsonNode numRows = node.get("num_rows");
         return new Location(
             node.has("location") ? node.get("location").asText() : "",
             node.has("must_copy") ? node.get("must_copy").asBoolean() : true,
             node.has("format") ? node.get("format").asText() : "parquet",
-            node.has("version") ? node.get("version").asText() : ""
+            node.has("version") ? node.get("version").asText() : "",
+            numRows != null && numRows.isIntegralNumber() ? numRows.asLong() : null
         );
     }
 
