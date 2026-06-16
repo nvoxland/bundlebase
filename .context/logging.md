@@ -10,7 +10,7 @@ All Rust code uses the standard `log` crate macros (`log::info!()`, `log::debug!
 
 1. Rust code uses standard `log` macros: `info!()`, `debug!()`, `warn!()`, `error!()`
 2. The `pyo3-log` crate (initialized on module import) forwards these to Python's `logging` module
-3. Logs appear under the logger name `Bundlebase.rust`
+3. Logs appear under the logger name `bundlebase.rust`
 4. Python code can configure filtering, formatting, and handlers using standard Python logging
 
 ### Python Configuration
@@ -19,19 +19,19 @@ Users can configure the Rust logger like any Python logger:
 
 ```python
 import logging
-import Bundlebase
+import bundlebase
 
 # Option 1: Use the helper function (simplest)
-Bundlebase.set_rust_log_level(logging.DEBUG)
+bundlebase.set_rust_log_level(logging.DEBUG)
 
 # Option 2: Configure the logger directly
-logging.getLogger('Bundlebase.rust').setLevel(logging.INFO)
+logging.getLogger('bundlebase.rust').setLevel(logging.INFO)
 
 # Option 3: Use basicConfig for all loggers
 logging.basicConfig(level=logging.INFO)
 
 # Option 4: Add a custom handler
-rust_logger = logging.getLogger('Bundlebase.rust')
+rust_logger = logging.getLogger('bundlebase.rust')
 file_handler = logging.FileHandler('rust.log')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 rust_logger.addHandler(file_handler)
@@ -53,21 +53,21 @@ error!("Failed to load: {}", err);
 When logs are emitted from Rust and captured by Python:
 
 ```
-INFO [Bundlebase.rust] Container initialized: mydata
-DEBUG [Bundlebase.rust] Processing 1000000 rows
-WARNING [Bundlebase.rust] Large dataset detected: 1000000 rows
-ERROR [Bundlebase.rust] Failed to load: file not found
+INFO [bundlebase.rust] Container initialized: mydata
+DEBUG [bundlebase.rust] Processing 1000000 rows
+WARNING [bundlebase.rust] Large dataset detected: 1000000 rows
+ERROR [bundlebase.rust] Failed to load: file not found
 ```
 
 ### Default Behavior
 
-By default, the `Bundlebase.rust` logger is configured with:
+By default, the `bundlebase.rust` logger is configured with:
 - **Level**: INFO (shows INFO, WARN, ERROR; hides DEBUG, TRACE)
 - **Handler**: StreamHandler to stderr
 - **Formatter**: `%(levelname)s [%(name)s] %(message)s`
 
 This means:
-- INFO and higher logs appear by default when importing Bundlebase
+- INFO and higher logs appear by default when importing bundlebase
 - DEBUG logs are hidden unless explicitly enabled
 - Integration with Python logging frameworks (like in Jupyter notebooks) works automatically
 
@@ -77,7 +77,7 @@ The Rust logger integrates seamlessly with Python's logging ecosystem:
 
 ```python
 import logging
-import Bundlebase
+import bundlebase
 
 # Configure logging at application startup
 logging.basicConfig(
@@ -95,11 +95,11 @@ logging.basicConfig(
 
 ## REPL Logging
 
-The `Bundlebase-cli` REPL displays Rust logs using the `ui` log level by default, which shows a minimal format (message only) for clean interactive output. The log level is fully configurable via the `--log-level` CLI argument.
+The `bundlebase` CLI REPL (`bundlebase repl`) displays Rust logs using the `ui` log level by default, which shows a minimal format (message only) for clean interactive output. The log level is fully configurable via the `--log-level` CLI argument.
 
 ### How It Works
 
-1. The REPL binary (`Bundlebase-cli`) uses `tracing-subscriber` as the logging backend
+1. The CLI binary (`bundlebase`, crate `bundlebase-cli`) uses `tracing-subscriber` as the logging backend
 2. The `tracing-log` crate bridges `log::*` macros to `tracing-subscriber`
 3. All Rust logs from the Bundlebase library are captured and displayed
 4. Log level is configured via the `--log-level` CLI argument
@@ -109,22 +109,22 @@ The `Bundlebase-cli` REPL displays Rust logs using the `ui` log level by default
 
 ```bash
 # Default: UI mode (minimal format, message only)
-Bundlebase-cli --container mydata --repl
+bundlebase repl --bundle mydata
 
 # Show DEBUG logs with full format (timestamps, module names, levels)
-Bundlebase-cli --container mydata --repl --log-level debug
+bundlebase repl --bundle mydata --log-level debug
 
 # Show TRACE logs (most verbose with full format)
-Bundlebase-cli --container mydata --repl --log-level trace
+bundlebase repl --bundle mydata --log-level trace
 
 # Show only INFO logs with full format
-Bundlebase-cli --container mydata --repl --log-level info
+bundlebase repl --bundle mydata --log-level info
 
 # Show only WARN and ERROR with full format
-Bundlebase-cli --container mydata --repl --log-level warn
+bundlebase repl --bundle mydata --log-level warn
 
 # Show only ERROR with full format
-Bundlebase-cli --container mydata --repl --log-level error
+bundlebase repl --bundle mydata --log-level error
 ```
 
 ### Log Levels
@@ -148,7 +148,7 @@ Attached data.parquet
 
 **Debug/Info/Trace modes (full format with timestamps and module names):**
 ```
-2024-12-12T10:30:45.123456Z  INFO Bundlebase_server: Creating container at: memory:///mydata
+2024-12-12T10:30:45.123456Z  INFO bundlebase_cli: Creating container at: memory:///mydata
 2024-12-12T10:30:45.456789Z  DEBUG bundlebase::functions: Creating FunctionRegistry
 2024-12-12T10:30:45.789012Z  INFO bundlebase::schema: Loading schema
 2024-12-12T10:31:00.012345Z  WARN bundlebase::query: Large result set: 1000000 rows
@@ -159,7 +159,7 @@ Attached data.parquet
 ### Python Bindings (pyo3-log)
 
 - Uses the `pyo3-log` crate to bridge Rust logs to Python
-- Initialized automatically when the `_Bundlebase` module is imported
+- Initialized automatically when the `_bundlebase` module is imported
 - Handles GIL acquisition and thread safety transparently
 - Minimal overhead: zero cost for filtered logs
 - Log levels mapped:
@@ -173,7 +173,7 @@ Attached data.parquet
 
 - Uses `tracing-log` to bridge `log` crate logs to `tracing`
 - Uses `tracing-subscriber` to format and display the logs
-- Configured at startup in `Bundlebase-cli/src/main.rs`
+- Configured at startup in `rust/bundlebase-cli/src/main.rs`
 - Log level is set via the `--log-level` CLI argument with default "ui"
 - Default level: `ui` mode (shows INFO and higher with minimal formatting)
 - `ui` mode configuration: Disables timestamps, log levels, target/module names, and thread info
@@ -186,11 +186,11 @@ Attached data.parquet
 
 ```python
 import logging
-import Bundlebase
+import bundlebase
 
 # Enable debug logging
 logging.basicConfig(level=logging.DEBUG)
-Bundlebase.set_rust_log_level(logging.DEBUG)
+bundlebase.set_rust_log_level(logging.DEBUG)
 
 # Now perform operations - you should see DEBUG logs from Rust
 ```
@@ -199,7 +199,7 @@ Bundlebase.set_rust_log_level(logging.DEBUG)
 
 ```bash
 # Run with DEBUG level
-Bundlebase-cli --container mydata --repl --log-level debug
+bundlebase repl --bundle mydata --log-level debug
 
 # You should see DEBUG logs like:
 # 2024-12-12T10:30:45.123456Z DEBUG bundlebase::builder: ...
@@ -210,8 +210,8 @@ Bundlebase-cli --container mydata --repl --log-level debug
 ```python
 import logging
 
-# After importing Bundlebase, the logger should exist
-rust_logger = logging.getLogger('Bundlebase.rust')
+# After importing bundlebase, the logger should exist
+rust_logger = logging.getLogger('bundlebase.rust')
 print(f"Logger level: {rust_logger.level}")
 print(f"Has handlers: {len(rust_logger.handlers) > 0}")
 ```
@@ -230,13 +230,13 @@ print(f"Has handlers: {len(rust_logger.handlers) > 0}")
 **Problem**: You're not seeing any Rust logs in your Python script.
 
 **Solutions**:
-1. Make sure you imported Bundlebase: `import Bundlebase`
-2. Set the log level: `Bundlebase.set_rust_log_level(logging.DEBUG)`
-3. Configure basicConfig before using Bundlebase:
+1. Make sure you imported bundlebase: `import bundlebase`
+2. Set the log level: `bundlebase.set_rust_log_level(logging.DEBUG)`
+3. Configure basicConfig before using bundlebase:
    ```python
    import logging
    logging.basicConfig(level=logging.DEBUG)
-   import Bundlebase
+   import bundlebase
    ```
 
 ### Logs appearing in Jupyter but not in console script
@@ -247,7 +247,7 @@ print(f"Has handlers: {len(rust_logger.handlers) > 0}")
 ```python
 import logging
 logging.basicConfig(level=logging.INFO)
-import Bundlebase
+import bundlebase
 ```
 
 ### Too many logs in REPL
@@ -257,14 +257,14 @@ import Bundlebase
 **Solution**: Use the `ui` log level (default) or set it to a higher level:
 ```bash
 # Use UI mode (minimal format, message only) - this is the default
-Bundlebase-cli --container mydata --repl
+bundlebase repl --bundle mydata
 
 # Or explicitly set to UI mode
-Bundlebase-cli --container mydata --repl --log-level ui
+bundlebase repl --bundle mydata --log-level ui
 
 # Or set to INFO level with full format
-Bundlebase-cli --container mydata --repl --log-level info
+bundlebase repl --bundle mydata --log-level info
 
 # Or show only WARN and ERROR with full format
-Bundlebase-cli --container mydata --repl --log-level warn
+bundlebase repl --bundle mydata --log-level warn
 ```

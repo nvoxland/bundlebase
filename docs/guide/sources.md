@@ -324,9 +324,11 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `url` | Yes | Directory URL (e.g., `s3://bucket/data/`, `file:///path/to/data/`) |
+| `url` | Yes | Directory URL (e.g., `s3://bucket/data/`, `file:///path/to/data/`, `ftp://host/path/`, `sftp://user@host/path/`) |
 | `patterns` | No | Comma-separated glob patterns (default: `**/*`) |
-| `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
+| `key_path` | No | SSH private key path, for `sftp://` URLs |
+
+Whether files are copied into the bundle or referenced in place depends on the URL scheme: schemes that can be read directly at query time (S3, GCS, Azure, `file://`) are referenced in place; schemes that can't (FTP, SFTP) are always copied.
 
 === "Async API"
 
@@ -341,12 +343,6 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
     bundle = await bundle.create_source("remote_dir", {
         "url": "file:///data/exports/",
         "patterns": "**/*.csv,**/*.parquet"
-    })
-
-    # Reference files in place instead of copying
-    bundle = await bundle.create_source("remote_dir", {
-        "url": "s3://my-bucket/data/",
-        "copy": "false"
     })
     ```
 
@@ -363,12 +359,6 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
     bundle = bundle.create_source("remote_dir", {
         "url": "file:///data/exports/",
         "patterns": "**/*.csv,**/*.parquet"
-    })
-
-    # Reference files in place instead of copying
-    bundle = bundle.create_source("remote_dir", {
-        "url": "s3://my-bucket/data/",
-        "copy": "false"
     })
     ```
 
@@ -378,30 +368,20 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
     CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
-### ftp_directory
+#### FTP
 
-Lists files from an FTP server. Supports anonymous and authenticated access.
-
-**Arguments:**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `url` | Yes | FTP URL (e.g., `ftp://user:pass@host:21/path/`) |
-| `patterns` | No | Comma-separated glob patterns (default: `**/*`) |
-
-!!! note
-    Files are always copied into the bundle since FTP URLs cannot be directly referenced during query execution.
+FTP directories work through `remote_dir` with an `ftp://` URL. Anonymous and authenticated access are both supported. Files are always copied into the bundle since FTP URLs cannot be directly referenced during query execution.
 
 === "Async API"
 
     ```python
     # Anonymous FTP
-    bundle = await bundle.create_source("ftp_directory", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "ftp://ftp.example.com/pub/data/"
     })
 
     # Authenticated FTP
-    bundle = await bundle.create_source("ftp_directory", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "ftp://user:pass@ftp.example.com/data/",
         "patterns": "**/*.csv"
     })
@@ -411,12 +391,12 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 
     ```python
     # Anonymous FTP
-    bundle = bundle.create_source("ftp_directory", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "ftp://ftp.example.com/pub/data/"
     })
 
     # Authenticated FTP
-    bundle = bundle.create_source("ftp_directory", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "ftp://user:pass@ftp.example.com/data/",
         "patterns": "**/*.csv"
     })
@@ -425,28 +405,17 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 === "SQL"
 
     ```sql
-    CREATE SOURCE USING ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
+    CREATE SOURCE USING remote_dir WITH (url = 'ftp://ftp.example.com/pub/data/')
     ```
 
-### sftp_directory
+#### SFTP
 
-Lists files from a remote directory via SFTP. Requires an SSH private key for authentication.
-
-**Arguments:**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `url` | Yes | SFTP URL (e.g., `sftp://user@host:22/path/`) |
-| `key_path` | Yes | Path to SSH private key file (e.g., `~/.ssh/id_rsa`) |
-| `patterns` | No | Comma-separated glob patterns (default: `**/*`) |
-
-!!! note
-    Files are always copied into the bundle since SFTP URLs cannot be directly referenced during query execution.
+SFTP directories work through `remote_dir` with an `sftp://` URL plus a `key_path` for SSH key authentication. Files are always copied into the bundle since SFTP URLs cannot be directly referenced during query execution.
 
 === "Async API"
 
     ```python
-    bundle = await bundle.create_source("sftp_directory", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "sftp://user@host/data/",
         "key_path": "~/.ssh/id_rsa",
         "patterns": "**/*.parquet"
@@ -456,7 +425,7 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "Sync API"
 
     ```python
-    bundle = bundle.create_source("sftp_directory", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "sftp://user@host/data/",
         "key_path": "~/.ssh/id_rsa",
         "patterns": "**/*.parquet"
@@ -466,7 +435,7 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "SQL"
 
     ```sql
-    CREATE SOURCE USING sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
     ```
 
 ### kaggle
@@ -552,14 +521,14 @@ Bundlebase supports custom connectors in two modes: **native** (in-process, zero
 
 ```python
 bundle.import_temp_connector('example.connector', 'python::example_connector:ExampleConnector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 #### IPC (Subprocess)
 
 ```python
 bundle.import_connector('example.connector', 'ipc::./example_connector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 See [Custom Connectors](custom-connectors/index.md) for full command reference, runtime values, SDKs, and protocol details.
@@ -654,7 +623,7 @@ Each `FetchResults` object contains:
 | Property | Type | Description |
 |----------|------|-------------|
 | `connector` | `str` | Connector name (e.g., "remote_dir") |
-| `source_id` | `str` | Stable identifier for this source. Pass to `DESCRIBE SOURCE` for full configuration |
+| `source_id` | `str` | Stable identifier for this source, as shown by `SHOW SOURCES` |
 | `pack` | `str` | Pack name ("base" or join name) |
 | `added` | `list[FetchedSource]` | Source locations newly added (one entry per `DiscoveredLocation`, *not* per bundle block) |
 | `replaced` | `list[FetchedSource]` | Source locations whose content changed and was re-attached |
@@ -758,7 +727,7 @@ A typical workflow for incrementally loading data:
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
-    bundle = (await bb.open("sales/data")).extend()
+    bundle = await (await bb.open("sales/data")).extend()
     results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:

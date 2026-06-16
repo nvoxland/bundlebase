@@ -69,7 +69,6 @@ Bundle metadata is available as properties:
     bundle = bb.open("my/data")
     print(bundle.name)
     print(bundle.description)
-    print(bundle.id)
     print(bundle.url)
     print(bundle.version)
     ```

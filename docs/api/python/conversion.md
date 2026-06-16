@@ -4,7 +4,7 @@ Convert Bundlebase bundles to various data formats.
 
 ## Overview
 
-Bundlebase provides utilities to convert bundles to pandas, Polars, NumPy, and Python dictionaries. All conversion functions use streaming internally to handle datasets larger than RAM.
+Bundlebase provides utilities to convert bundles to pandas, Polars, NumPy, and Python dictionaries. The conversion functions read data in streaming batches, but the final DataFrame or dict must fit in memory. For datasets larger than RAM, use `stream_batches()`.
 
 ## Functions
 
@@ -52,7 +52,7 @@ import bundlebase
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18"))
+    .filter("SELECT * FROM bundle WHERE age >= 18"))
 
 # Convert to pandas DataFrame
 df = await c.to_pandas()
@@ -78,8 +78,7 @@ print(df.describe())
 import bundlebase
 
 c = await (bundlebase.create()
-    .attach("data.parquet")
-    .query("SELECT x, y, z FROM bundle"))
+    .attach("data.parquet"))
 
 # Convert to NumPy arrays (dict of column name -> array)
 arrays = await c.to_numpy()
@@ -106,12 +105,12 @@ For datasets larger than RAM, use `stream_batches()`:
 ```python
 import bundlebase
 
-c = await bundlebase.open("huge_dataset.parquet")
+c = await bundlebase.create().attach("huge_dataset.parquet")
 
 # Process in batches
 total_rows = 0
 async for batch in bundlebase.stream_batches(c):
-    # Each batch is a PyArrow RecordBatch (~100MB)
+    # Each batch is a PyArrow RecordBatch holding a slice of the data
     total_rows += batch.num_rows
 
     # Convert batch to pandas if needed
@@ -123,34 +122,21 @@ print(f"Processed {total_rows} rows")
 
 ## Memory Efficiency
 
-All conversion functions use streaming internally:
+The conversion functions read data in streaming batches, but they build the full result in memory. Expect peak memory of roughly twice the dataset size while the batches are combined into the final DataFrame:
 
 ```python
-# These all stream internally (constant memory):
-df = await c.to_pandas()   # ✓ Good
-df = await c.to_polars()   # ✓ Good
-arrays = await c.to_numpy()  # ✓ Good
+# These materialize the full result (dataset must fit in RAM):
+df = await c.to_pandas()
+df = await c.to_polars()
+arrays = await c.to_numpy()
 
-# For large datasets, use custom streaming:
+# For datasets larger than RAM, process batch by batch instead:
 async for batch in bundlebase.stream_batches(c):
-    process(batch)  # ✓ Best for custom processing
+    process(batch)  # bounded memory
 ```
 
 !!! warning "Avoid for Large Datasets"
     Do NOT use `as_pyarrow()` for large datasets - it materializes the entire dataset in memory. Use `stream_batches()` instead.
-
-## Batch Size
-
-`stream_batches()` uses a default batch size of ~100MB. You can customize this by implementing a custom progress tracker:
-
-```python
-from bundlebase.progress import StreamProgress
-
-progress = StreamProgress(batch_size=50_000_000)  # 50MB batches
-
-async for batch in bundlebase.stream_batches(c, progress=progress):
-    process(batch)
-```
 
 ## Integration Examples
 
@@ -162,7 +148,7 @@ import pandas as pd
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("active = true"))
+    .filter("SELECT * FROM bundle WHERE active = true"))
 
 # Convert and continue with pandas
 df = await c.to_pandas()
@@ -191,8 +177,7 @@ import bundlebase
 import numpy as np
 
 c = await (bundlebase.create()
-    .attach("data.parquet")
-    .query("SELECT x, y, z FROM bundle"))
+    .attach("data.parquet"))
 
 # Convert to NumPy for numerical operations
 arrays = await c.to_numpy()
@@ -206,7 +191,7 @@ correlation = np.corrcoef(x, y)[0, 1]
 ```python
 import bundlebase
 
-c = await bundlebase.open("large_dataset.parquet")
+c = await bundlebase.create().attach("large_dataset.parquet")
 
 # Custom incremental processing
 results = []

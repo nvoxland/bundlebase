@@ -35,29 +35,31 @@ A vendor delivers daily sales CSVs to an SFTP server. The files land in `/outbou
             "Normalized columns, filtered to completed transactions. "
             "Downstream consumers use bb.open() — SFTP details are internal."
         )
-        .create_source("sftp_directory", {
-            "url": "sftp://vendor.example.com/outbound/sales/",
+        .create_source("remote_dir", {
+            "url": "sftp://pipeline-user@vendor.example.com/outbound/sales/",
             "patterns": "sales_*.csv",
-            "username": "pipeline-user",
             "key_path": "/etc/keys/vendor_rsa"
         })
         .normalize_column_names()
-        .filter("status = 'completed'")
+        .filter("SELECT * FROM bundle WHERE status = 'completed'")
         .drop_column("internal_vendor_code"))
 
     # First fetch — picks up all existing files
     bundle.fetch("base", "add")
     bundle.commit("Initial load — all historical files")
-    print(f"Loaded: {bundle.num_rows:,} rows")
+    print(f"Loaded: {bundle.num_rows():,} rows")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/vendor-sales --create
+    ```
+
     ```sql
-    CREATE 's3://team-data/vendor-sales';
     SET NAME 'Vendor Sales — Daily Feed';
-    SET DESCRIPTION 'Daily CSV feed from Vendor A via SFTP. Normalized columns, filtered to completed transactions. Downstream consumers use OPEN — SFTP details are internal.';
-    CREATE SOURCE FOR base USING sftp_directory WITH (url = 'sftp://vendor.example.com/outbound/sales/', patterns = 'sales_*.csv', username = 'pipeline-user', key_path = '/etc/keys/vendor_rsa');
+    SET DESCRIPTION 'Daily CSV feed from Vendor A via SFTP. Normalized columns, filtered to completed transactions. Downstream consumers open the bundle — SFTP details are internal.';
+    CREATE SOURCE FOR base USING remote_dir WITH (url = 'sftp://pipeline-user@vendor.example.com/outbound/sales/', patterns = 'sales_*.csv', key_path = '/etc/keys/vendor_rsa');
     NORMALIZE COLUMN NAMES;
     FILTER WITH SELECT * FROM bundle WHERE status = 'completed';
     DROP COLUMN internal_vendor_code;
@@ -85,14 +87,16 @@ The daily job is three lines:
     bundle.fetch("base", "add")   # only pulls files not already in the bundle
     bundle.commit(f"Daily fetch — {date.today()}")
 
-    print(f"Done: {bundle.num_rows:,} total rows at version {bundle.version}")
+    print(f"Done: {bundle.num_rows():,} total rows at version {bundle.version}")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/vendor-sales
+    ```
+
     ```sql
-    OPEN 's3://team-data/vendor-sales';
-    EXTEND;
     FETCH base ADD;
     COMMIT 'Daily fetch';
     SHOW STATUS;
@@ -115,9 +119,8 @@ Your data science team:
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://team-data/vendor-sales';
-    SELECT * FROM bundle;
+    ```bash
+    bundlebase query --bundle s3://team-data/vendor-sales "SELECT * FROM bundle"
     ```
 
 Your reporting dashboard (using the CLI SQL server):
@@ -137,25 +140,23 @@ When you add a second vendor with a different format, you extend the same bundle
     ```python
     bundle = bb.open("s3://team-data/vendor-sales").extend()
 
-    # Add a second vendor source — different SFTP, different format
-    bundle.create_source("sftp_directory", {
-        "url": "sftp://vendor-b.example.com/exports/",
+    # Add a second vendor source — different SFTP, different format.
+    # It unions into the same base pack as Vendor A.
+    bundle.create_source("remote_dir", {
+        "url": "sftp://pipeline-b@vendor-b.example.com/exports/",
         "patterns": "*.parquet",
-        "username": "pipeline-b",
         "key_path": "/etc/keys/vendor_b_rsa"
-    }, name="vendor_b")
+    })
 
-    bundle.fetch("vendor_b", "add")
+    bundle.fetch("base", "add")
     bundle.commit("Added Vendor B source")
     ```
 
 === "SQL"
 
     ```sql
-    OPEN 's3://team-data/vendor-sales';
-    EXTEND;
-    CREATE SOURCE FOR vendor_b USING sftp_directory WITH (url = 'sftp://vendor-b.example.com/exports/', patterns = '*.parquet', username = 'pipeline-b', key_path = '/etc/keys/vendor_b_rsa');
-    FETCH vendor_b ADD;
+    CREATE SOURCE FOR base USING remote_dir WITH (url = 'sftp://pipeline-b@vendor-b.example.com/exports/', patterns = '*.parquet', key_path = '/etc/keys/vendor_b_rsa');
+    FETCH base ADD;
     COMMIT 'Added Vendor B source';
     ```
 

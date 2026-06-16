@@ -457,7 +457,7 @@ Default (one row per source):
 pack | connector | source_id | source_locations_added | source_locations_modified | source_locations_removed | rows_before | rows_after
 ```
 
-`source_id` is a stable identifier; pass it to `DESCRIBE SOURCE` to see the source's full configuration.
+`source_id` is a stable identifier, matching the id shown by `SHOW SOURCES`.
 
 The `source_locations_*` counts are **per-connector-location**, *not* per bundle block. With `MIN BATCH` (the default for `SAVE AS AUTO`/`PARQUET`, threshold 1 GiB), small files get merged into fewer batch blocks at fetch time, so the actual block count after fetch can be smaller than these numbers. Treat them as an upper bound; use `VERBOSE` for per-location detail.
 
@@ -853,28 +853,26 @@ SELECT category, id, acme.my_sum(amount) OVER (PARTITION BY category ORDER BY id
 
 ### DROP FUNCTION
 
-Removes a function definition, or removes only the entrypoint for a specific platform.
+Removes a function definition.
 
 ```sql
-DROP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+DROP FUNCTION <namespace.name>
 ```
 
-**Examples:**
+**Example:**
 
 ```sql
--- Drop the entire function
 DROP FUNCTION acme.double_val
-
--- Drop function for a specific platform only
-DROP FUNCTION acme.double_val FOR PLATFORM 'linux/amd64'
 ```
+
+To drop only a specific platform's entry, use the Python API: `bundle.drop_function("acme.double_val", platform="linux/amd64")`.
 
 ### DROP TEMP FUNCTION
 
-Removes runtime-only function entries. Optionally filter by platform.
+Removes runtime-only function entries.
 
 ```sql
-DROP TEMP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+DROP TEMP FUNCTION <namespace.name>
 ```
 
 ### RENAME FUNCTION
@@ -1158,17 +1156,17 @@ See [Metadata](../guide/metadata.md) for details.
 Sets a runtime configuration value for the current session only (not persisted). Takes the highest priority, overriding all other config sources. Works on both read-only bundles and builders.
 
 ```sql
-SET CONFIG <key> = '<value>' [FOR '<scope>']
+SET CONFIG <key> = '<value>' FOR '<scope>'
 ```
 
 See [Configuration](../guide/configuration.md) for details.
 
 ### SAVE CONFIG
 
-Saves a configuration value to the bundle manifest, optionally scoped to a scope (URL prefix or alias name).
+Saves a configuration value to the bundle manifest, scoped to a scope (URL prefix or alias name).
 
 ```sql
-SAVE CONFIG <key> = '<value>' [FOR '<scope>']
+SAVE CONFIG <key> = '<value>' FOR '<scope>'
 ```
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
@@ -1269,7 +1267,7 @@ Shows the contents of a bundle metadata table. A shortcut for `SELECT * FROM bun
 SHOW <table>
 ```
 
-Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `SOURCES`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`.
+Available targets: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `SOURCES`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`, `COLUMNS`, `COUNT`, `REPORTS`, `ALWAYS DELETES`, `ALWAYS UPDATES`.
 
 **Examples:**
 

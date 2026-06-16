@@ -125,10 +125,11 @@ When reviewing code, check these items systematically:
 
 If PR adds or modifies operations:
 
-- [ ] **Three-phase pattern** - `check()`, `reconfigure()`, `apply_dataframe()` all implemented
-- [ ] **Validation in check()** - Errors caught before execution
-- [ ] **Schema updated in reconfigure()** - If operation changes schema
+- [ ] **Operation trait implemented** - `describe()`, `check()`, `apply()` (and `apply_dataframe()` if the operation transforms data)
+- [ ] **Validation in check()** - Errors caught before execution (`check(&self, bundle: &Bundle)`)
+- [ ] **State updated in apply()** - If operation changes bundle state/schema
 - [ ] **Streaming in apply_dataframe()** - Uses DataFusion, no collect()
+- [ ] **Registered in AnyOperation** - Added to the `define_any_operation!` macro in `operation.rs`
 
 **See:** [decisions/006-lazy-evaluation.md](decisions/006-lazy-evaluation.md)
 
@@ -188,8 +189,8 @@ If PR adds Python bindings:
 - [ ] New functionality has tests
 - [ ] Tests are in correct location:
   - Rust unit tests: Same file as code (`#[cfg(test)]`)
-  - Rust integration tests: `tests/` directory
-  - Python E2E tests: `python/tests/`
+  - Rust integration tests: `rust/bundlebase/tests/` (primary home for e2e coverage)
+  - Python E2E tests: `python/tests/` (binding-layer checks only)
 - [ ] Tests cover happy path (success case)
 - [ ] Tests cover error cases (invalid input, missing files, etc.)
 - [ ] Tests use sample data (not production data)
@@ -281,26 +282,25 @@ If PR modifies data processing:
 
 #### Compatibility
 
-- [ ] No breaking changes to public API (unless major version bump)
-- [ ] Deprecation warnings if removing functionality
-- [ ] Migration guide if breaking change necessary
+- [ ] The project is pre-launch: breaking changes are fine when improvements warrant them — do NOT keep methods purely for compatibility
+- [ ] Breaking changes should still be deliberate and noted in the PR description
 
 ---
 
 ### 6. Specific File Type Reviews
 
-#### Reviewing Operations (`bundle/operations/*.rs`)
+#### Reviewing Operations (`rust/bundlebase/src/bundle/operation/*.rs`)
 
 - [ ] Implements `Operation` trait fully
 - [ ] `check()` validates without executing
-- [ ] `reconfigure()` updates schema/state
+- [ ] `apply()` updates bundle state
 - [ ] `apply_dataframe()` uses streaming
-- [ ] Derives `Clone, Serialize, Deserialize` (for manifest support)
-- [ ] Has Rust test and Python E2E test
+- [ ] Derives `Debug, Clone, Serialize, Deserialize` (for manifest support)
+- [ ] Has Rust tests (Python E2E only if the binding surface changed)
 
 **Template:** [prompts/add-operation.md](prompts/add-operation.md)
 
-#### Reviewing Python Bindings (`python/bundlebase/src/*.rs`, `python/bundlebase/*.py`)
+#### Reviewing Python Bindings (`rust/bundlebase-python/src/*.rs`, `python/src/bundlebase/*.py`)
 
 - [ ] PyO3 wrapper returns `self.clone()` (Rust side)
 - [ ] Both `AsyncContainer` and `Container` updated (Python side)
@@ -366,10 +366,10 @@ return Err(format!("Failed to parse SQL expression '{}': {}", expr, e).into());
 **Swallowing errors:**
 ```rust
 // ❌ FLAG THIS
-let _ = operation.check(state);  // Ignores errors!
+let _ = operation.check(&bundle).await;  // Ignores errors!
 
 // ✅ SUGGEST THIS
-operation.check(state)?;
+operation.check(&bundle).await?;
 ```
 
 ---
@@ -602,7 +602,7 @@ The test names are descriptive and the assertions include helpful messages.
 1. ⚠️ No `collect()` calls on DataFrames
 2. ⚠️ No `.unwrap()` or `.expect()` calls
 3. ⚠️ No `mod.rs` files
-4. ⚠️ Operations implement three-phase pattern
+4. ⚠️ Operations implement the `Operation` trait pattern (check/apply/apply_dataframe)
 5. ⚠️ Python bindings return Arc clones
 6. ⚠️ Tests pass and cover new functionality
 
@@ -634,4 +634,4 @@ The test names are descriptive and the assertions include helpful messages.
 
 ---
 
-**Last Updated:** January 2026
+**Last Updated:** 2026-06-10

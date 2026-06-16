@@ -43,7 +43,7 @@ You have a quarterly sales export from your CRM: three CSVs with inconsistent co
         .normalize_column_names()          # fixes inconsistent casing, special chars
         .drop_column("ssn")
         .drop_column("email")
-        .filter("status = 'closed_won'")
+        .filter("SELECT * FROM bundle WHERE status = 'closed_won'")
         .set_name("Q1 2026 Sales -- Closed Won")
         .set_description("CRM export, PII removed, normalized column names"))
 
@@ -83,9 +83,12 @@ The data science team uses it like this:
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://company-data/sales-q1-2026
+    ```
+
     ```sql
-    OPEN 's3://company-data/sales-q1-2026';
-    SHOW STATUS;  -- name, description, version
+    SHOW DETAILS;  -- name, description, version
 
     SELECT region, SUM(amount) FROM bundle GROUP BY region;
     ```
@@ -201,8 +204,8 @@ In each session, the agent updates the bundle:
             "url": "https://api.example.com/reviews",
             "json_record_path": "data"
         })
-        .fetch("base", "add")
         .set_description("Product reviews from example.com API"))
+    bundle.fetch("base", "add")
 
     bundle.commit(f"Fetched batch {batch_id} -- {new_rows} new reviews")
     ```
@@ -210,9 +213,10 @@ In each session, the agent updates the bundle:
 === "SQL"
 
     ```sql
-    OPEN 's3://agent-workspace/product-reviews';
-    CREATE SOURCE http 'https://api.example.com/reviews'
-      json_record_path=data;
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/reviews',
+        json_record_path = 'data'
+    );
     FETCH base ADD;
     COMMIT 'Fetched batch 3 -- 2,840 new reviews';
     ```
@@ -228,7 +232,7 @@ At the start of the next session, the agent reconstructs its context from the bu
 
     # What do I have?
     print(bundle.name)           # "Product Reviews"
-    print(bundle.num_rows)       # 14,302
+    print(bundle.num_rows())     # 14302
     print(bundle.schema)         # column names and types
 
     # What happened last time?
@@ -247,8 +251,7 @@ At the start of the next session, the agent reconstructs its context from the bu
 === "SQL"
 
     ```sql
-    OPEN 's3://agent-workspace/product-reviews';
-    SHOW STATUS;   -- name, rows, schema, version
+    SHOW DETAILS;   -- name, version, row count
     SHOW HISTORY;
 
     -- v1: Initial fetch -- 1,240 reviews
@@ -278,7 +281,7 @@ Three specific things this enables:
 
 - **Source provenance without a catalog.** The manifest stores the exact source URL and content hash for every attached file. The agent doesn't need an external system to answer "where did this come from."
 - **Machine-readable changelog.** `bundle.history()` returns structured entries. The agent can check whether data has changed since the last session without re-downloading anything.
-- **Structural metadata without a full scan.** `bundle.num_rows` and `bundle.schema` are cheap property reads, so the agent can understand what it has before deciding whether to query.
+- **Structural metadata without a full scan.** `bundle.num_rows()` and `bundle.schema` are cheap reads, so the agent can understand what it has before deciding whether to query.
 
 ### Session flow
 
@@ -349,9 +352,9 @@ Your data source is dirty and it stays dirty. Every time you pull a new export, 
     bundle = bb.create("s3://analytics/crm-pipeline")
 
     # Define cleanup rules once -- they fire automatically on every future attach
-    bundle.always_delete("WHERE status = 'test'")
-    bundle.always_delete("WHERE amount < 0")          # credits tracked separately
-    bundle.always_delete("WHERE email IS NULL")
+    bundle.always_delete("status = 'test'")
+    bundle.always_delete("amount < 0")          # credits tracked separately
+    bundle.always_delete("email IS NULL")
 
     # Attach the first month's dirty export -- rules apply automatically
     bundle.attach("s3://crm-exports/jan.csv")
@@ -366,9 +369,9 @@ Your data source is dirty and it stays dirty. Every time you pull a new export, 
 === "SQL"
 
     ```sql
-    ALWAYS DELETE WHERE status = 'test';
-    ALWAYS DELETE WHERE amount < 0;
-    ALWAYS DELETE WHERE email IS NULL;
+    ALWAYS DELETE FROM bundle WHERE status = 'test';
+    ALWAYS DELETE FROM bundle WHERE amount < 0;
+    ALWAYS DELETE FROM bundle WHERE email IS NULL;
 
     ATTACH 's3://crm-exports/jan.csv';
     COMMIT 'January -- rules applied automatically';
@@ -389,14 +392,14 @@ A cleanup script lives outside the data. It has to be run, remembered, and passe
     ```python
     # always_update: transform a column value on every future attach
     bundle.always_update("SET region = 'EMEA' WHERE region = 'Europe'")
-    bundle.always_update("SET amount = ROUND(amount, 2)")
+    bundle.always_update("SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL")
     ```
 
 === "SQL"
 
     ```sql
-    ALWAYS UPDATE SET region = 'EMEA' WHERE region = 'Europe';
-    ALWAYS UPDATE SET amount = ROUND(amount, 2);
+    ALWAYS UPDATE bundle SET region = 'EMEA' WHERE region = 'Europe';
+    ALWAYS UPDATE bundle SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL;
     ```
 
 ---
@@ -461,22 +464,21 @@ Write a connector in Python, Go, Java, or any IPC-compatible language to attach 
     ```python
     import bundlebase.sync as bb
 
-    bundle = bb.open("s3://analytics/crm-export")
+    bundle = bb.open("s3://analytics/crm-export").extend()
 
     # Register a Python connector (session-only)
     bundle.import_temp_connector('acme.salesforce', 'python::salesforce_connector:SalesforceSource')
 
     # Use it exactly like any built-in source
-    bundle.extend().attach('acme.salesforce://opportunities?stage=closed_won')
+    bundle.create_source('acme.salesforce', {'object': 'opportunities', 'stage': 'closed_won'})
     bundle.commit("Q1 opportunities from Salesforce")
     ```
 
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/crm-export';
-    IMPORT TEMP CONNECTOR 'acme.salesforce' FROM 'python::salesforce_connector:SalesforceSource';
-    ATTACH 'acme.salesforce://opportunities?stage=closed_won';
+    IMPORT TEMP CONNECTOR acme.salesforce FROM 'python::salesforce_connector:SalesforceSource';
+    CREATE SOURCE USING acme.salesforce WITH (object = 'opportunities', stage = 'closed_won');
     COMMIT 'Q1 opportunities from Salesforce';
     ```
 
@@ -505,8 +507,7 @@ Register Python callables as scalar or aggregate UDFs and call them from any SQL
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/crm-export';
-    IMPORT TEMP FUNCTION 'acme.risk_score' FROM 'python::risk_model:score';
+    IMPORT TEMP FUNCTION acme.risk_score FROM 'python::risk_model:score';
     SELECT id, amount, acme.risk_score(revenue, churn_prob) AS risk FROM bundle;
     ```
 

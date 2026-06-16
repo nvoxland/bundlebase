@@ -4,76 +4,77 @@ This document defines project-specific terminology used throughout the Bundlebas
 
 ## Core Concepts
 
-### Bundle (Trait)
+### BundleFacade (Trait)
 
-**Definition**: The common interface shared by all container types in Bundlebase.
+**Definition**: The common read/query interface shared by both bundle types.
 
-**Usage**: Defines methods for schema introspection, querying, and data conversion that work across both mutable and immutable containers.
+**Usage**: Defines methods for schema introspection (`schema()`, `bundle_schema()`), querying (`query()`, `dataframe()`, `num_rows()`), metadata, views, reports, and export. Catalog schema providers and the CLI work against `dyn BundleFacade`.
 
-**Implemented By**: `Bundlebase` (read-only) and `BundlebaseBuilder` (mutable)
+**Implemented By**: `Bundle` (committed) and `BundleBuilder` (working copy)
 
-**Location**: `rust/bundlebase/src/bundle.rs`
+**Location**: `rust/bundlebase/src/bundle/facade.rs`
 
 **See Also**: [architecture.md](architecture.md)
 
-### Bundlebase (Read-Only Container)
+### Bundle (Committed Bundle)
 
-**Definition**: An immutable container representing a committed snapshot of data.
+**Definition**: A bundle loaded from persistent storage, representing committed state.
 
 **Characteristics**:
 - Loaded from versioned manifests in `{data_dir}/_bundlebase/`
-- Cannot be modified directly
-- Thread-safe due to immutability
+- Uses interior mutability: all mutable state lives in `Arc<RwLock<T>>` fields, so it is thread-safe and `Arc`-shareable
+- State changes only happen through the `pub(crate)` `apply_operation()` path — external code cannot record operations on a bare `Bundle`
+- `Clone` shares Arc state: mutations in one clone are visible in all clones
 - Can be extended via `extend(new_data_dir)` to create a `BundleBuilder`
 
-**Python Type**: `Bundle` (read-only wrapper)
+**Python Type**: `PyBundle` (read/query wrapper)
 
 **Usage Example**:
 ```python
-# Load committed container
-c = await bundlebase.open("/path/to/container")
-df = await c.to_pandas()  # Can read, cannot modify
+# Load committed bundle
+c = await bundlebase.open("/path/to/bundle")
+df = await c.to_pandas()  # Can read, cannot record operations
 ```
 
 **See Also**: [architecture.md](architecture.md)
 
-### BundleBuilder (Mutable Container)
+### BundleBuilder (Working Copy)
 
-**Definition**: A mutable container for building and transforming data.
+**Definition**: A working copy of a bundle for building and transforming data, with uncommitted-change tracking.
 
 **Characteristics**:
-- Wraps a `Bundlebase` with a working directory
-- Tracks new operations applied since the base container
-- All modification methods mutate in-place and return `&mut self`
-- Can be committed via `commit(message)` to create a versioned snapshot
+- Wraps an `Arc<Bundle>` plus change tracking (`in_progress_change`, uncommitted `status`, pending deletes/updates)
+- Modification methods take `&self` and return `Result<&Self, BundlebaseError>` (interior mutability) — chainable with `?`
+- Convenience methods (`attach()`, `filter()`, ...) live on the `BundleBuilderExt` trait in `rust/bundlebase-command/src/builder_ext.rs`
+- Can be committed via `commit(message)` to create a versioned snapshot; `reset()`/`undo()` discard or roll back uncommitted changes
 
-**Methods**: `attach()`, `drop_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `import_function()`, `commit()`
+**Methods**: `attach()`, `drop_column()`, `rename_column()`, `cast_column()`, `filter()`, `join()`, `import_function()`, `create_view()`, `commit()`, ...
 
-**Python Type**: `BundleBuilder` (mutable wrapper)
+**Python Type**: `PyBundleBuilder` (mutation wrapper)
 
 **Usage Example**:
 ```python
-# Create mutable container
-c = await bundlebase.create("/path/to/container")
-c = c.attach("data.parquet").filter("age >= 18")  # Chainable mutations
+# Create working copy
+c = await bundlebase.create("/path/to/bundle") \
+    .attach("data.parquet") \
+    .filter("age >= 18")  # Chainable mutations
 await c.commit("Filtered adults")
 ```
 
 **See Also**: [architecture.md](architecture.md), [python-api.md](python-api.md)
 
-### BundleState
+### BundleSchema
 
-**Definition**: Shared internal state used by both `Bundlebase` and `BundleBuilder`.
+**Definition**: The schema-tracking structure threaded through the operation pipeline.
 
 **Contains**:
-- Arrow `SchemaRef` (schema definition)
-- Metadata (name, description)
-- Row count tracking
-- SessionContext for DataFusion
-- Function entries (user-defined SQL functions)
-- Adapter factory
+- `ColumnId → user-visible name` map (including computed columns)
+- The physical schema and per-column block locations
+- Helpers: `translate_sql()` (user names → `col_<id>`), `rename_to_real_names()` (final rename), `internal_name()`, `column_id()`
 
-**Sharing**: Uses `Arc` for efficient cloning - all clones share the same state
+**Usage**: Each operation's `apply_dataframe()` receives `&mut BundleSchema`; metadata-only operations (e.g. `RenameColumnOp`) just update the map.
+
+**Location**: `rust/bundlebase/src/bundle/bundle_schema.rs`
 
 **See Also**: [architecture.md](architecture.md)
 
@@ -81,26 +82,23 @@ await c.commit("Filtered adults")
 
 ### Operation
 
-**Definition**: A recorded transformation step in the data pipeline.
+**Definition**: A recorded transformation step in the data pipeline. The full set (~39 ops) is declared in the `define_any_operation!` macro in `rust/bundlebase/src/bundle/operation.rs`.
 
-**Types**:
-- **AttachBlock**: Add data from sources (union operation)
-- **RemoveColumns**: Filter out columns
-- **RenameColumn**: Rename columns
-- **Filter**: Filter rows based on SQL predicates
-- **Select**: Select specific columns or execute SQL
-- **Join**: Join with other data sources
-- **Query**: Execute custom SQL queries
-- **ImportFunction**: Register custom data generation functions
-- **SetName**: Set container name
-- **SetDescription**: Set container description
-- **IndexData**: Track row indexing metadata
+**Representative Types**:
+- **AttachBlock / DetachBlock / ReplaceBlock**: Add, remove, or replace data blocks (attach unions rows)
+- **AddColumn / DropColumn / RenameColumn / CastColumn**: Column manipulation
+- **Filter**: Apply a stored SELECT against the current DataFrame
+- **CreateJoin**: Join with other data sources
+- **Delete / UpdateData / AlwaysDelete / AlwaysUpdate**: Row-level changes and persistent rules
+- **ImportFunction / ImportConnector / CreateSource**: Functions, connectors, sources
+- **CreateView / CreateIndex / CreateReport**: Views, indexes, reports
+- **SetName / SetDescription**: Bundle metadata
 
 **Lifecycle**:
-1. **Recorded** when operation method is called
-2. **Validated** immediately via `check()`
-3. **Applied to schema** immediately via `reconfigure()`
-4. **Executed on DataFrame** lazily during query via `apply_dataframe()`
+1. **Validated** immediately via `check(&Bundle)` (fail fast)
+2. **Bundle side effects** applied immediately via `apply(&Bundle)` (interior mutability; no-op for many ops)
+3. **Recorded** onto `Bundle::operations`; the cached DataFrame is invalidated
+4. **Executed on DataFrame** lazily during rebuild via `apply_dataframe(df, ctx, &mut BundleSchema)`
 
 **See Also**: [architecture.md](architecture.md)
 
@@ -119,15 +117,17 @@ df = await c.to_pandas()     # NOW both operations EXECUTE
 
 **See Also**: [ai-rules.md](ai-rules.md)
 
-### Adapter
+### Reader Plugin
 
-**Definition**: Plugin component that handles loading data from specific source types.
+**Definition**: Plugin component (`ReaderPlugin` trait) that handles loading data from specific source formats. Sometimes called an "adapter" in older docs.
 
-**Built-in Adapters**:
-- **CsvPlugin**: CSV file support
-- **JsonPlugin**: Line-delimited JSON support
+**Built-in Plugins**:
+- **CsvPlugin / TsvPlugin**: CSV/TSV file support (all columns import as Utf8)
+- **JsonlPlugin**: Line-delimited JSON support
 - **ParquetPlugin**: Apache Parquet support
-**Location**: `rust/bundlebase/src/data/`
+- **BundlebasePlugin**: References other committed bundles via `bundle://` URLs
+
+**Location**: `rust/bundlebase-data/src/plugin/` (BundlebasePlugin: `rust/bundlebase/src/data/plugin/`)
 
 **See Also**: [architecture.md](architecture.md)
 
@@ -245,17 +245,15 @@ pub struct BTreeIndex {
 
 ### RowId
 
-**Definition**: Unique identifier for a row combining block ID and offset.
+**Definition**: Unique identifier for a row, packing a compact block reference and a row number into a single `u64`.
 
 **Structure**:
 ```rust
-pub struct RowId {
-    block_id: ObjectId,  // Identifies data block
-    offset: u64,         // Offset within block (0-based)
-}
+// rust/bundlebase-common/src/row_id.rs
+pub struct RowId(u64); // RowId::new(block_ref: ObjectIdAlias, row_number: u32)
 ```
 
-**Usage**: Internal tracking for row identification across blocks
+**Usage**: Internal tracking for row identification across blocks (indexes, tombstones, update overlays)
 
 **See Also**: [indexing.md](indexing.md)
 
@@ -349,8 +347,8 @@ container/
 **Definition**: Python wrapper classes that expose Rust container types via PyO3.
 
 **Mapping**:
-- `PyBundle` (Python) → `Bundlebase` (Rust read-only)
-- `PyBundleBuilder` (Python) → `BundlebaseBuilder` (Rust mutable)
+- `PyBundle` (Python) → `Bundle` (Rust, committed)
+- `PyBundleBuilder` (Python) → `BundleBuilder` (Rust, working copy)
 
 **Location**: `rust/bundlebase-python/src/`
 
@@ -448,7 +446,7 @@ for batch in batches {
 
 **Definition**: Apache Arrow-based SQL query engine used by Bundlebase for query execution.
 
-**Version**: v51
+**Version**: v53 (see workspace `Cargo.toml` for current)
 
 **Usage**: Provides SQL parsing, query planning, optimization, and streaming execution
 
@@ -464,7 +462,7 @@ for batch in batches {
 
 **Definition**: Language-independent columnar memory format used for data representation.
 
-**Version**: v57
+**Version**: v58 (see workspace `Cargo.toml` for current)
 
 **Key Concepts**:
 - **RecordBatch**: Collection of columnar arrays (rows)
@@ -483,7 +481,7 @@ for batch in batches {
 
 **Definition**: Rust bindings for Python - enables calling Rust from Python.
 
-**Version**: v0.23
+**Version**: v0.28 (see `rust/bundlebase-python/Cargo.toml` for current)
 
 **Usage in Bundlebase**: Wraps Rust containers as Python classes with async methods
 

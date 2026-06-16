@@ -12,36 +12,30 @@ Step-by-step guides for common development tasks in the Bundlebase project. Foll
 1. Identify the appropriate module or create a new one
 2. Implement the feature in pure Rust (no PyO3 code)
 3. Ensure proper error handling using `?` operator (no `.unwrap()`)
-4. Return `&mut Self` for mutable operations (enables chaining)
+4. Modification methods take `&self` and return `Result<&Self>` (interior mutability, enables chaining)
 5. Use `execute_stream()` for any DataFrame operations (never `collect()`)
 
-**Example** (adding a new transformation):
+**Example** (adding a new transformation — see [prompts/add-operation.md](prompts/add-operation.md) for the full operation workflow):
 ```rust
-// rust/bundlebase/src/bundle.rs
-impl BundleBuilder {
-    pub fn deduplicate(&mut self, columns: Vec<String>) -> Result<&mut Self> {
-        // Validate columns exist
-        for col in &columns {
-            if !self.schema().column_with_name(col).is_some() {
-                return Err(format!("Column not found: {}", col).into());
-            }
-        }
+// 1. New op in rust/bundlebase/src/bundle/operation/deduplicate.rs
+//    implementing the Operation trait (check / apply / apply_dataframe),
+//    registered via define_any_operation! in operation.rs.
 
-        // Record operation (lazy evaluation)
-        self.operations.push(Operation::Deduplicate(columns));
-
-        // Update state if needed
-        // Schema unchanged, row count may decrease
-
-        Ok(self)
-    }
+// 2. Convenience method on the BundleBuilderExt trait
+//    (rust/bundlebase-command/src/builder_ext.rs):
+async fn deduplicate(&self, columns: Vec<String>) -> Result<&Self, BundlebaseError> {
+    // Runs the command through run_command() for change tracking;
+    // the command's execute() validates input and calls
+    // builder.apply_operation(DeduplicateOp::setup(...).into())
+    exec_cmd(self, DeduplicateCommand::new(columns)).await?;
+    Ok(self)
 }
 ```
 
 **Checklist**:
 - [ ] No `.unwrap()` calls (enforced by compiler)
 - [ ] Proper error handling with `?`
-- [ ] Mutable operations return `&mut Self`
+- [ ] Modification methods are `&self -> Result<&Self>` and routed through change tracking
 - [ ] No PyO3 imports in core Rust code
 - [ ] Streaming execution if DataFrame operations involved
 
@@ -65,15 +59,14 @@ async fn test_deduplicate_removes_duplicates() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let path = temp_dir.path().to_str().unwrap();
 
-    let mut container = BundlebaseBuilder::create(path).await?;
-    container.attach("test_data/with_dupes.parquet").await?;
+    let builder = BundleBuilder::create(path, None).await?;
+    builder.attach("test_data/with_dupes.parquet", None).await?;
 
     // Apply deduplication
-    container.deduplicate(vec!["id".to_string()]).await?;
+    builder.deduplicate(vec!["id".to_string()]).await?;
 
     // Verify results
-    let stream = container.execute_stream().await?;
-    // Check row count decreased...
+    assert_eq!(builder.num_rows().await?, expected_count);
 
     Ok(())
 }
@@ -95,32 +88,33 @@ cargo test deduplicate
 **Location**: `rust/bundlebase-python/src/`
 
 **Process**:
-1. Add `#[pymethod]` wrapper in appropriate PyClass
-2. Convert Rust types to Python types
-3. Handle errors with `.map_err()` to convert to PyErr
+1. Add `#[pymethods]` wrapper in the appropriate PyClass
+2. Clone the inner `Arc`-shared builder, then await the Rust call inside `pyo3_async_runtimes::tokio::future_into_py`
+3. Convert errors to Python exceptions
 4. Make method async for consistency
-5. Return `Self` (not `&mut Self`) to satisfy Python's ownership model
 
-**Example**:
+**Example** (pattern from `rust/bundlebase-python/src/builder.rs`):
 ```rust
-// rust/bundlebase-python/src/bundle.rs
 #[pymethods]
 impl PyBundleBuilder {
-    fn deduplicate(&mut self, columns: Vec<String>) -> PyResult<Self> {
-        self.inner
-            .deduplicate(columns)
-            .map_err(|e| PyErr::new::<PyRuntimeError, _>(format!("Deduplicate error: {}", e)))?;
-
-        // Return cloned self for Python chaining
-        Ok(self.clone())
+    fn deduplicate<'py>(
+        slf: PyRef<'_, Self>,
+        columns: Vec<String>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone(); // Arc-shared builder
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner.deduplicate(columns).await.map_err(to_py_err)?;
+            Ok(())
+        })
     }
 }
 ```
 
 **Checklist**:
 - [ ] PyO3 code only in `bundlebase-python/` crate
-- [ ] Proper error conversion with `.map_err()`
-- [ ] Method returns Self for Python chaining
+- [ ] Proper error conversion to Python exceptions
+- [ ] Inner builder cloned (Arc) before the async block — no references across await
 - [ ] Consistent async/await pattern
 
 ### Step 4: Register in Python Layer
@@ -128,27 +122,29 @@ impl PyBundleBuilder {
 **Location**: `python/src/bundlebase/__init__.py`
 
 **Process**:
-1. Register async method on both `Bundle` and `BundleBuilder` classes
-2. Register sync wrapper for `bundlebase.sync` module
+1. Add the PyO3 method to the `_original_methods` dict
+2. If it mutates the bundle and returns the builder, add it to the `mutation_methods` list so it's wrapped to return an `OperationChain`
 3. Ensure method name matches Rust `#[pyo3(name = "...")]` attribute
 
 **Example**:
 ```python
 # python/src/bundlebase/__init__.py
 
-# Register on both classes
-for cls in [Bundle, BundleBuilder]:
-    # Async method
-    register_async_method(cls, 'deduplicate', 'deduplicate')
+_original_methods = {
+    ...
+    "deduplicate": _PyBundleBuilder.deduplicate,
+}
 
-    # Sync wrapper
-    register_sync_method(cls, 'deduplicate', 'deduplicate')
+mutation_methods = [
+    "attach", "drop_column", ...,
+    "deduplicate",
+]
 ```
 
 **Checklist**:
-- [ ] Method registered for async API
-- [ ] Method registered for sync API
-- [ ] Registration on both Bundle and BundleBuilder if applicable
+- [ ] Method added to `_original_methods`
+- [ ] Mutation methods added to `mutation_methods` (enables chaining + sync API)
+- [ ] Read-only methods that exist on both PyBundle and PyBundleBuilder are handled separately (see comments in `__init__.py`)
 
 ### Step 5: Write Python E2E Tests
 
@@ -270,14 +266,14 @@ poetry run pytest -k deduplicate
 
 **All tests**:
 ```bash
-# Rust tests
-cargo test
+# Rust tests (use the test profile — see CLAUDE.md build guidance)
+cargo test --profile test
 
 # Python tests
-poetry run pytest
+poetry run pytest python/tests/
 
 # Both
-cargo test && poetry run pytest
+cargo test --profile test && poetry run pytest python/tests/
 ```
 
 **Specific test**:

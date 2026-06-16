@@ -8,8 +8,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bundlebase-sdk = "0.7"
-arrow = "57"
+bundlebase-sdk = { git = "https://github.com/nvoxland/bundlebase" }
+arrow = "58"
 ```
 
 ## Quick Start
@@ -33,6 +33,7 @@ impl Connector for ExampleConnector {
             must_copy: true,
             format: "parquet".into(),
             version: "v1".into(),
+            num_rows: None,
         }])
     }
 
@@ -58,7 +59,7 @@ Build and use with:
 
 ```python
 bundle.import_connector('example.connector', 'ipc::./target/release/example-connector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ## API Reference
@@ -190,12 +191,14 @@ impl Connector for DatabaseSource {
                 must_copy: true,
                 format: "parquet".into(),
                 version: "v2".into(),
+                num_rows: None,
             },
             Location {
                 location: "orders.parquet".into(),
                 must_copy: true,
                 format: "parquet".into(),
                 version: "v1".into(),
+                num_rows: None,
             },
         ])
     }
@@ -344,8 +347,8 @@ Add `crate-type = ["cdylib"]` to your `Cargo.toml`:
 crate-type = ["cdylib"]
 
 [dependencies]
-bundlebase-sdk = "0.7"
-arrow = "57"
+bundlebase-sdk = { git = "https://github.com/nvoxland/bundlebase" }
+arrow = "58"
 serde_json = "1"
 ```
 
@@ -385,7 +388,7 @@ cargo build --release
 
 ```python
 bundle.import_connector('example.connector', 'ffi::target/release/libexample_connector.so')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ### How It Works

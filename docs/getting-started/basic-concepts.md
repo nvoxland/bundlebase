@@ -23,9 +23,9 @@ The key property is that **the data carries its own context**. A bundle knows it
     # Define what the data is and how it's shaped
     bundle = (bb.create("s3://my-bucket/my-bundle")
         .attach("data.parquet")
-        .filter("age >= 18")
-        .drop_column("ssn")
-        .commit("Adults only, PII removed"))
+        .filter("SELECT * FROM bundle WHERE age >= 18")
+        .drop_column("ssn"))
+    bundle.commit("Adults only, PII removed")
 
     # Anyone opens it the same way
     bundle = bb.open("s3://my-bucket/my-bundle")
@@ -34,16 +34,20 @@ The key property is that **the data carries its own context**. A bundle knows it
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://my-bucket/my-bundle --create
+    ```
+
     ```sql
-    CREATE 's3://my-bucket/my-bundle';
     ATTACH 'data.parquet';
     FILTER WITH SELECT * FROM bundle WHERE age >= 18;
     DROP COLUMN ssn;
     COMMIT 'Adults only, PII removed';
+    ```
 
-    -- Anyone opens it the same way
-    OPEN 's3://my-bucket/my-bundle';
-    SELECT * FROM bundle;
+    ```bash
+    # Anyone opens it the same way
+    bundlebase query --bundle s3://my-bucket/my-bundle "SELECT * FROM bundle"
     ```
 
 !!! tip "If you know Docker"
@@ -67,7 +71,7 @@ The key property is that **the data carries its own context**. A bundle knows it
 
     # extend() -> mutable copy, ready to modify
     bundle = bundle.extend()
-    bundle.filter("active = true")
+    bundle.filter("SELECT * FROM bundle WHERE active = true")
     bundle.commit("Active users only")
 
     # create() -> new mutable bundle
@@ -78,21 +82,23 @@ The key property is that **the data carries its own context**. A bundle knows it
 
 === "SQL"
 
+    ```bash
+    # --read-only -> queries and inspection only
+    bundlebase repl --bundle s3://my-bucket/my-bundle --read-only
+
+    # without --read-only -> mutating commands allowed
+    bundlebase repl --bundle s3://my-bucket/my-bundle
+
+    # --create -> new mutable bundle
+    bundlebase repl --bundle s3://my-bucket/new-bundle --create
+    ```
+
     ```sql
-    -- OPEN -> read-only
-    OPEN 's3://my-bucket/my-bundle';
     SELECT * FROM bundle;    -- query: yes
     SHOW STATUS;             -- inspect: yes
 
-    -- EXTEND -> mutable, ready to modify
-    EXTEND;
     FILTER WITH SELECT * FROM bundle WHERE active = true;
     COMMIT 'Active users only';
-
-    -- CREATE -> new mutable bundle
-    CREATE 's3://my-bucket/new-bundle';
-    ATTACH 'data.parquet';
-    COMMIT 'Initial load';
     ```
 
 ## Lazy evaluation
@@ -105,17 +111,16 @@ Operations are **recorded** when you write them, but not **executed** until you 
     import bundlebase.sync as bb
 
     bundle = bb.create("s3://my-bucket/my-bundle")
-    bundle.attach("data.parquet")   # recorded
-    bundle.filter("age >= 18")      # recorded
-    bundle.drop_column("ssn")       # recorded
+    bundle.attach("data.parquet")                              # recorded
+    bundle.filter("SELECT * FROM bundle WHERE age >= 18")      # recorded
+    bundle.drop_column("ssn")                                  # recorded
 
-    df = bundle.to_pandas()         # pipeline executes here
+    df = bundle.to_pandas()                                    # pipeline executes here
     ```
 
 === "SQL"
 
     ```sql
-    CREATE 's3://my-bucket/my-bundle';
     ATTACH 'data.parquet';                             -- recorded
     FILTER WITH SELECT * FROM bundle WHERE age >= 18;  -- recorded
     DROP COLUMN ssn;                                   -- recorded
@@ -161,10 +166,10 @@ There are two ways to bring data into a bundle: **attach** and **source**.
 
     ```python
     # Define once -- watch this S3 prefix for Parquet files
-    bundle.create_source("monthly_reports", {"url": "s3://exports/reports/", "patterns": "**/*.parquet"})
+    bundle.create_source("remote_dir", {"url": "s3://exports/reports/", "patterns": "**/*.parquet"})
 
     # Each month: fetch picks up only the new files
-    bundle.fetch("monthly_reports")
+    bundle.fetch()
     bundle.commit("Added new monthly reports")
     ```
 
@@ -172,10 +177,10 @@ There are two ways to bring data into a bundle: **attach** and **source**.
 
     ```sql
     -- Define once
-    CREATE SOURCE FOR monthly_reports USING s3_connector WITH (url = 's3://exports/reports/', patterns = '**/*.parquet');
+    CREATE SOURCE USING remote_dir WITH (url = 's3://exports/reports/', patterns = '**/*.parquet');
 
     -- Each month: fetch picks up only the new files
-    FETCH monthly_reports ADD;
+    FETCH base ADD;
     COMMIT 'Added new monthly reports';
     ```
 
@@ -209,16 +214,13 @@ Every `commit` saves a named snapshot. The full history is stored in the bundle 
 === "SQL"
 
     ```sql
-    CREATE 's3://my-bucket/sales';
     ATTACH 'jan.csv';
     COMMIT 'January data';
 
-    EXTEND;
     ATTACH 'feb.csv';
     COMMIT 'Added February';
 
     -- View the history
-    OPEN 's3://my-bucket/sales';
     SHOW HISTORY;
     ```
 
@@ -229,7 +231,7 @@ Indexes enable fast lookups on specific columns without scanning the full datase
 === "Python"
 
     ```python
-    bundle.create_index("email")
+    bundle.create_index("email", "btree")
 
     # Queries on email now use the index
     result = bundle.query("SELECT * FROM bundle WHERE email = 'user@example.com'")
@@ -238,7 +240,7 @@ Indexes enable fast lookups on specific columns without scanning the full datase
 === "SQL"
 
     ```sql
-    CREATE INDEX email;
+    CREATE BTREE INDEX ON email;
 
     -- Queries on email now use the index
     SELECT * FROM bundle WHERE email = 'user@example.com';

@@ -34,8 +34,8 @@ if __name__ == "__main__":
 Use with:
 
 ```python
-b.import_temp_connector('example.connector', 'ipc::example_connector.py')
-b.create_source('example.connector')
+b.import_temp_connector('example.connector', 'ipc::python example_connector.py')
+b.create_source('example.connector', {})
 ```
 
 ## API Reference
@@ -143,21 +143,19 @@ class MyConnector(Connector):
         return {"name": "Utf8", "age": "Int32", "score": "Float64", "active": "Boolean"}
 ```
 
-Supported type strings:
+Supported type strings (exact match, no aliases):
 
-| Type String | Arrow Type | Aliases |
-|------------|------------|---------|
-| `Utf8` | `pa.string()` | `string` |
-| `Int64` | `pa.int64()` | `int` |
-| `Int8`, `Int16`, `Int32` | `pa.int8()`, etc. | |
-| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `pa.uint8()`, etc. | |
-| `Float64` | `pa.float64()` | `float`, `double` |
-| `Float16`, `Float32` | `pa.float16()`, etc. | |
-| `Boolean` | `pa.bool_()` | `bool` |
-| `Date32` | `pa.date32()` | `date` |
-| `Date64` | `pa.date64()` | |
-| `Timestamp` | `pa.timestamp("us")` | |
-| `Binary` | `pa.binary()` | `bytes` |
+| Type String | Arrow Type |
+|------------|------------|
+| `Utf8`, `LargeUtf8` | `pa.string()`, `pa.large_string()` |
+| `Int8`, `Int16`, `Int32`, `Int64` | `pa.int8()`, etc. |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `pa.uint8()`, etc. |
+| `Float16`, `Float32`, `Float64` | `pa.float16()`, etc. |
+| `Boolean` | `pa.bool_()` |
+| `Date32` | `pa.date32()` |
+| `Date64` | `pa.date64()` |
+| `Timestamp` | `pa.timestamp("us")` |
+| `Binary`, `LargeBinary` | `pa.binary()`, `pa.large_binary()` |
 
 ### Returning Column-Oriented Dicts
 
@@ -329,7 +327,7 @@ from example_connector import ExampleConnector
 
 bundle = bb.create("my/data")
 bundle.import_temp_connector('example.connector', 'python::example_connector:ExampleConnector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 bundle.fetch("base", "add")
 ```
 
@@ -338,7 +336,7 @@ The same `Connector` class works for both native and IPC mode; no code changes n
 | Mode | Registration | Data Transfer |
 |------|-------------|---------------|
 | **Native** | `import_temp_connector(..., 'python::module:Class')` | Zero-copy via PyO3 |
-| **IPC** | `import_temp_connector(..., 'ipc::script.py')` | Serialized Arrow IPC over pipes |
+| **IPC** | `import_temp_connector(..., 'ipc::python script.py')` | Serialized Arrow IPC over pipes |
 
 ### Extra Arguments
 

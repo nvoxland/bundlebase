@@ -33,8 +33,11 @@ Use **`create_source` + `fetch`** when you want a bundle to stay in sync with a 
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://my-bucket/api-data --create
+    ```
+
     ```sql
-    CREATE 's3://my-bucket/api-data';
     CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.example.com/v2/records',
         format = 'json',
@@ -105,10 +108,9 @@ Use **`create_source` + `fetch`** when you want a bundle to stay in sync with a 
 === "Python"
 
     ```python
-    bundle.create_source("sftp_directory", {
-        "url": "sftp://vendor.example.com/outbound/",
+    bundle.create_source("remote_dir", {
+        "url": "sftp://pipeline-user@vendor.example.com/outbound/",
         "patterns": "sales_*.csv",
-        "username": "pipeline-user",
         "key_path": "/etc/keys/vendor_rsa"
     })
     bundle.fetch("base", "add")
@@ -117,10 +119,9 @@ Use **`create_source` + `fetch`** when you want a bundle to stay in sync with a 
 === "SQL"
 
     ```sql
-    CREATE SOURCE FOR base USING sftp_directory WITH (
-        url = 'sftp://vendor.example.com/outbound/',
+    CREATE SOURCE FOR base USING remote_dir WITH (
+        url = 'sftp://pipeline-user@vendor.example.com/outbound/',
         patterns = 'sales_*.csv',
-        username = 'pipeline-user',
         key_path = '/etc/keys/vendor_rsa'
     );
     FETCH base ADD;
@@ -157,25 +158,18 @@ Use **`create_source` + `fetch`** when you want a bundle to stay in sync with a 
     FETCH snapshot SYNC;
     ```
 
-Preview what a fetch would do before running it:
+Preview what a fetch would do before running it (SQL only -- the Python `fetch()` does not support dry runs yet):
 
-=== "Python"
-
-    ```python
-    # Dry run — shows what would change without modifying anything
-    bundle.fetch("base", "add", dry_run=True)
-    ```
-
-=== "SQL"
-
-    ```sql
-    FETCH base ADD DRY RUN;
-    FETCH ALL SYNC DRY RUN;
-    ```
+```sql
+FETCH base ADD DRY RUN;
+FETCH ALL SYNC DRY RUN;
+```
 
 ---
 
-## Multiple named sources
+## Multiple sources
+
+A source belongs to a pack: either the base pack or a joined pack (created with `join`). Sources on the same pack union together; a join gets its own pack with its own sources.
 
 === "Python"
 
@@ -184,59 +178,54 @@ Preview what a fetch would do before running it:
 
     bundle = bb.create("s3://analytics/pipeline")
 
-    # Primary event data from S3
+    # Primary event data from S3 (base pack)
     bundle.create_source("remote_dir", {
         "url": "s3://raw-data/events/",
         "patterns": "**/*.parquet"
-    })   # defaults to name="base"
+    })
 
-    # Reference taxonomy from internal API
+    # Vendor supplement from SFTP unions into the same base pack
+    bundle.create_source("remote_dir", {
+        "url": "sftp://pipeline-user@vendor.example.com/outbound/",
+        "patterns": "*.csv",
+        "key_path": "/etc/keys/vendor_rsa"
+    })
+
+    # Reference taxonomy joins as its own pack
+    bundle.join("ref", on="bundle.event_type_id = ref.id")
     bundle.create_source("http", {
         "url": "https://api.internal/taxonomy",
         "format": "json",
         "json_record_path": "types"
-    }, name="ref")
-
-    # Vendor supplement from SFTP
-    bundle.create_source("sftp_directory", {
-        "url": "sftp://vendor.example.com/outbound/",
-        "patterns": "*.csv",
-        "username": "pipeline-user",
-        "key_path": "/etc/keys/vendor_rsa"
-    }, name="vendor")
+    }, pack="ref")
 
     bundle.fetch("base", "add")
     bundle.fetch("ref", "sync")
-    bundle.fetch("vendor", "add")
     bundle.commit("Initial pipeline load")
     ```
 
 === "SQL"
 
-    ```sql
-    CREATE 's3://analytics/pipeline';
+    ```bash
+    bundlebase repl --bundle s3://analytics/pipeline --create
+    ```
 
+    ```sql
     CREATE SOURCE FOR base USING remote_dir WITH (
         url = 's3://raw-data/events/',
         patterns = '**/*.parquet'
     );
-    CREATE SOURCE FOR ref USING http WITH (
-        url = 'https://api.internal/taxonomy',
-        format = 'json',
-        json_record_path = 'types'
-    );
-    CREATE SOURCE FOR vendor USING sftp_directory WITH (
-        url = 'sftp://vendor.example.com/outbound/',
+    CREATE SOURCE FOR base USING remote_dir WITH (
+        url = 'sftp://pipeline-user@vendor.example.com/outbound/',
         patterns = '*.csv',
-        username = 'pipeline-user',
         key_path = '/etc/keys/vendor_rsa'
     );
 
     FETCH base ADD;
-    FETCH ref SYNC;
-    FETCH vendor ADD;
     COMMIT 'Initial pipeline load';
     ```
+
+    Creating a join point without initial data (so a joined pack can get its own source) requires the Python API's `join()`.
 
 ---
 
@@ -253,17 +242,17 @@ Once sources are defined, subsequent runs are just fetch + commit:
     bundle = bb.open("s3://analytics/pipeline").extend()
     bundle.fetch("base", "add")
     bundle.fetch("ref", "sync")
-    bundle.fetch("vendor", "add")
     bundle.commit(f"Daily refresh — {date.today()}")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/pipeline
+    ```
+
     ```sql
-    OPEN 's3://analytics/pipeline';
-    EXTEND;
     FETCH base ADD;
     FETCH ref SYNC;
-    FETCH vendor ADD;
     COMMIT 'Daily refresh';
     ```

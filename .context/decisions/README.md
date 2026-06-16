@@ -73,7 +73,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 3. **Accept**: Merge the PR with status changed to "Accepted"
 4. **Supersede**: If a decision changes, create a new ADR that supersedes the old one
 
-**Important**: ADRs are **immutable once accepted**. If a decision changes, create a new ADR (with status "Superseded by ADR-XXX" on the old one) rather than editing the original.
+**Important**: ADRs are **immutable once accepted**. If a decision changes, create a new ADR (with status "Superseded by ADR-XXX" on the old one) rather than editing the original. Exception: when the implemented design drifted from the recorded decision without a new decision being made, the ADR may be **amended** — keep the original context and add a "Decision History" section recording what changed and why, with the status marked "Amended <date>".
 
 ## Index of Decisions
 
@@ -82,9 +82,9 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 | [001](001-rust-core.md) | Rust Core Library | Accepted |
 | [002](002-datafusion-arrow.md) | DataFusion and Apache Arrow | Accepted |
 | [003](003-streaming-only.md) | Streaming-Only Execution | Accepted |
-| [004](004-three-tier-architecture.md) | Three-Tier Architecture | Accepted |
-| [005](005-mutable-operations.md) | Mutable Operations Return &mut Self | Accepted |
-| [006](006-lazy-evaluation.md) | Lazy Operation Evaluation | Accepted |
+| [004](004-three-tier-architecture.md) | Three-Tier Architecture | Accepted (amended 2026-06) |
+| [005](005-mutable-operations.md) | Modification Methods Use Interior Mutability | Accepted (amended 2026-06) |
+| [006](006-lazy-evaluation.md) | Lazy Operation Evaluation | Accepted (amended 2026-06) |
 | [007](007-no-unwrap.md) | No .unwrap() Allowed | Accepted |
 | [008](008-no-mod-rs.md) | No mod.rs Files | Accepted |
 

@@ -16,14 +16,14 @@ This document catalogs bundlebase's external dependencies, version constraints, 
 
 These dependencies are **essential** - bundlebase cannot function without them.
 
-### DataFusion (v51.x)
+### DataFusion (v53.x)
 
 **Purpose:** SQL query engine and DataFrame API
 
-**Version:** `51.0.0`
+**Version:** `53` (workspace `Cargo.toml`, resolved to 53.0.0; `avro` feature enabled)
 
 **Why this version:**
-- Stable API (v51 released December 2024)
+- Stable API
 - Streaming execution support
 - Predicate and projection pushdown
 - Rich DataFrame API
@@ -38,14 +38,14 @@ These dependencies are **essential** - bundlebase cannot function without them.
 
 ---
 
-### Apache Arrow (v57.x)
+### Apache Arrow (v58.x)
 
 **Purpose:** Columnar data format and interoperability
 
-**Version:** `57.0.0`
+**Version:** `58` (resolved to 58.1.0; `ffi` + `pyarrow` features; `arrow-flight` and `parquet` pinned to the same major)
 
 **Why this version:**
-- Matches DataFusion v51 requirement
+- Matches DataFusion v53 requirement
 - Stable schema and RecordBatch APIs
 - Interop with Pandas, Polars, PyArrow
 
@@ -57,19 +57,18 @@ These dependencies are **essential** - bundlebase cannot function without them.
 
 ---
 
-### PyO3 (v0.23.x)
+### PyO3 (v0.28.x)
 
 **Purpose:** Rust ↔ Python bindings
 
-**Version:** `0.23`
+**Version:** `0.28` (with `experimental-async`; plus `pyo3-async-runtimes` 0.28 and `pyo3-log` 0.13)
 
 **Why this version:**
-- Stable API (v0.23 released 2024)
-- Support for async Python
+- Support for async Python (`experimental-async` feature)
 - Arc-based cloning patterns
 - Good GIL management
 
-**Version policy:** Can upgrade minor versions (0.23.x)
+**Version policy:** Can upgrade minor versions (0.28.x)
 
 **Rationale:** PyO3 is the standard for Rust/Python interop. Enables exposing Rust API to Python.
 
@@ -117,15 +116,13 @@ These dependencies provide significant functionality but could theoretically be 
 
 ---
 
-### Serde JSON (v1.x)
+### Serde JSON (v1.x) and serde_yaml_ng (v0.10)
 
-**Purpose:** JSON format for manifests
+**Purpose:** JSON and YAML serialization
 
-**Version:** `1.x`
+**Version:** `serde_json = "1"`, `serde_yaml_ng = "0.10"`
 
-**Usage:** Reading/writing `.json` manifest files
-
-**Alternatives:** Could use TOML, YAML, but JSON is ubiquitous
+**Usage:** Manifest/commit files are YAML (`serde_yaml_ng`); JSON is used for configs and interchange
 
 **License:** Apache 2.0 / MIT
 
@@ -221,53 +218,63 @@ Managed via `pyproject.toml`:
 
 ```toml
 [tool.poetry.dependencies]
-python = "^3.8"
-pyarrow = "^18.0.0"  # Must match Arrow v57
-pandas = "^2.0.0"
-polars = "^1.0.0"
+python = "^3.13"
+pyarrow = ">=14.0.0"
+pandas = {version = ">=2.0.0", optional = true}
+polars = {version = ">=0.20.0", optional = true}
+numpy = {version = ">=1.20.0", optional = true}
+nest-asyncio = {version = "^1.6.0", optional = true}
+ipykernel = {version = "^7.1.0", optional = true}
 ```
+
+Pandas, polars, numpy, and nest-asyncio are **optional** extras (`pandas`,
+`jupyter`); only pyarrow is required.
 
 ---
 
-### PyArrow (v18.x)
+### PyArrow (>=14)
 
 **Purpose:** Python Arrow library (interop)
 
-**Version:** `18.0.0` (matches Arrow v57)
+**Version:** `>=14.0.0` (Arrow's FFI/C data interface keeps this compatible across versions; no hard lock to the Rust Arrow version)
 
 **Usage:** Converting Arrow RecordBatches to Python objects
-
-**Version policy:** LOCKED - must match Rust Arrow version
 
 **License:** Apache 2.0
 
 ---
 
-### Pandas (v2.x)
+### Pandas (v2.x, optional)
 
 **Purpose:** DataFrame library for Python
 
-**Version:** `^2.0.0`
+**Version:** `>=2.0.0`
 
 **Usage:** `to_pandas()` returns `pandas.DataFrame`
-
-**Version policy:** Compatible with v2.x
 
 **License:** BSD-3-Clause
 
 ---
 
-### Polars (v1.x)
+### Polars (optional)
 
 **Purpose:** Alternative DataFrame library
 
-**Version:** `^1.0.0`
+**Version:** `>=0.20.0`
 
 **Usage:** `to_polars()` returns `polars.DataFrame`
 
-**Version policy:** Compatible with v1.x
-
 **License:** MIT
+
+---
+
+### nest-asyncio (v1.6.x, optional)
+
+**Purpose:** Allow the sync API to run inside already-running event loops (Jupyter)
+
+**Version:** `^1.6.0` (part of the `jupyter` extra)
+
+**License:** BSD-2-Clause
 
 ---
 
@@ -296,9 +303,8 @@ poetry run ./scripts/maturin-build.sh    # Release build
 ### Hard Locks (MUST NOT CHANGE without testing)
 
 ```toml
-datafusion = "51.0.0"
-arrow = "57.0.0"
-pyarrow = "18.0.0"  # In Python
+datafusion = "53"
+arrow = "58"        # arrow-flight, arrow-schema, parquet pinned to same major
 ```
 
 **Reason:** API compatibility, ABI compatibility
@@ -315,7 +321,7 @@ pyarrow = "18.0.0"  # In Python
 ### Flexible Versions (can upgrade minor)
 
 ```toml
-pyo3 = "0.23"      # 0.23.x OK
+pyo3 = "0.28"      # 0.28.x OK
 tokio = "1"        # 1.x OK
 serde = "1"        # 1.x OK
 ```
@@ -327,15 +333,15 @@ serde = "1"        # 1.x OK
 ## Dependency Tree
 
 ```
-bundlebase
-├── datafusion = 51.0.0 (CRITICAL)
-│   ├── arrow = 57.0.0 (CRITICAL)
+bundlebase (workspace of rust/bundlebase-* crates)
+├── datafusion = 53 (CRITICAL)
+│   ├── arrow = 58 (CRITICAL)
 │   ├── tokio = 1.x
 │   └── [many DataFusion deps]
-├── pyo3 = 0.23
+├── pyo3 = 0.28 (bundlebase-python only)
 │   └── [PyO3 proc macros]
 ├── serde = 1.x
-├── serde_json = 1.x
+├── serde_json = 1.x / serde_yaml_ng = 0.10 (manifests)
 ├── async-trait = 0.1
 ├── log = 0.4
 └── env_logger = 0.11
@@ -413,7 +419,7 @@ cargo update --dry-run -p datafusion
 open https://github.com/apache/datafusion/releases
 
 # Update version in Cargo.toml
-# datafusion = "52.0.0"
+# datafusion = "54"
 
 # Fix breaking changes
 cargo test --no-run
@@ -517,8 +523,8 @@ For users who only need Rust API (no Python):
 
 ```toml
 [dependencies]
-datafusion = "51.0.0"
-arrow = "57.0.0"
+datafusion = "53"
+arrow = "58"
 tokio = "1"
 serde = "1"
 serde_json = "1"
@@ -528,7 +534,7 @@ log = "0.4"
 
 For Python bindings, add:
 ```toml
-pyo3 = "0.23"
+pyo3 = "0.28"
 ```
 
 ---
@@ -552,10 +558,10 @@ pyo3 = "0.23"
 
 ### Potential Additions
 
-1. **HTTP client (reqwest)** - for remote data sources
-2. **Compression libs** - for additional formats (gzip, zstd)
-3. **Database drivers** - for SQL database sources
-4. **Cloud SDKs** - for S3, GCS, Azure integration
+1. **Compression libs** - additional formats beyond gzip/`flate2` (e.g., zstd)
+2. **Database drivers** - for SQL database sources
+
+(Cloud storage is already covered: `object_store` with `aws`, `gcp`, and `azure` features.)
 
 **Policy:** Only add when feature implemented
 
@@ -624,7 +630,7 @@ cargo update
 
 **Error:** `Arrow schema incompatibility`
 
-**Solution:** Ensure PyArrow version matches Rust Arrow version
+**Solution:** Ensure PyArrow meets the minimum (`>=14.0.0`) and update if needed
 
 ```bash
 # Check Rust Arrow version
@@ -661,10 +667,10 @@ poetry update pyarrow
 ## Summary
 
 **Critical dependencies:**
-- DataFusion v51 (query engine) - LOCKED
-- Arrow v57 (data format) - LOCKED
-- PyO3 v0.23 (Python bindings) - minor updates OK
-- PyArrow v18 (Python interop) - LOCKED
+- DataFusion v53 (query engine) - LOCKED
+- Arrow v58 (data format) - LOCKED
+- PyO3 v0.28 (Python bindings) - minor updates OK
+- PyArrow >=14 (Python interop) - flexible
 
 **Version policy:**
 - DataFusion/Arrow: Hard lock, upgrade with caution

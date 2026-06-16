@@ -5,6 +5,9 @@
 Bundlebase logs through the standard python logging system under the `bundlebase` logger.
 
 ```python
+import logging
+import sys
+
 logging.basicConfig(
   stream=sys.stdout,
   level=logging.INFO,
@@ -29,6 +32,9 @@ Bundlebase includes OpenTelemetry-based metrics.
 For development and debugging, Bundlebase provides a simple way to see metrics via stdout without needing Prometheus, Jaeger, or other external collectors:
 
 ```python
+import logging
+import sys
+
 from bundlebase import log_metrics
 
 logging.basicConfig(
@@ -43,7 +49,7 @@ log_metrics()
 ## Rest of your python code
 ```
 
-This is perfect for:
+This is useful for:
 - Local development
 - Debugging index performance
 - Quick performance checks

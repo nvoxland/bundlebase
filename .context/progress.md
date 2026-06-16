@@ -43,14 +43,14 @@ Different execution environments can register their own progress trackers:
 Progress tracking is **automatic** if `tqdm` is installed:
 
 ```python
-import Bundlebase
+import bundlebase
 
 # Progress code is always included
 # If you have tqdm installed, progress bars appear automatically
 # pip install tqdm  # Optional - enables progress bars
 
 # Progress bars appear automatically if tqdm is available
-c = await Bundlebase.create("/path/to/container")
+c = await bundlebase.create("/path/to/container")
 await c.attach("large_data.parquet")  # Progress bar shows here (if tqdm installed)
 await c.rebuild_index("salary")        # Progress bar shows here (if tqdm installed)
 ```
@@ -67,17 +67,17 @@ def my_progress(event, operation, id, current, total, message):
     elif event == 'finish':
         print(f"Finished: {operation}")
 
-Bundlebase.progress.set_callback(my_progress)
+bundlebase.progress.set_callback(my_progress)
 ```
 
 #### Disabling Progress
 
 ```python
 # Disable all progress tracking
-Bundlebase.progress.disable()
+bundlebase.progress.disable()
 
 # Re-enable tqdm
-Bundlebase.progress.enable_tqdm()
+bundlebase.progress.enable_tqdm()
 ```
 
 ### Rust REPL
@@ -85,7 +85,7 @@ Bundlebase.progress.enable_tqdm()
 Progress bars appear automatically in the REPL:
 
 ```bash
-$ Bundlebase-cli /path/to/container
+$ bundlebase repl --bundle /path/to/bundle
 Bundlebase REPL
 Type 'help' for available commands, 'exit' to quit
 
@@ -144,7 +144,7 @@ set_tracker(Box::new(LoggingTracker::new()));
 
 // Now all progress is logged at INFO/DEBUG levels
 // Control with RUST_LOG environment variable:
-// RUST_LOG=Bundlebase=debug cargo run
+// RUST_LOG=bundlebase=debug cargo run
 ```
 
 Log levels produced:
@@ -293,9 +293,9 @@ async def test_progress_callback():
     def callback(event, operation, id, current, total, message):
         events.append(event)
 
-    Bundlebase.progress.set_callback(callback)
+    bundlebase.progress.set_callback(callback)
 
-    c = await Bundlebase.create()
+    c = await bundlebase.create()
     await c.attach("data.parquet")
 
     assert 'start' in events
@@ -330,14 +330,14 @@ With active tracker:
 **Solution**:
 ```python
 # Check if tqdm is detected
-import Bundlebase.progress
-print(Bundlebase.progress._has_tqdm())  # Should be True if tqdm installed
+import bundlebase.progress
+print(bundlebase.progress._has_tqdm())  # Should be True if tqdm installed
 
 # If False, install tqdm:
 # pip install tqdm
 
 # Then manually enable
-Bundlebase.progress.enable_tqdm()
+bundlebase.progress.enable_tqdm()
 ```
 
 ### Progress bars interfere with output
@@ -346,7 +346,7 @@ Bundlebase.progress.enable_tqdm()
 
 **Solution**: tqdm writes to stderr by default, but you can disable:
 ```python
-Bundlebase.progress.disable()
+bundlebase.progress.disable()
 ```
 
 ### Multiple progress bars in REPL
@@ -392,6 +392,6 @@ fn my_test() {
 
 ## See Also
 
-- [Architecture Overview](01-ARCHITECTURE.md) - Overall system design
-- [Python API](02-PYTHON-API.md) - Python usage examples
-- [Development Guide](06-DEVELOPMENT.md) - Building and testing
+- [Architecture Overview](architecture.md) - Overall system design
+- [Python API](python-api.md) - Python usage examples
+- [Development Guide](development.md) - Building and testing

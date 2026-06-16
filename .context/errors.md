@@ -10,7 +10,7 @@ Bundlebase follows Rust's error handling model:
 2. **Explicit errors** - Use `Result<T>` for all fallible operations
 3. **Rich context** - Errors include actionable information
 4. **Early validation** - Catch errors in `check()` phase, not during execution
-5. **Typed errors** - Use custom error types with semantic meaning
+5. **String-context errors** - `BundlebaseError` is an untyped boxed error; the context string carries the meaning (typed error kinds are a planned improvement)
 
 **See:** [decisions/007-no-unwrap.md](decisions/007-no-unwrap.md) for rationale
 
@@ -20,38 +20,30 @@ Bundlebase follows Rust's error handling model:
 
 ### Core Error Type
 
-```rust
-pub struct BundlebaseError {
-    kind: ErrorKind,
-    context: String,
-    source: Option<Box<dyn std::error::Error>>,
-}
+The error type is an untyped boxed error alias, not a structured enum:
 
-pub enum ErrorKind {
-    InvalidOperation,
-    ValidationError,
-    DataSourceError,
-    SchemaError,
-    IoError,
-    DataFusionError,
-}
+```rust
+// rust/bundlebase-common/src/lib.rs
+pub type BundlebaseError = Box<dyn Error + Send + Sync>;
 ```
+
+There is no `ErrorKind` — error "type" information lives in the message text. Any `std::error::Error` (DataFusion, I/O, serde, ...) converts into `BundlebaseError` via `?`/`.into()`, and ad-hoc errors are created from strings.
 
 ### Usage Pattern
 
 ```rust
-// Creating errors with context
-return Err(BundlebaseError::validation(
-    format!("Column '{}' not found in schema", column_name)
-));
+// Creating errors from strings (the dominant pattern)
+return Err(format!("Column '{}' not found in schema", column_name).into());
 
-// Adding context to errors
+// Equivalent explicit form
+return Err(BundlebaseError::from(format!("No bundle found at '{}'", path)));
+
+// Adding context when wrapping another error
 operation.apply(df)
-    .map_err(|e| BundlebaseError::context(
-        e,
-        format!("Failed to apply {} operation", op_name)
-    ))?;
+    .map_err(|e| BundlebaseError::from(format!("Failed to apply {} operation: {}", op_name, e)))?;
 ```
+
+**Planned (not yet implemented):** a structured error type with an `ErrorKind` enum (ValidationError, DataSourceError, SchemaError, IoError, ...) so callers and the Python bindings can branch on error category instead of message text.
 
 ---
 
@@ -74,25 +66,21 @@ pub fn filter(&mut self, expr: &str) -> Result<&mut Self> {
 
 ---
 
-### 2. Pattern Matching (Specific Handling)
+### 2. Recover by Checking First (No Error Kinds to Match)
 
-**Use when:** Different error types need different handling
+**Use when:** A specific failure condition is recoverable
+
+Because `BundlebaseError` is untyped, code cannot pattern-match on error kinds. Recoverable conditions are checked *before* the fallible call (or by downcasting/string inspection as a last resort):
 
 ```rust
-match load_manifest(&path) {
-    Ok(manifest) => apply_manifest(manifest),
-    Err(BundlebaseError { kind: ErrorKind::IoError, .. }) => {
-        // File doesn't exist, create new bundle
-        create_new_bundle()
-    }
-    Err(e) => {
-        // Other errors are fatal
-        return Err(e);
-    }
+// Check the recoverable condition up front instead of matching the error
+if !manifest_exists(&path).await? {
+    return create_new_bundle().await;
 }
+let manifest = load_manifest(&path).await?; // remaining errors are fatal
 ```
 
-**Why:** Allows recovery from specific error conditions
+**Why:** Keeps recovery logic explicit; avoids brittle matching on error message text
 
 ---
 
@@ -107,9 +95,7 @@ let column = schema.column_with_name(&name).unwrap();
 // ✅ CORRECT: Convert to Result
 let column = schema
     .column_with_name(&name)
-    .ok_or_else(|| BundlebaseError::validation(
-        format!("Column '{}' not found", name)
-    ))?;
+    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", name)))?;
 ```
 
 **Why:** Provides meaningful error instead of panic
@@ -124,16 +110,12 @@ let column = schema
 fn check(&self, state: &BundleState) -> Result<()> {
     // Early return on validation errors
     if self.columns.is_empty() {
-        return Err(BundlebaseError::validation(
-            "Cannot select zero columns"
-        ));
+        return Err("Cannot select zero columns".into());
     }
 
     for col in &self.columns {
         if !state.schema().column_with_name(col).is_some() {
-            return Err(BundlebaseError::validation(
-                format!("Column '{}' not found", col)
-            ));
+            return Err(format!("Column '{}' not found", col).into());
         }
     }
 
@@ -153,13 +135,13 @@ fn check(&self, state: &BundleState) -> Result<()> {
 // DataFusion error
 let df = ctx.read_parquet(&path, Default::default())
     .await
-    .map_err(|e| BundlebaseError::data_source(
+    .map_err(|e| BundlebaseError::from(
         format!("Failed to read Parquet file '{}': {}", path, e)
     ))?;
 
 // I/O error
 let contents = std::fs::read_to_string(&path)
-    .map_err(|e| BundlebaseError::io(
+    .map_err(|e| BundlebaseError::from(
         format!("Cannot read manifest '{}': {}", path, e)
     ))?;
 ```
@@ -185,14 +167,14 @@ let contents = std::fs::read_to_string(&path)
 fn validate_filter(&self, schema: &Schema) -> Result<()> {
     // Parse SQL expression
     let expr = parse_sql(&self.expression)
-        .map_err(|e| BundlebaseError::validation(
+        .map_err(|e| BundlebaseError::from(
             format!("Invalid SQL expression '{}': {}", self.expression, e)
         ))?;
 
     // Validate columns exist
     for col in expr.referenced_columns() {
         if !schema.column_with_name(&col).is_some() {
-            return Err(BundlebaseError::validation(
+            return Err(BundlebaseError::from(
                 format!("Column '{}' not found in schema", col)
             ));
         }
@@ -221,7 +203,7 @@ fn validate_filter(&self, schema: &Schema) -> Result<()> {
 async fn load_parquet(&self, path: &str) -> Result<DataFrame> {
     ctx.read_parquet(path, Default::default())
         .await
-        .map_err(|e| BundlebaseError::data_source(
+        .map_err(|e| BundlebaseError::from(
             format!("Cannot read Parquet file '{}': {}. \
                      Check that file exists and is valid Parquet format.",
                      path, e)
@@ -251,7 +233,7 @@ fn validate_schema(&self, expected: &Schema, actual: &Schema) -> Result<()> {
                 // OK
             }
             Some(actual_field) => {
-                return Err(BundlebaseError::schema(
+                return Err(BundlebaseError::from(
                     format!(
                         "Column '{}' has type {} but expected {}",
                         field.name(),
@@ -261,7 +243,7 @@ fn validate_schema(&self, expected: &Schema, actual: &Schema) -> Result<()> {
                 ));
             }
             None => {
-                return Err(BundlebaseError::schema(
+                return Err(BundlebaseError::from(
                     format!("Required column '{}' not found", field.name())
                 ));
             }
@@ -288,7 +270,7 @@ fn validate_schema(&self, expected: &Schema, actual: &Schema) -> Result<()> {
 ```rust
 async fn apply_dataframe(&self, df: DataFrame) -> Result<DataFrame> {
     df.filter(self.predicate.clone())
-        .map_err(|e| BundlebaseError::execution(
+        .map_err(|e| BundlebaseError::from(
             format!("Filter operation failed on expression '{}': {}",
                     self.expression, e)
         ))
@@ -301,40 +283,44 @@ async fn apply_dataframe(&self, df: DataFrame) -> Result<DataFrame> {
 
 ## Python Error Mapping
 
-### Rust to Python Conversion
+### Current Behavior
 
-All Rust errors must be mapped to Python exceptions:
+The Python bindings map (almost) **all** Rust errors to `ValueError`, via helper functions in `rust/bundlebase-python/src/builder.rs`:
 
 ```rust
-#[pymethods]
-impl PyBundleBuilder {
-    fn filter(&mut self, expression: String) -> PyResult<Self> {
-        self.inner.filter(&expression)
-            .map_err(|e| match e.kind() {
-                ErrorKind::ValidationError => {
-                    PyErr::new::<PyValueError, _>(e.to_string())
-                }
-                ErrorKind::DataSourceError => {
-                    PyErr::new::<PyFileNotFoundError, _>(e.to_string())
-                }
-                _ => {
-                    PyErr::new::<PyRuntimeError, _>(e.to_string())
-                }
-            })?;
-        Ok(self.clone())
-    }
+/// Helper function to create a PyErr with operation context
+fn to_py_error<E: std::fmt::Display>(err: E) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyValueError, _>(err.to_string())
+}
+
+/// Helper function to create a PyErr with operation context description
+fn to_py_error_ctx<E: std::fmt::Display>(context: &str, err: E) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}: {}", context, err))
 }
 ```
 
-### Python Exception Types
+Methods typically add operation context, e.g. `.map_err(|e| to_py_error_ctx("Failed to attach", e))`, so Python sees `ValueError("Failed to attach: <message>")`.
 
-| Rust ErrorKind | Python Exception | When to Use |
+The exceptions to the rule:
+- **`FileNotFoundError`** - missing bundles/files. `create()`, `open()`, and `upgrade_bundle()` route errors through `map_bundlebase_error()` (builder.rs), which raises `FileNotFoundError` when the message indicates a filesystem-missing case (`"No bundle found"` or `"No such file or directory"`) and `ValueError` otherwise. So `bundlebase.open("/does/not/exist")` raises `FileNotFoundError`. The classification is by message content (there is no `ErrorKind`), deliberately anchored on those specific phrases so logical "not found" errors (e.g. "Column not found", "View not found") stay `ValueError`.
+- **`RuntimeError`** - stream execution and batch-iteration failures (`PyRecordBatchStream.next_batch()`, the `collect()` inside `as_pyarrow()`, and similar conversion paths)
+- The Python wrapper layer (`python/src/bundlebase/conversion.py`) raises `ImportError` (missing pandas/polars/numpy), `TypeError` (wrong object passed to conversion helpers), and `RuntimeError` (re-consuming an exhausted `QueryResult`, batch conversion failures)
+
+**Practical guidance:** catch `FileNotFoundError` for a missing bundle/file from `open()`/`create()`/`upgrade_bundle()`; catch `ValueError` for other bundlebase operation failures. Other operations (attach, schema, etc.) still raise `ValueError` even for not-found-style messages.
+
+### Planned (Not Yet Implemented): Kind-Based Exception Mapping
+
+Once `BundlebaseError` carries an error kind (see "Error Type Hierarchy" above), the bindings should map kinds to idiomatic Python exceptions:
+
+| Rust ErrorKind (planned) | Python Exception | When to Use |
 |----------------|------------------|-------------|
 | `ValidationError` | `ValueError` | Invalid input |
 | `DataSourceError` | `FileNotFoundError` or `IOError` | File issues |
 | `SchemaError` | `TypeError` | Type mismatch |
 | `IoError` | `IOError` | I/O operations |
 | Other | `RuntimeError` | General errors |
+
+Today none of this table is implemented — everything funnels through `to_py_error`/`to_py_error_ctx` as `ValueError`.
 
 ---
 
@@ -348,7 +334,7 @@ impl PyBundleBuilder {
 ```rust
 fn check(&self, state: &BundleState) -> Result<()> {
     if !state.schema().column_with_name(&self.column).is_some() {
-        return Err(BundlebaseError::validation(
+        return Err(BundlebaseError::from(
             format!(
                 "Column '{}' not found. Available columns: {}",
                 self.column,
@@ -363,10 +349,10 @@ fn check(&self, state: &BundleState) -> Result<()> {
 **Python:**
 ```python
 try:
-    c.filter("invalid_column > 10")
+    c.filter("SELECT * FROM bundle WHERE invalid_column > 10")
 except ValueError as e:
     print(f"Error: {e}")
-    # Error: Column 'invalid_column' not found. Available columns: name, age, status
+    # Error: Failed to apply filter: ... Column 'invalid_column' not found ...
 ```
 
 ---
@@ -379,7 +365,7 @@ except ValueError as e:
 ```rust
 fn check(&self, state: &BundleState) -> Result<()> {
     parse_sql(&self.expression)
-        .map_err(|e| BundlebaseError::validation(
+        .map_err(|e| BundlebaseError::from(
             format!(
                 "Invalid SQL expression '{}': {}. \
                  Example: \"age > 18 AND status = 'active'\"",
@@ -393,11 +379,10 @@ fn check(&self, state: &BundleState) -> Result<()> {
 **Python:**
 ```python
 try:
-    c.filter("age > > 18")  # Invalid syntax
+    c.filter("SELECT * FROM bundle WHERE age > > 18")  # Invalid syntax
 except ValueError as e:
     print(f"Error: {e}")
-    # Error: Invalid SQL expression 'age > > 18': unexpected token '>'
-    # Example: "age > 18 AND status = 'active'"
+    # Error: Failed to apply filter: ... unexpected token '>' ...
 ```
 
 ---
@@ -411,7 +396,7 @@ except ValueError as e:
 async fn attach(&mut self, path: &str) -> Result<&mut Self> {
     // Check file exists
     if !std::path::Path::new(path).exists() {
-        return Err(BundlebaseError::data_source(
+        return Err(BundlebaseError::from(
             format!(
                 "File '{}' not found. Check path and try again.",
                 path
@@ -422,7 +407,7 @@ async fn attach(&mut self, path: &str) -> Result<&mut Self> {
     // Attempt to read
     let df = ctx.read_parquet(path, Default::default())
         .await
-        .map_err(|e| BundlebaseError::data_source(
+        .map_err(|e| BundlebaseError::from(
             format!("Cannot read '{}': {}", path, e)
         ))?;
 
@@ -434,9 +419,9 @@ async fn attach(&mut self, path: &str) -> Result<&mut Self> {
 ```python
 try:
     c.attach("nonexistent.parquet")
-except FileNotFoundError as e:
+except ValueError as e:  # all bundlebase errors surface as ValueError today
     print(f"Error: {e}")
-    # Error: File 'nonexistent.parquet' not found. Check path and try again.
+    # Error: Failed to attach: File 'nonexistent.parquet' not found. ...
 ```
 
 ---
@@ -450,13 +435,13 @@ except FileNotFoundError as e:
 fn check(&self, state: &BundleState) -> Result<()> {
     let field = state.schema()
         .column_with_name(&self.column)
-        .ok_or_else(|| BundlebaseError::validation(
+        .ok_or_else(|| BundlebaseError::from(
             format!("Column '{}' not found", self.column)
         ))?;
 
     // Ensure numeric type
     if !matches!(field.data_type(), DataType::Int64 | DataType::Float64) {
-        return Err(BundlebaseError::schema(
+        return Err(BundlebaseError::from(
             format!(
                 "Column '{}' has type {} but operation requires numeric type",
                 self.column, field.data_type()
@@ -471,8 +456,8 @@ fn check(&self, state: &BundleState) -> Result<()> {
 **Python:**
 ```python
 try:
-    c.filter("name > 100")  # name is string, not number
-except TypeError as e:
+    c.filter("SELECT * FROM bundle WHERE name > 100")  # name is string, not number
+except ValueError as e:  # would be TypeError under the planned kind mapping
     print(f"Error: {e}")
     # Error: Column 'name' has type Utf8 but operation requires numeric type
 ```
@@ -491,7 +476,7 @@ let column = schema.column_with_name(&name).unwrap();  // Panics!
 **Right:**
 ```rust
 let column = schema.column_with_name(&name)
-    .ok_or_else(|| BundlebaseError::validation(
+    .ok_or_else(|| BundlebaseError::from(
         format!("Column '{}' not found", name)
     ))?;
 ```
@@ -509,7 +494,7 @@ return Err("Operation failed".into());  // Useless error
 
 **Right:**
 ```rust
-return Err(BundlebaseError::execution(
+return Err(BundlebaseError::from(
     format!(
         "Filter operation failed on column '{}' with expression '{}': {}",
         column, expression, cause
@@ -628,12 +613,14 @@ fn test_filter_invalid_column() {
 ### Python Tests
 
 ```python
+import bundlebase.sync as bb
+
 def test_filter_error():
-    c = bundlebase.create()
+    c = bb.create()
     c.attach("tests/data/sample.parquet")
 
     with pytest.raises(ValueError, match="Column .* not found"):
-        c.filter("invalid_column > 10")
+        c.filter("SELECT * FROM bundle WHERE invalid_column > 10")
 ```
 
 **See:** [testing.md](testing.md) for more patterns
@@ -682,7 +669,7 @@ format!(
 | Pattern | When to Use | Example |
 |---------|-------------|---------|
 | `?` operator | Propagate to caller | `operation.check()?` |
-| Pattern match | Specific handling | `match err.kind()` |
+| Check before call | Recoverable conditions | `if !exists(path)? { create() }` |
 | `ok_or_else()` | Option → Result | `option.ok_or_else(|| error)?` |
 | `map_err()` | Add context | `.map_err(|e| format!("Context: {}", e))` |
 | Early return | Validation | `if invalid { return Err(...) }` |
@@ -691,7 +678,7 @@ format!(
 - ✅ Never use `.unwrap()` in library code
 - ✅ Provide rich context in error messages
 - ✅ Validate early (in `check()` phase)
-- ✅ Map Rust errors to Python exceptions
+- ✅ Map Rust errors to Python exceptions (currently `ValueError` via `to_py_error`/`to_py_error_ctx`)
 - ✅ Make errors actionable (user knows what to fix)
 
 **See also:**

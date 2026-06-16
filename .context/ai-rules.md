@@ -140,85 +140,70 @@ let result = operation().unwrap();  // Compile error!
 
 ## 2. Architecture Constraints
 
-### 2.1 Three-Tier Immutability
+### 2.1 Three-Tier Mutability Boundaries
 
-**Rule**: Respect the three-tier architecture and mutability semantics.
+**Rule**: Respect the three-tier architecture. User-facing mutation goes through `BundleBuilder` only.
 
 #### The Three Types
 
-| Type | Mutability | Usage | Methods |
-|------|------------|-------|---------|
-| **Bundle trait** | Interface only | Common operations across all containers | Shared trait methods |
-| **BundleBuilder** | **Mutable** | Building/transforming data | `&mut self` operations |
-| **Bundle (read-only)** | **Immutable** | Loaded from commits | `&self` operations only |
+| Type | Role | Mutation |
+|------|------|----------|
+| **BundleFacade trait** | Common read/query interface | None — read/query methods only |
+| **BundleBuilder** | Working copy with change tracking | `&self -> Result<&Self>` methods using interior mutability, wrapped in `run_command`/`do_change` |
+| **Bundle** | Committed/persistent state | Interior mutability via `Arc<RwLock<...>>` fields, but ONLY through `pub(crate) apply_operation()` — never expose public mutation on `Bundle` |
 
 #### Code Patterns
 
 ```rust
-// ✅ CORRECT: Mutable operations on BundleBuilder
-impl BundleBuilder {
-    pub fn filter(&mut self, expr: &str) -> &mut Self {
-        // Mutate in place
-        self.operations.push(Operation::Filter(expr.to_string()));
-        self  // Return &mut Self for chaining
-    }
+// ✅ CORRECT: Modification methods on BundleBuilder (or BundleBuilderExt)
+// take &self and return Result<&Self>, routed through change tracking
+async fn filter(&self, query: &str, params: Vec<ScalarValue>)
+    -> Result<&Self, BundlebaseError>;
+
+// ✅ CORRECT: Bundle mutation only via the operation pipeline
+impl Bundle {
+    pub(crate) async fn apply_operation(&self, op: AnyOperation)
+        -> Result<(), BundlebaseError> { /* check, apply, record, clear cache */ }
 }
 
-// ✅ CORRECT: Read-only operations on Bundle
+// ❌ WRONG: Public ad-hoc mutation on Bundle that bypasses the operation log
 impl Bundle {
-    pub fn schema(&self) -> &Schema {
-        &self.schema  // No mutation
-    }
-}
-
-// ❌ WRONG: Trying to mutate immutable Bundle
-impl Bundle {
-    pub fn filter(&mut self, expr: &str) -> &mut Self {
-        // Type error: Bundle is immutable!
+    pub fn set_packs(&self, packs: HashMap<ObjectId, Arc<Pack>>) {
+        *self.packs.write() = packs; // bypasses check/version/operation recording
     }
 }
 ```
 
-**Rationale**: Clear separation between mutable building and immutable querying prevents accidental mutations
+**Rationale**: All state changes must flow through recorded operations so they version, persist, and replay correctly
 
-**See**: [architecture.md](architecture.md)
+**See**: [architecture.md](architecture.md), [decisions/004](decisions/004-three-tier-architecture.md)
 
-### 2.2 Mutable Operations Return &mut Self
+### 2.2 Modification Methods: `&self -> Result<&Self>`
 
-**Rule**: All mutation operations return `&mut Self` for fluent chaining.
+**Rule**: Modification methods take `&self`, mutate via interior mutability, and return `Result<&Self, BundlebaseError>` for fluent chaining with `?`. The types are shared via `Arc`, so `&mut self` signatures are not possible.
 
 ```rust
-// ✅ CORRECT: Chainable API
-impl BundleBuilder {
-    pub fn filter(&mut self, expr: &str) -> &mut Self {
-        self.operations.push(Operation::Filter(expr.to_string()));
-        self
-    }
-
-    pub fn select(&mut self, columns: Vec<String>) -> &mut Self {
-        self.operations.push(Operation::Select(columns));
-        self
-    }
-}
+// ✅ CORRECT: Chainable API (actual signatures from builder.rs / builder_ext.rs)
+pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError>;
+async fn attach(&self, path: &str, pack: Option<&str>) -> Result<&Self, BundlebaseError>;
+async fn rename_column(&self, old_name: &str, new_name: &str) -> Result<&Self, BundlebaseError>;
 
 // Usage: Fluent chaining
-let container = builder
-    .filter("age >= 18")
-    .query("SELECT name, email FROM bundle")?
-    .drop_column("temp");
+builder.attach("data.parquet", None).await?
+    .filter("SELECT * FROM bundle WHERE age >= 18", vec![]).await?
+    .commit("load and filter").await?;
 
-// ❌ WRONG: Returns () - breaks chaining
-impl BundleBuilder {
-    pub fn filter(&mut self, expr: &str) {
-        self.operations.push(Operation::Filter(expr.to_string()));
-        // No return value
-    }
-}
+// ❌ WRONG: &mut self — cannot be called through Arc<BundleBuilder>
+pub fn filter(&mut self, expr: &str) -> &mut Self { ... }
+
+// ❌ WRONG: Returns () — breaks chaining (unless the method's purpose is to
+// return a value, e.g. delete() returns the affected row count)
+pub async fn filter(&self, expr: &str) -> Result<(), BundlebaseError> { ... }
 ```
 
-**Rationale**: Enables fluent API matching Python's chaining style
+**Rationale**: Enables fluent chaining while supporting `Arc`-shared access from async tasks, server sessions, and Python bindings
 
-**See**: [architecture.md](architecture.md), [python-api.md](python-api.md)
+**See**: [decisions/005](decisions/005-mutable-operations.md), [architecture.md](architecture.md)
 
 ### 2.3 Internal Column Naming (col_<id>)
 
@@ -230,11 +215,11 @@ impl BundleBuilder {
 3. The command layer translates user input to `col_<id>` before creating operations
 4. `dataframe()` in `bundle.rs` applies a final rename from `col_<id>` → user-visible names
 
-**When adding a new command that stores SQL**: Always call `column_metadata::translate_sql_to_col_ids()` on user-provided SQL before storing it in an operation. The `builder.column_names()` method provides the `ColumnId → user_name` map needed for translation.
+**When adding a new command that stores SQL**: Always translate user-provided SQL before storing it in an operation — use `builder.translate_sql(sql)` (or `BundleSchema::translate_sql()` inside an operation) to rewrite user-visible names to `col_<id>` references.
 
-**When adding a new operation with `apply_dataframe()`**: Columns in the incoming DataFrame are `col_<id>`. Use `column_metadata::col_id_name(&id)` to reference columns. The `column_names` parameter tracks `ColumnId → user_name` for the final rename step.
+**When adding a new operation with `apply_dataframe()`**: Columns in the incoming DataFrame are `col_<id>`. Use `bundle_schema.internal_name(&id)` / `bundle_schema::generate_internal_name(&id)` to reference columns. The `bundle_schema: &mut BundleSchema` parameter tracks `ColumnId → user_name` for the final rename step (e.g. `RenameColumnOp` just calls `bundle_schema.insert(id, new_name)`).
 
-**Key files**: `column_metadata.rs`, `data_block.rs`, `schema_rename_filter.rs`
+**Key files**: `bundle/bundle_schema.rs` (helpers: `generate_internal_name()`, `parse_internal_name()`, `translate_sql()`, `rename_to_real_names()`), `bundle/data_block.rs`, `bundle/schema_rename_filter.rs`
 
 ### 2.4 Lazy Evaluation
 
@@ -254,31 +239,18 @@ df = await c.to_pandas()     # NOW queries run
 #### Implementation Pattern
 
 ```rust
-// ✅ CORRECT: Record operations
-pub fn filter(&mut self, expr: &str) -> &mut Self {
-    // Just record the operation
-    self.operations.push(Operation::Filter(expr.to_string()));
-    self  // No execution yet
-}
+// ✅ CORRECT: Record the operation; Bundle::apply_operation validates (check),
+// applies side effects (apply), records the op, and clears the cached DataFrame
+builder.apply_operation(FilterOp::new(query, params).into()).await?;
 
-// Execution happens here
-async fn execute(&self) -> Result<DataFrame> {
-    let mut df = self.initial_dataframe.clone();
+// Execution happens lazily in Bundle::dataframe() (bundle.rs):
+// rebuilds from the base pack table by running each recorded op's
+// apply_dataframe() in order, then renames col_<id> → user-visible names
+let df = bundle.dataframe().await?;
 
-    // Apply all recorded operations
-    for op in &self.operations {
-        df = op.apply(df).await?;
-    }
-
-    Ok(df)
-}
-
-// ❌ WRONG: Execute immediately
-pub fn filter(&mut self, expr: &str) -> &mut Self {
-    // Applying to dataframe immediately defeats lazy evaluation
-    self.dataframe = self.dataframe.filter(expr).await.unwrap();
-    self
-}
+// ❌ WRONG: Materializing/executing data inside the operation-recording path.
+// Operations must not run the query when recorded — data transformation
+// belongs in the op's apply_dataframe(), which runs at rebuild time.
 ```
 
 **Rationale**: Enables query optimization, composable transformations
@@ -302,23 +274,31 @@ pub fn filter(&mut self, expr: &str) -> &mut Self {
 
 **See**: [overview.md line 110](overview.md), [python-bindings.md](python-bindings.md)
 
-### 3.2 Async Method Registration
+### 3.2 Python Method Registration
 
-**Rule**: Python methods must be registered in `python/src/bundlebase/__init__.py` to support both async and sync APIs.
+**Rule**: New builder methods must be registered in `python/src/bundlebase/__init__.py` to support fluent chaining and the sync API.
 
 #### Registration Pattern
 
 ```python
 # python/src/bundlebase/__init__.py
 
-# Register method on both Bundle and BundleBuilder classes
-for cls in [Bundle, BundleBuilder]:
-    # Async method
-    register_async_method(cls, 'to_pandas', 'to_pandas')
+# 1. Add the original PyO3 method to the _original_methods dict
+_original_methods = {
+    ...
+    "my_operation": _PyBundleBuilder.my_operation,
+}
+# (each entry is passed to register_original_method for the chain machinery)
 
-    # Sync wrapper (for bundlebase.sync module)
-    register_sync_method(cls, 'to_pandas', 'to_pandas')
+# 2. If it mutates the bundle and returns the builder, add it to
+#    mutation_methods so it gets wrapped to return an OperationChain
+mutation_methods = [
+    "attach", "drop_column", "rename_column", "filter", ...,
+    "my_operation",
+]
 ```
+
+Mutation methods are wrapped by `_wrap_mutation_method()` to return an `OperationChain` (see `chain.py`), which queues calls and executes them on `await`. The sync API (`bundlebase.sync`) builds on the same registration.
 
 #### Why This Matters
 
@@ -605,9 +585,9 @@ Before generating any code, verify:
 - [ ] Rust implementation comes before Python bindings
 - [ ] No `collect()` - always streaming execution
 - [ ] No `.unwrap()` - proper error handling
-- [ ] PyO3 code only in `python/` module
-- [ ] Mutable operations return `&mut Self`
-- [ ] Operations are lazy, executed only during query
+- [ ] PyO3 code only in `rust/bundlebase-python/`
+- [ ] Modification methods take `&self` and return `Result<&Self>`
+- [ ] Operations are lazy: data transformation only in `apply_dataframe()`
 - [ ] Python methods registered in `__init__.py`
 - [ ] Tests follow established hierarchy
 - [ ] No over-engineering or premature optimization

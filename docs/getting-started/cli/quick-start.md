@@ -14,7 +14,7 @@ bundlebase repl --bundle ./my-bundle --create
 You'll see a header and prompt:
 
 ```
-Opened bundle at file://tmp/my-bundle (version empty, 1 commit)
+Opened bundle at file:///home/you/my-bundle (version empty, 1 commit)
 Type '/help' for available commands, '/exit' to quit
 ----------------------------------------------------------
 my-bundle>
@@ -25,6 +25,8 @@ my-bundle>
 ```
 my-bundle> ATTACH 'customers.csv'
 ```
+
+Relative paths resolve against the bundle directory, so this expects `./my-bundle/customers.csv`. For a file elsewhere, use a full URL: `ATTACH 'file:///home/you/customers.csv'`.
 
 ## Query
 
@@ -52,7 +54,7 @@ my-bundle> SHOW HISTORY
 
 ## Exit
 
-Type `/exit`, `/quit`, or press `Ctrl+C` / `Ctrl+D`.
+Type `/exit`, `/quit`, or press `Ctrl+D` (or `Ctrl+C` twice).
 
 ## Next steps
 

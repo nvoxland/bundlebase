@@ -53,7 +53,7 @@ Build a JAR and use with:
 
 ```python
 bundle.import_connector('example.connector', 'java::target/example-connector.jar')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ## API Reference
@@ -113,6 +113,9 @@ Return a stable URL for the given location. Default returns `null`.
 ```java
 public record Location(String location, boolean mustCopy, String format, String version, Long numRows) {
     public Location(String location) { this(location, true, "parquet", "", null); }
+    public Location(String location, boolean mustCopy, String format, String version) {
+        this(location, mustCopy, format, version, null);
+    }
 }
 ```
 
@@ -122,9 +125,16 @@ public record Location(String location, boolean mustCopy, String format, String 
 | `mustCopy` | `boolean` | `true` | Whether the data must be copied into the bundle |
 | `format` | `String` | `"parquet"` | File format |
 | `version` | `String` | `""` | Version string for change detection |
-| `numRows` | `Long` | `null` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (Parquet footer, manifest); leave `null` when counting would require fully parsing the data. Bundlebase preserves `null` distinct from `0`. |
+| `numRows` | `Long` | `null` | Row count for `FETCH ... DRY RUN` accounting. Set when known cheaply (e.g. read from a Parquet footer); leave `null` when counting would require fully parsing the data. `null` is preserved distinct from `0`. |
 
-The single-argument constructor `new Location("path")` defaults to `mustCopy=true`, `format="parquet"`, `version=""`, `numRows=null`.
+The single-argument constructor `new Location("path")` defaults to `mustCopy=true`, `format="parquet"`, `version=""`, `numRows=null`. The protocol requires a `num_rows` key on every location; the SDK serializes `numRows=null` as explicit JSON `null` ("unknown") automatically.
+
+```java
+// Row count known cheaply:
+new Location("users.parquet", true, "parquet", "v2", 1234L);
+// Row count unknown — serialized as "num_rows": null:
+new Location("orders.parquet", true, "parquet", "v1");
+```
 
 ### StableUrl
 
@@ -179,21 +189,19 @@ public Map<String, String> schema() {
 }
 ```
 
-Supported type strings:
+Supported type strings (exact match, no aliases):
 
-| Type String | Arrow Type | Aliases |
-|------------|------------|---------|
-| `Utf8` | `Utf8` | `string` |
-| `Int64` | `Int(64, signed)` | `int` |
-| `Int8`, `Int16`, `Int32` | `Int(8/16/32, signed)` | |
-| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `Int(8-64, unsigned)` | |
-| `Float64` | `FloatingPoint(DOUBLE)` | `float`, `double` |
-| `Float16`, `Float32` | `FloatingPoint(HALF/SINGLE)` | |
-| `Boolean` | `Bool` | `bool` |
-| `Date32` | `Date(DAY)` | `date` |
-| `Date64` | `Date(MILLISECOND)` | |
-| `Timestamp` | `Timestamp(MICROSECOND)` | |
-| `Binary` | `Binary` | `bytes` |
+| Type String | Arrow Type |
+|------------|------------|
+| `Utf8`, `LargeUtf8` | `Utf8`, `LargeUtf8` |
+| `Int8`, `Int16`, `Int32`, `Int64` | `Int(8-64, signed)` |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `Int(8-64, unsigned)` |
+| `Float16`, `Float32`, `Float64` | `FloatingPoint(HALF/SINGLE/DOUBLE)` |
+| `Boolean` | `Bool` |
+| `Date32` | `Date(DAY)` |
+| `Date64` | `Date(MILLISECOND)` |
+| `Timestamp` | `Timestamp(MICROSECOND)` |
+| `Binary`, `LargeBinary` | `Binary`, `LargeBinary` |
 
 ### Returning Column-Oriented Data
 
@@ -275,8 +283,8 @@ public class DatabaseSource implements Connector {
     @Override
     public List<Location> discover(List<String> attachedLocations, Map<String, String> args) {
         return List.of(
-            new Location("users.parquet", true, "parquet", "v2"),
-            new Location("orders.parquet", true, "parquet", "v1")
+            new Location("users.parquet", true, "parquet", "v2", 3L),
+            new Location("orders.parquet", true, "parquet", "v1")  // row count unknown
         );
     }
 
@@ -436,7 +444,7 @@ This produces `libbundlebase_plugin.so` in `target/`.
 
 ```python
 bundle.import_connector('example.connector', 'ffi::./libbundlebase_plugin.so')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ### How It Works

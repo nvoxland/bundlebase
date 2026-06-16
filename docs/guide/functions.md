@@ -447,16 +447,16 @@ Renames **runtime-only** function entries to a new name. Only temporary entries 
 
 ### "External code execution is not allowed"
 
-External code execution is disabled by default. Enable it in your bundle's configuration:
+External code execution is disabled by default. Enable it with the `system.allow_external_code` config key:
 
 ```python
-c.config().set("allow_external_code", True)
+await c.set_config("system", "allow_external_code", "true")
 ```
 
 Or in SQL:
 
 ```sql
-SET allow_external_code = true;
+SET CONFIG allow_external_code = 'true' FOR 'system';
 ```
 
 ### Subprocess not found or not executable

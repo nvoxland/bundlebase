@@ -6,38 +6,44 @@ Bundlebase uses a versioned manifest system for persistence:
 
 **Manifest storage:**
 - Location: `{data_dir}/_bundlebase/` directory
-- Format: YAML files with 5-digit version + 12-character hash
-- Example: `00001-a1b2c3d4e5f6.yaml`
+- Format: YAML files named `{5-digit-version}{12-char-hash}.yaml`
+- Example: `00001abc123def456.yaml` (version 1), `00042xyz789abc123.yaml` (version 42)
+- Init commit: `00000000000000000.yaml` (created when the bundle is created)
 
-**Manifest structure:**
+**Init commit structure** (`00000000000000000.yaml`):
 ```yaml
-# Container metadata
-name: "my_container"
-description: "Container description"
-num_rows: 1000
-schema:
-  - name: "id"
-    type: "Int64"
-  - name: "name"
-    type: "Utf8"
-
-# Base container reference (for from)
-from: null  # or path to base container
-
-# Operations applied
-operations:
-  - type: "AttachBlock"
-    source: "data.parquet"  # Relative path
-    version: "a1b2c3d4e5f6"
-  - type: "RemoveColumns"
-    names: ["temp_col"]
-
-# Commit metadata
-version: 1
-hash: "a1b2c3d4e5f6"
-created_at: "2024-01-15T10:30:00Z"
-message: "Initial data load"
+id: 4f8a1c2e-...        # Bundle UUID (only when creating, not extending)
+from: file:///base      # Optional: parent bundle URL ('from' chain)
+minVersion: "0.13"      # Minimum bundlebase format version required to open
+# maxVersion is left unset so future bundlebase versions can open the bundle
 ```
+
+**Commit structure** (`00001....yaml`, written by `commit()`):
+```yaml
+author: nathan
+message: Initial data load
+timestamp: 2024-01-15T10:30:00Z
+changes:
+  - id: 12345678-1234-...
+    description: ATTACH data.parquet
+    operations:
+      - type: attachBlock
+        # ... operation-specific config
+```
+
+## Format Version Requirements
+
+Bundles record which bundlebase versions can read them:
+
+- **Min version** is set automatically when a bundle is **created** (stored as
+  `major.minor` of the creating bundlebase version), so older clients get a
+  clear upgrade message.
+- **Max version** is NOT auto-set, so any future bundlebase version can open
+  the bundle without a bundle upgrade.
+- `SET MIN VERSION` / `SET MAX VERSION` commands (`SetMinVersionOp` /
+  `SetMaxVersionOp`) adjust the requirements explicitly.
+- `bundlebase upgrade-bundle` upgrades a bundle's format version to the
+  current bundlebase version.
 
 ## Commit Workflow
 

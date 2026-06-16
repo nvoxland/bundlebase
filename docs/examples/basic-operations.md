@@ -24,9 +24,10 @@ description: "Core Bundlebase operations: creating bundles, attaching data, filt
 
 === "SQL"
 
-    ```sql
-    CREATE '/path/to/my-bundle';
-    CREATE 's3://my-bucket/my-bundle';
+    ```bash
+    # Start a REPL on a new bundle
+    bundlebase repl --bundle /path/to/my-bundle --create
+    bundlebase repl --bundle s3://my-bucket/my-bundle --create
     ```
 
 ## Opening an existing bundle
@@ -40,14 +41,17 @@ description: "Core Bundlebase operations: creating bundles, attaching data, filt
 
     # Inspect before doing anything
     print(bundle.name)
-    print(f"{bundle.num_rows:,} rows")
+    print(f"{bundle.num_rows():,} rows")
     print(bundle.version)
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://my-bucket/my-bundle
+    ```
+
     ```sql
-    OPEN 's3://my-bucket/my-bundle';
     SHOW STATUS;
     ```
 
@@ -89,13 +93,13 @@ Multiple files union together automatically, even across formats:
 
     ```python
     # Simple filter
-    bundle.filter("status = 'active'")
+    bundle.filter("SELECT * FROM bundle WHERE status = 'active'")
 
     # Compound filter
-    bundle.filter("age >= 18 AND status = 'active' AND balance > 1000")
+    bundle.filter("SELECT * FROM bundle WHERE age >= 18 AND status = 'active' AND balance > 1000")
 
     # Parameterized (prevents injection, handles type coercion)
-    bundle.filter("age >= $1 AND status = $2", [18, "active"])
+    bundle.filter("SELECT * FROM bundle WHERE age >= $1 AND status = $2", [18, "active"])
     ```
 
 === "SQL"
@@ -138,8 +142,8 @@ Multiple files union together automatically, even across formats:
 
     NORMALIZE COLUMN NAMES;
 
-    CAST COLUMN amount AS FLOAT64;
-    CAST COLUMN created_at AS TIMESTAMP;
+    CAST COLUMN amount TO float64;
+    CAST COLUMN created_at TO timestamp;
     ```
 
 ## Querying with SQL
@@ -184,7 +188,7 @@ Multiple files union together automatically, even across formats:
     arrays = bundle.to_numpy()
     x = arrays["revenue"]
 
-    # Streaming batches — constant memory regardless of dataset size
+    # Streaming batches — bounded memory regardless of dataset size
     for batch in bundle.stream_batches():
         process(batch)   # each batch is a PyArrow RecordBatch
     ```
@@ -220,29 +224,25 @@ Multiple files union together automatically, even across formats:
     bundle = bb.open("s3://my-bucket/sales")
     for entry in bundle.history():
         print(entry)
-
-    # Roll back uncommitted changes
-    bundle = bb.open("s3://my-bucket/sales").extend()
-    bundle.attach("bad-data.csv")
-    bundle.reset()   # back to last committed state
     ```
+
+    To discard uncommitted changes, use the async API's `reset()` or the SQL `RESET` command -- `reset()` is not available in the sync API yet.
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://my-bucket/sales --create
+    ```
+
     ```sql
-    CREATE 's3://my-bucket/sales';
     ATTACH 'jan.csv';
     COMMIT 'January data';
 
-    OPEN 's3://my-bucket/sales';
-    EXTEND;
     ATTACH 'feb.csv';
     COMMIT 'Added February';
 
-    OPEN 's3://my-bucket/sales';
     SHOW HISTORY;
 
-    EXTEND;
     ATTACH 'bad-data.csv';
     RESET;
     ```
@@ -252,8 +252,8 @@ Multiple files union together automatically, even across formats:
 === "Python"
 
     ```python
-    bundle.create_index("email")
-    bundle.create_index("user_id")
+    bundle.create_index("email", "btree")
+    bundle.create_index("user_id", "btree")
 
     # Queries on these columns now use the index automatically
     result = bundle.query("SELECT * FROM bundle WHERE email = 'user@example.com'")
@@ -265,8 +265,8 @@ Multiple files union together automatically, even across formats:
 === "SQL"
 
     ```sql
-    CREATE INDEX email;
-    CREATE INDEX user_id;
+    CREATE BTREE INDEX ON email;
+    CREATE BTREE INDEX ON user_id;
 
     SELECT * FROM bundle WHERE email = 'user@example.com';
 
@@ -289,15 +289,18 @@ All mutation methods return `self`, so operations can be chained:
         .normalize_column_names()
         .cast_column("amount", "float64")
         .drop_column("internal_id")
-        .filter("status = 'closed_won'")
-        .set_name("Q1 Sales — Closed Won")
-        .commit("Initial Q1 export"))
+        .filter("SELECT * FROM bundle WHERE status = 'closed_won'")
+        .set_name("Q1 Sales — Closed Won"))
+    bundle.commit("Initial Q1 export")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://my-bucket/sales-q1 --create
+    ```
+
     ```sql
-    CREATE 's3://my-bucket/sales-q1';
     ATTACH 'jan.csv';
     ATTACH 'feb.csv';
     ATTACH 'mar.csv';

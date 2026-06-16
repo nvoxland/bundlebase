@@ -23,14 +23,17 @@ If the data has been published as a Bundlebase bundle, none of that applies. You
     # Understand what you have before loading anything
     print(bundle.name)
     print(bundle.description)
-    print(f"{bundle.num_rows:,} rows")
+    print(f"{bundle.num_rows():,} rows")
     print(bundle.version)
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/support-tickets
+    ```
+
     ```sql
-    OPEN 's3://team-data/support-tickets';
     SHOW STATUS;
     ```
 
@@ -49,14 +52,14 @@ This is the information that usually lives in a README — or doesn't exist at a
 === "Python"
 
     ```python
-    for field in bundle.schema:
+    for field in bundle.schema.fields:
         print(f"  {field.name}: {field.data_type}")
     ```
 
 === "SQL"
 
     ```sql
-    SHOW SCHEMA;
+    SHOW COLUMNS;
     ```
 
 ```
@@ -217,7 +220,8 @@ title: Longest to Resolve
 Generate the PDF:
 
 ```bash
-bundlebase generate-report --input analysis.md --output support-q1-2026.pdf
+bundlebase generate-report --bundle s3://team-data/support-tickets \
+    --input analysis.md --output support-q1-2026.pdf
 ```
 
 The report pulls live data from the bundle at generation time — no manual copy-paste, no stale charts.
@@ -231,7 +235,6 @@ If you want to add your own data on top of what's been shared, you can extend th
     ```python
     # Your own extended view — doesn't touch the shared bundle
     my_view = bb.open("s3://team-data/support-tickets").extend()
-    my_view.attach("my_team_annotations.csv")
     my_view.join("annotations",
         on="bundle.ticket_id = annotations.ticket_id",
         location="my_team_annotations.csv")
@@ -246,10 +249,11 @@ If you want to add your own data on top of what's been shared, you can extend th
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/support-tickets
+    ```
+
     ```sql
-    OPEN 's3://team-data/support-tickets';
-    EXTEND;
-    ATTACH 'my_team_annotations.csv';
     JOIN 'my_team_annotations.csv' AS annotations ON bundle.ticket_id = annotations.ticket_id;
     SELECT * FROM bundle;
     COMMIT 'Enriched with team annotations';

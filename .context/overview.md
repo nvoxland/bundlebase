@@ -7,27 +7,34 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 ## Key Technologies
 
 - **Rust**: Core library implementation
-- **DataFusion (v46)**: SQL query engine
-- **Apache Arrow (v54)**: Columnar data format
-- **PyO3 (v0.23)**: Python bindings
+- **DataFusion (v53)**: SQL query engine
+- **Apache Arrow (v58)**: Columnar data format
+- **PyO3 (v0.28)**: Python bindings
 - **Tokio**: Async runtime
 - **Maturin**: Python wheel builder
 
 ## Project Structure
 
 ```
-├── src/
-│   ├── lib.rs                          # Library entry point
-│   ├── bundle.rs                       # Bundlebase trait interface
-│   ├── bundle/                         # Container implementations
-│   ├── data/                           # Data source plugins
-│   ├── io/                             # Storage abstraction
-│   ├── udf/                            # User-defined SQL functions
-│   └── python/                         # Python bindings
-├── python/Bundlebase/                  # Python package
-├── tests/                              # Rust integration tests
+├── rust/                               # Cargo workspace crates
+│   ├── bundlebase/                     # Core library (bundle, operations)
+│   │   └── tests/                      # Rust integration/e2e tests
+│   ├── bundlebase-common/              # Shared types (RowId, errors, progress, IO)
+│   ├── bundlebase-io/                  # Storage abstraction
+│   ├── bundlebase-connector/           # Pluggable data source connectors
+│   ├── bundlebase-index/               # BTree/text index implementations
+│   ├── bundlebase-data/                # Data source plugins
+│   ├── bundlebase-udf/                 # User-defined SQL functions (multi-runtime)
+│   ├── bundlebase-catalog/             # Catalog support
+│   ├── bundlebase-command/             # Command language (parser, syntax docs)
+│   ├── bundlebase-python/              # PyO3 Python bindings
+│   ├── bundlebase-cli/                 # CLI (REPL, query, Flight server, MCP)
+│   └── bundlebase-report/              # PDF report generation
+├── sdk/                                # Rust and Python SDKs
+├── python/src/bundlebase/              # Python package
+├── python/tests/                       # Python binding tests
 ├── test_data/                          # Test data files
-├── Cargo.toml                          # Rust dependencies
+├── Cargo.toml                          # Workspace manifest
 └── pyproject.toml                      # Python package configuration
 ```
 
@@ -93,6 +100,10 @@ poetry run pytest         # Python tests
 - ✅ Multi-format file support (CSV, TSV, JSON, Parquet)
 - ✅ Row indexing system for efficient lookups
 - ✅ Lazy evaluation with DataFusion integration
+- ✅ Joins between bundles (JOIN / IMPORT JOIN)
+- ✅ Data modification via UPDATE/DELETE overlays (plus ALWAYS UPDATE/DELETE rules)
+- ✅ Views (CREATE VIEW) with parent inheritance
+- ✅ SQL queries (including GROUP BY / window functions) via DataFusion
 - ✅ Schema tracking through operation pipeline
 - ✅ Proper error propagation to Python
 - ✅ Async/await support for Python bindings
@@ -101,6 +112,7 @@ poetry run pytest         # Python tests
 **Known Limitations:**
 - ❌ Limited input validation (some operations don't validate preconditions)
 - ❌ Schema mismatch handling in multi-source UNIONs could be improved
+- ❌ No open-at-version, push/pull, or diff yet
 - ⚠️ Row indexing is lazy and built on first use (not pre-computed)
 
 ## Development Guidelines

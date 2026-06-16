@@ -1,6 +1,6 @@
 # Filtering
 
-The `filter()` method narrows down the rows in a bundle using a SQL WHERE clause. Unlike `query()` which returns a separate result set, `filter()` modifies the bundle in place.
+The `filter()` method narrows down the rows in a bundle using a SQL SELECT query. Unlike `query()` which returns a separate result set, `filter()` modifies the bundle in place.
 
 ## Basic Usage
 
@@ -11,7 +11,7 @@ The `filter()` method narrows down the rows in a bundle using a SQL WHERE clause
 
     bundle = await bb.create("my/data")
     await bundle.attach("customers.csv")
-    await bundle.filter("age >= 21")
+    await bundle.filter("SELECT * FROM bundle WHERE age >= 21")
     ```
 
 === "Sync API"
@@ -21,7 +21,7 @@ The `filter()` method narrows down the rows in a bundle using a SQL WHERE clause
 
     bundle = bb.create("my/data")
     bundle.attach("customers.csv")
-    bundle.filter("age >= 21")
+    bundle.filter("SELECT * FROM bundle WHERE age >= 21")
     ```
 
 === "SQL"
@@ -37,13 +37,13 @@ Use `$1`, `$2`, etc. as placeholders to safely pass parameters:
 === "Async API"
 
     ```python
-    await bundle.filter("salary > $1 AND department = $2", params=[50000.0, "Engineering"])
+    await bundle.filter("SELECT * FROM bundle WHERE salary > $1 AND department = $2", params=[50000.0, "Engineering"])
     ```
 
 === "Sync API"
 
     ```python
-    bundle.filter("salary > $1 AND department = $2", params=[50000.0, "Engineering"])
+    bundle.filter("SELECT * FROM bundle WHERE salary > $1 AND department = $2", params=[50000.0, "Engineering"])
     ```
 
 !!! note

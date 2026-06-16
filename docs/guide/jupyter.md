@@ -13,7 +13,7 @@ import bundlebase.sync as bb
 
 c = (bb.create()
     .attach("data.parquet")
-    .filter("active = true"))
+    .filter("SELECT * FROM bundle WHERE active = true"))
 
 # Display results
 display(c.to_pandas())

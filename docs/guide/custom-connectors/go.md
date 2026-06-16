@@ -50,7 +50,7 @@ Build and use with:
 
 ```python
 bundle.import_connector('example.connector', 'ipc::example-connector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ## API Reference
@@ -323,7 +323,7 @@ go build -buildmode=c-shared -o example_connector.so .
 
 ```python
 bundle.import_connector('example.connector', 'ffi::example_connector.so')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 ### How It Works

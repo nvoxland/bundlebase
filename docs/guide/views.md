@@ -61,12 +61,6 @@ Remove a view from the bundle.
     await bundle.drop_view("adults")
     ```
 
-=== "Sync API"
-
-    ```python
-    bundle.drop_view("adults")
-    ```
-
 === "SQL"
 
     ```sql
@@ -83,17 +77,14 @@ Rename an existing view.
     await bundle.rename_view("adults", new_name="adult_customers")
     ```
 
-=== "Sync API"
-
-    ```python
-    bundle.rename_view("adults", new_name="adult_customers")
-    ```
-
 === "SQL"
 
     ```sql
     RENAME VIEW adults TO adult_customers
     ```
+
+!!! note
+    `drop_view()` and `rename_view()` are not available in the sync API yet.
 
 ## Dynamic Inheritance
 

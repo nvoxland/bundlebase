@@ -8,7 +8,7 @@ This `.context/` directory contains comprehensive documentation designed for bot
 
 **Bundlebase** is like Docker, but for data. It's a high-performance data processing library written in Rust with Python bindings, providing a flexible framework for loading, transforming, and querying data from various sources.
 
-**Current Version**: 0.2.1 (Alpha)
+**Current Version**: 0.13.0 (Alpha)
 **License**: Apache 2.0
 **Homepage**: https://github.com/nvoxland/bundlebase
 
@@ -84,7 +84,7 @@ await c.commit("Cleaned customer data")
 - **[decisions/](decisions/)** - Architecture Decision Records (ADRs) documenting major architectural choices
   - [README.md](decisions/README.md) - ADR template, guidelines, and index
   - [001-rust-core.md](decisions/001-rust-core.md) - Why Rust core with Python bindings
-  - [002-datafusion-arrow.md](decisions/002-datafusion-arrow.md) - DataFusion v51 and Apache Arrow v57
+  - [002-datafusion-arrow.md](decisions/002-datafusion-arrow.md) - DataFusion and Apache Arrow as the query/data foundation
   - [003-streaming-only.md](decisions/003-streaming-only.md) - Mandate for streaming execution
   - [004-three-tier-architecture.md](decisions/004-three-tier-architecture.md) - Bundle trait, Bundle, BundleBuilder design
   - [005-mutable-operations.md](decisions/005-mutable-operations.md) - Why operations return `&mut Self`
@@ -116,9 +116,9 @@ await c.commit("Cleaned customer data")
 | Technology | Version | Purpose |
 |------------|---------|---------|
 | **Rust** | 2021 Edition | Core library implementation, performance-critical code |
-| **DataFusion** | v51 | SQL query engine and execution framework |
-| **Apache Arrow** | v57 | Columnar data format, zero-copy data sharing |
-| **PyO3** | v0.23 | Python bindings and FFI layer |
+| **DataFusion** | v53 | SQL query engine and execution framework |
+| **Apache Arrow** | v58 | Columnar data format, zero-copy data sharing |
+| **PyO3** | v0.28 | Python bindings and FFI layer |
 | **Tokio** | v1 | Async runtime for Rust operations |
 
 ### Python Ecosystem
@@ -174,21 +174,24 @@ This enables query optimization and deferred execution.
 
 ## Project Maturity
 
-**Current State**: Alpha (v0.2.1)
+**Current State**: Alpha (v0.13.0)
 
 **Major Features Implemented**:
 - ✅ Three-tier architecture with proper immutability semantics
 - ✅ Commit-based versioning with manifest history
 - ✅ Streaming execution with constant memory usage
 - ✅ Python async/await and synchronous APIs
-- ✅ Multi-format support (CSV, TSV, JSON, Parquet, custom functions)
-- ✅ Row indexing for fast lookups
-- ✅ SQL query integration via DataFusion
+- ✅ Multi-format support (CSV, TSV, JSON, Parquet, connectors, custom functions)
+- ✅ Joins, UPDATE/DELETE overlays, views, and custom UDFs (IMPORT FUNCTION)
+- ✅ Row indexing for fast lookups (btree + text indexes)
+- ✅ SQL query integration via DataFusion (including GROUP BY and window functions)
+- ✅ CLI with REPL, query, Arrow Flight server, and MCP server modes
 
 **Known Limitations**:
 - ⚠️ Limited input validation (some operations don't validate preconditions)
 - ⚠️ Schema mismatch handling in multi-source UNIONs could be improved
 - ⚠️ Row indexing is lazy (built on first use, not pre-computed)
+- ⚠️ No open-at-version, push/pull, or diff yet (see [debt.md](debt.md))
 
 **Development Philosophy**:
 - Project is **not launched** - no backward compatibility constraints
@@ -331,5 +334,5 @@ grep -i "bundle" .context/glossary.md
 
 ---
 
-**Last Updated**: January 2026
+**Last Updated**: 2026-06-10
 **Methodology**: [.context approach](https://github.com/andrefigueira/.context/)

@@ -211,7 +211,7 @@ LIMIT 50;
 `message_events` and `tool_events` are predefined views, but you don't `SELECT FROM message_events` — you scope the bundle to the view first, then query `bundle` against that scope. From Python:
 
 ```python
-import bundlebase as bb
+import bundlebase.sync as bb
 
 bundle = bb.open("./claude-history-bundle", config={"system": {"allow_external_code": "true"}})
 

@@ -48,6 +48,8 @@ The MCP server exposes the following tools to AI assistants. All per-bundle tool
 | `sample` | `bundle` (string), `limit` (integer, optional, default 10) | Preview sample rows as JSON |
 | `status` | `bundle` (string) | Show uncommitted changes |
 | `history` | `bundle` (string) | Show commit history |
+| `generate_report` | `input` (string), `output` (string), `branding` (bool, optional) | Generate a PDF report from markdown with embedded bundlebase code blocks |
+| `upgrade_bundle` | `path` (string) | Upgrade a bundle's format version to the current bundlebase version |
 
 ### The `query` Tool
 

@@ -38,42 +38,43 @@ You only do this once — source definitions are stored in the bundle:
             "vendor supplement from SFTP (vendor). "
             "Joined on event_type_id."
         )
-        # Source 1: S3 directory of daily Parquet partitions
+        # Source 1: S3 directory of daily Parquet partitions (base pack)
         .create_source("remote_dir", {
             "url": "s3://raw-data/events/",
             "patterns": "year=*/month=*/day=*/*.parquet"
         })
-        # Source 2: reference taxonomy API
-        .create_source("http", {
-            "url": "https://api.internal/taxonomy/event-types",
-            "format": "json",
-            "json_record_path": "types"
-        }, name="ref")
-        # Source 3: vendor SFTP drop
-        .create_source("sftp_directory", {
-            "url": "sftp://vendor.example.com/outbound/",
+        # Source 2: vendor SFTP drop — unions into the same base pack
+        .create_source("remote_dir", {
+            "url": "sftp://pipeline-user@vendor.example.com/outbound/",
             "patterns": "*.csv",
-            "username": "pipeline-user",
             "key_path": "/etc/keys/vendor_rsa"
-        }, name="vendor")
+        })
     )
 
-    # Initial fetch of all three sources
-    bundle.fetch("base", "add")    # events — add new only
-    bundle.fetch("ref", "replace") # reference data — always replace with latest
-    bundle.fetch("vendor", "add")  # vendor supplement — add new only
-
-    # Join reference data so consumers get event names, not just IDs
+    # Source 3: reference taxonomy API joins as its own pack,
+    # so consumers get event names, not just IDs
     bundle.join("ref", on="bundle.event_type_id = ref.id")
+    bundle.create_source("http", {
+        "url": "https://api.internal/taxonomy/event-types",
+        "format": "json",
+        "json_record_path": "types"
+    }, pack="ref")
+
+    # Initial fetch
+    bundle.fetch("base", "add")  # events + vendor records — add new only
+    bundle.fetch("ref", "sync")  # reference data — always replace with latest
 
     bundle.commit("Pipeline initialized — first fetch")
-    print(f"Initialized: {bundle.num_rows:,} rows")
+    print(f"Initialized: {bundle.num_rows():,} rows")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/events-pipeline --create
+    ```
+
     ```sql
-    CREATE 's3://analytics/events-pipeline';
     SET NAME 'Events Pipeline';
     SET DESCRIPTION 'Daily events from S3 partitions (base), reference taxonomy from API (ref), vendor supplement from SFTP (vendor). Joined on event_type_id.';
 
@@ -83,28 +84,24 @@ You only do this once — source definitions are stored in the bundle:
         patterns = 'year=*/month=*/day=*/*.parquet'
     );
 
-    -- Source 2: reference taxonomy API
+    -- Source 2: vendor SFTP drop — unions into the same base pack
+    CREATE SOURCE FOR base USING remote_dir WITH (
+        url = 'sftp://pipeline-user@vendor.example.com/outbound/',
+        patterns = '*.csv',
+        key_path = '/etc/keys/vendor_rsa'
+    );
+
+    -- Source 3: reference taxonomy joined as its own pack
+    JOIN 'https://api.internal/taxonomy/event-types' AS ref ON bundle.event_type_id = ref.id;
     CREATE SOURCE FOR ref USING http WITH (
         url = 'https://api.internal/taxonomy/event-types',
         format = 'json',
         json_record_path = 'types'
     );
 
-    -- Source 3: vendor SFTP drop
-    CREATE SOURCE FOR vendor USING sftp_directory WITH (
-        url = 'sftp://vendor.example.com/outbound/',
-        patterns = '*.csv',
-        username = 'pipeline-user',
-        key_path = '/etc/keys/vendor_rsa'
-    );
-
-    -- Initial fetch of all three sources
+    -- Initial fetch
     FETCH base ADD;
     FETCH ref SYNC;
-    FETCH vendor ADD;
-
-    -- Join reference data so consumers get event names, not just IDs
-    JOIN 'ref' AS ref ON bundle.event_type_id = ref.id;
 
     COMMIT 'Pipeline initialized — first fetch';
     SHOW STATUS;
@@ -126,12 +123,11 @@ The pipeline script is simple because all the source definitions are already in 
     bundle = bb.open("s3://analytics/events-pipeline").extend()
 
     try:
-        bundle.fetch("base", "add")     # new event partitions only
-        bundle.fetch("ref", "replace")  # refresh reference data
-        bundle.fetch("vendor", "add")   # new vendor records only
+        bundle.fetch("base", "add")  # new event and vendor records only
+        bundle.fetch("ref", "sync")  # refresh reference data
 
         bundle.commit(f"Daily refresh — {date.today()}")
-        print(f"Done: {bundle.num_rows:,} rows at version {bundle.version}")
+        print(f"Done: {bundle.num_rows():,} rows at version {bundle.version}")
 
     except Exception as e:
         print(f"Pipeline failed: {e}")
@@ -140,21 +136,21 @@ The pipeline script is simple because all the source definitions are already in 
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://analytics/events-pipeline';
-    EXTEND;
+    ```bash
+    bundlebase repl --bundle s3://analytics/events-pipeline
+    ```
 
+    ```sql
     FETCH base ADD;
     FETCH ref SYNC;
-    FETCH vendor ADD;
 
     COMMIT 'Daily refresh — <today>';
     SHOW STATUS;
     ```
 
-!!! tip "`add` vs `replace`"
+!!! tip "`add` vs `sync`"
     - **`add`** — skips files already attached to the bundle (safe for append-only sources like S3 partitions)
-    - **`replace`** — removes previously fetched data from this source and re-fetches everything (right for reference data that changes in-place)
+    - **`sync`** — full replacement: removes data no longer in the source and re-fetches what changed (right for reference data that changes in-place)
 
 ## Step 3: Monitoring and auditing
 
@@ -175,8 +171,11 @@ The commit history is your pipeline log:
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/events-pipeline
+    ```
+
     ```sql
-    OPEN 's3://analytics/events-pipeline';
     SHOW HISTORY;
     ```
 
@@ -225,8 +224,11 @@ The analytics team doesn't care about your pipeline — they just open the bundl
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/events-pipeline
+    ```
+
     ```sql
-    OPEN 's3://analytics/events-pipeline';
     SELECT * FROM bundle;
     ```
 
@@ -244,8 +246,8 @@ Source data is dirty. If you're encoding your cleanup steps in the pipeline scri
     bundle = bb.open("s3://analytics/events-pipeline").extend()
 
     # Define once — fire on every future attach to this bundle
-    bundle.always_delete("WHERE event_type = 'internal_test'")
-    bundle.always_delete("WHERE user_id IS NULL")
+    bundle.always_delete("event_type = 'internal_test'")
+    bundle.always_delete("user_id IS NULL")
     bundle.always_update("SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe')")
 
     bundle.commit("Added persistent cleanup rules")
@@ -254,12 +256,9 @@ Source data is dirty. If you're encoding your cleanup steps in the pipeline scri
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/events-pipeline';
-    EXTEND;
-
-    ALWAYS DELETE WHERE event_type = 'internal_test';
-    ALWAYS DELETE WHERE user_id IS NULL;
-    ALWAYS UPDATE SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe');
+    ALWAYS DELETE FROM bundle WHERE event_type = 'internal_test';
+    ALWAYS DELETE FROM bundle WHERE user_id IS NULL;
+    ALWAYS UPDATE bundle SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe');
 
     COMMIT 'Added persistent cleanup rules';
     ```
@@ -278,17 +277,17 @@ bundle.commit(f"Daily refresh — {date.today()}")
 === "Python"
 
     ```python
-    bundle.always_update("SET currency = UPPER(currency)")           # normalize 'usd' -> 'USD'
-    bundle.always_update("SET amount = ROUND(amount, 2)")            # normalize precision
-    bundle.always_update("SET event_type = LOWER(event_type)")       # normalize casing
+    bundle.always_update("SET currency = UPPER(currency) WHERE currency IS NOT NULL")      # normalize 'usd' -> 'USD'
+    bundle.always_update("SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL")          # normalize precision
+    bundle.always_update("SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL") # normalize casing
     ```
 
 === "SQL"
 
     ```sql
-    ALWAYS UPDATE SET currency = UPPER(currency);
-    ALWAYS UPDATE SET amount = ROUND(amount, 2);
-    ALWAYS UPDATE SET event_type = LOWER(event_type);
+    ALWAYS UPDATE bundle SET currency = UPPER(currency) WHERE currency IS NOT NULL;
+    ALWAYS UPDATE bundle SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL;
+    ALWAYS UPDATE bundle SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL;
     ```
 
 Rules accumulate — you can add new ones at any point in the pipeline's life. They're stored in the manifest alongside the source definitions and are visible in the commit history when they were added.
@@ -302,34 +301,25 @@ When you need to re-process historical data:
     ```python
     bundle = bb.open("s3://analytics/events-pipeline").extend()
 
-    # Replace just the base source (events) without touching ref or vendor
-    bundle.fetch("base", "replace")  # re-attach all matching partitions
+    # Replace just the base pack (events + vendor) without touching ref
+    bundle.fetch("base", "sync")  # re-attach all matching partitions
     bundle.commit("Backfill: re-fetched all base partitions after schema fix")
     ```
 
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/events-pipeline';
-    EXTEND;
-
     FETCH base SYNC;
     COMMIT 'Backfill: re-fetched all base partitions after schema fix';
     ```
 
-If something goes wrong mid-backfill, reset discards everything since the last commit:
+If something goes wrong mid-backfill, `RESET` discards everything since the last commit:
 
-=== "Python"
+```sql
+RESET;
+```
 
-    ```python
-    bundle.reset()  # back to the previous committed state, cleanly
-    ```
-
-=== "SQL"
-
-    ```sql
-    RESET;
-    ```
+In the async Python API, the equivalent is `await bundle.reset()` (`reset()` is not available in the sync API yet).
 
 ## Plugging into an orchestrator
 
@@ -362,8 +352,7 @@ Bundlebase doesn't replace a scheduler — use whatever you already have:
         from datetime import date
         bundle = bb.open("s3://analytics/events-pipeline").extend()
         bundle.fetch("base", "add")
-        bundle.fetch("ref", "replace")
-        bundle.fetch("vendor", "add")
+        bundle.fetch("ref", "sync")
         bundle.commit(f"Daily refresh — {date.today()}")
 
     refresh_task = PythonOperator(
@@ -381,7 +370,7 @@ Bundlebase doesn't replace a scheduler — use whatever you already have:
 | Audit log | Log files (if you wrote them) | Commit history, always |
 | Schema documentation | README (maybe) | Self-describing bundle |
 | Consumer access | S3 raw files + docs | One `bb.open()` |
-| Partial failure recovery | Manual cleanup | `bundle.reset()` |
+| Partial failure recovery | Manual cleanup | `RESET` |
 
 ## Next steps
 

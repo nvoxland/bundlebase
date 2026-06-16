@@ -104,10 +104,11 @@ Use `explain()` to see the query execution plan. It returns a stream of record b
 === "Sync API"
 
     ```python
-    stream = bundle.explain()
+    result = bundle.explain()
+    print(result)
 
     # With options
-    stream = bundle.explain(analyze=True, format="tree")
+    result = bundle.explain(analyze=True, format="tree")
     ```
 
 === "SQL"

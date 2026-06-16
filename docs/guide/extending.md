@@ -2,7 +2,9 @@
 
 Bundles can extend other bundles to build on previous versions.
 
-## From Chain
+## Extend a Bundle
+
+`extend()` turns an opened (read-only) bundle into a builder you can modify. Pass a data directory to write new data files somewhere other than the base bundle's directory.
 
 === "Async API"
 
@@ -10,10 +12,10 @@ Bundles can extend other bundles to build on previous versions.
     import bundlebase as bb
 
     # Load committed bundle
-    base = await bb.open("/base/container")
+    base = await bb.open("/base/bundle")
 
-    # Extend to new directory with new modifications
-    extended = await base.extend("/extended/container")
+    # Extend with a new data directory, then modify
+    extended = await base.extend("/extended/data")
     await extended.attach("new_data.parquet")
     ```
 
@@ -22,24 +24,24 @@ Bundles can extend other bundles to build on previous versions.
     ```python
     import bundlebase.sync as bb
 
-    base = bb.open("/base/container")
+    base = bb.open("/base/bundle")
 
-    extended = base.extend("/extended/container")
+    extended = base.extend("/extended/data")
     extended.attach("new_data.parquet")
     ```
 
 ## Exporting
 
-Export the entire bundle as a tar archive.
+Export the entire bundle as a tar archive. Pass `gzip=True` to write a `.tar.gz` instead.
 
 === "Async API"
 
     ```python
-    await c.export_tar("/path/to/output.tar")
+    await extended.export_tar("/path/to/output.tar")
     ```
 
 === "Sync API"
 
     ```python
-    c.export_tar("/path/to/output.tar")
+    extended.export_tar("/path/to/output.tar")
     ```

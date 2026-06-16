@@ -30,8 +30,8 @@ import bundlebase
 # Create a new bundle and chain operations
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18")
-    .remove_column("ssn")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
+    .drop_column("ssn")
     .rename_column("fname", "first_name"))
 
 # Convert to pandas
@@ -44,13 +44,13 @@ await c.commit("Cleaned customer data")
 ### Sync API
 
 ```python
-import bundlebase.sync as dc
+import bundlebase.sync as bb
 
 # Same operations, no await needed
-c = (dc.create()
+c = (bb.create()
     .attach("data.parquet")
-    .filter("age >= 18")
-    .remove_column("ssn")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
+    .drop_column("ssn")
     .rename_column("fname", "first_name"))
 
 df = c.to_pandas()
@@ -65,11 +65,11 @@ Process data larger than RAM efficiently:
 import bundlebase
 
 # Stream batches instead of loading everything
-c = await bundlebase.open("huge_dataset.parquet")
+c = await bundlebase.create().attach("huge_dataset.parquet")
 
 total_rows = 0
 async for batch in bundlebase.stream_batches(c):
-    # Each batch is ~100MB, not entire dataset
+    # Each batch is a slice of the data, not the entire dataset
     total_rows += batch.num_rows
     # Memory is freed after each iteration
 
@@ -81,43 +81,44 @@ print(f"Processed {total_rows} rows")
 ### Data Loading
 ```python
 c = await bundlebase.create()
-c = c.attach("data.parquet")      # Parquet files
-c = c.attach("data.csv")          # CSV files
-c = c.attach("data.json")         # JSON files
+c = await c.attach("data.parquet")      # Parquet files
+c = await c.attach("data.csv")          # CSV files
+c = await c.attach("data.jsonl")        # JSON Lines files
 ```
 
 ### Data Transformation
 ```python
-c = c.filter("active = true")              # Filter rows
-c = c.select(["id", "name", "email"])      # Select columns
-c = c.remove_column("temp_field")          # Remove columns
-c = c.rename_column("old", "new")          # Rename columns
-c = c.query("SELECT * FROM bundle WHERE ...")  # SQL queries
+c = await c.filter("SELECT * FROM bundle WHERE active = true")  # Filter rows
+c = await c.drop_column("temp_field")                           # Remove columns
+c = await c.rename_column("old", "new")                         # Rename columns
+
+rs = await c.query("SELECT * FROM bundle WHERE id > 10")        # SQL queries
+df = await rs.to_pandas()
 ```
 
 ### Data Export
 ```python
 df = await c.to_pandas()    # → pandas DataFrame
 df = await c.to_polars()    # → polars DataFrame
-arr = await c.to_numpy()    # → NumPy array
+arr = await c.to_numpy()    # → dict of NumPy arrays
 data = await c.to_dict()    # → Python dict
 ```
 
 ### Indexing
 ```python
-c = c.create_index("email")        # Create index for fast lookups
-c = c.rebuild_index("email")       # Rebuild existing index
+c = await c.create_index("email", "btree")   # Create index for fast lookups
+c = await c.rebuild_index("email")           # Rebuild existing index
 ```
 
 ### Joining
 ```python
 c = await bundlebase.create()
-c = c.attach("customers.parquet")
-c = c.join(
-    "orders.parquet",
-    left_on="customer_id",
-    right_on="id",
-    join_type="inner"
+c = await c.attach("customers.parquet")
+c = await c.join(
+    "orders",
+    "bundle.customer_id = orders.id",
+    location="orders.parquet",
+    join_type="inner",
 )
 ```
 
@@ -135,11 +136,11 @@ c = c.join(
 poetry install
 
 # Build Rust extension
-maturin develop
+./scripts/maturin-dev.sh
 
 # Run tests
-cargo test              # Rust tests
-poetry run pytest       # Python tests
+cargo test --profile test       # Rust tests
+poetry run pytest python/tests/ # Python tests
 ```
 
 ## Contributing

@@ -80,7 +80,7 @@ Parquet, CSV, and JSON are all supported. Attaching multiple files unions them t
 === "Sync API"
 
     ```python
-    c.filter("age >= 18")
+    c.filter("SELECT * FROM bundle WHERE age >= 18")
     c.drop_column("ssn")
     c.rename_column("fname", "first_name")
     ```
@@ -88,7 +88,7 @@ Parquet, CSV, and JSON are all supported. Attaching multiple files unions them t
 === "Async API"
 
     ```python
-    await c.filter("age >= 18")
+    await c.filter("SELECT * FROM bundle WHERE age >= 18")
     await c.drop_column("ssn")
     await c.rename_column("fname", "first_name")
     ```
@@ -159,9 +159,9 @@ All mutation methods return `self`:
 
     c = (bb.create("s3://mybucket/sales-q1")
         .attach("data.parquet")
-        .filter("active = true")
-        .drop_column("temp_field")
-        .commit("Initial commit"))
+        .filter("SELECT * FROM bundle WHERE active = true")
+        .drop_column("temp_field"))
+    c.commit("Initial commit")
     ```
 
 === "Async API"
@@ -171,9 +171,9 @@ All mutation methods return `self`:
 
     c = await (bb.create("s3://mybucket/sales-q1")
         .attach("data.parquet")
-        .filter("active = true")
-        .drop_column("temp_field")
-        .commit("Initial commit"))
+        .filter("SELECT * FROM bundle WHERE active = true")
+        .drop_column("temp_field"))
+    await c.commit("Initial commit")
     ```
 
 ## Next steps

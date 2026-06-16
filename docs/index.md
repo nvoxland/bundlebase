@@ -22,7 +22,7 @@ Bundlebase packages data into a versioned, self-describing container. Point anyo
         .attach("exports/jan.csv")
         .attach("exports/feb.csv")
         .drop_column("ssn")
-        .filter("status = 'closed_won'")
+        .filter("SELECT * FROM bundle WHERE status = 'closed_won'")
         .set_name("Q1 Sales -- Closed Won"))
     bundle.commit("Initial Q1 export")
 
@@ -40,10 +40,12 @@ Bundlebase packages data into a versioned, self-describing container. Point anyo
     FILTER WITH SELECT * FROM bundle WHERE status = 'closed_won';
     SET NAME 'Q1 Sales -- Closed Won';
     COMMIT 'Initial Q1 export';
+    ```
 
-    -- Anyone with the path
-    OPEN 's3://company-data/sales-q1';
-    SELECT region, SUM(amount) FROM bundle GROUP BY region;
+    ```bash
+    # Anyone with the path
+    bundlebase query --bundle s3://company-data/sales-q1 \
+      "SELECT region, SUM(amount) FROM bundle GROUP BY region"
     ```
 
 Commit once. Share the path. The consumer gets a DataFrame, a SQL connection, or a CLI session, whichever they prefer. The commit history *is* the changelog. No "which file is the latest?" conversations.
@@ -59,8 +61,8 @@ Agents lose context between sessions. A bundle doesn't. At startup the agent rea
     ```python
     # New session -- reconstruct from the bundle itself
     bundle = bb.open("s3://agent-workspace/product-reviews")
-    print(bundle.name)      # "Product Reviews"
-    print(bundle.num_rows)  # 14,302
+    print(bundle.name)        # "Product Reviews"
+    print(bundle.num_rows())  # 14302
     for e in bundle.history():
         print(e)            # what ran and when
 
@@ -71,9 +73,12 @@ Agents lose context between sessions. A bundle doesn't. At startup the agent rea
 
 === "SQL / MCP"
 
+    ```bash
+    # New session
+    bundlebase repl --bundle s3://agent-workspace/product-reviews
+    ```
+
     ```sql
-    -- REPL: new session
-    OPEN 's3://agent-workspace/product-reviews';
     SHOW STATUS;    -- name, rows, version
     SHOW HISTORY;   -- full commit log
 
@@ -99,8 +104,8 @@ Your source data is dirty. You clean it every time, until you forget. `always_de
     bundle = bb.create("s3://analytics/crm-export")
 
     # Define once
-    bundle.always_delete("WHERE amount < 0")
-    bundle.always_delete("WHERE status = 'test'")
+    bundle.always_delete("amount < 0")
+    bundle.always_delete("status = 'test'")
 
     # Attach dirty data -- rules fire automatically
     bundle.attach("jan.csv").commit("January")
@@ -110,9 +115,8 @@ Your source data is dirty. You clean it every time, until you forget. `always_de
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/crm-export';
-    ALWAYS DELETE WHERE amount < 0;
-    ALWAYS DELETE WHERE status = 'test';
+    ALWAYS DELETE FROM bundle WHERE amount < 0;
+    ALWAYS DELETE FROM bundle WHERE status = 'test';
 
     -- attach dirty data -- rules fire automatically
     ATTACH 'jan.csv';

@@ -4,7 +4,7 @@ You can create a bundle built up of data in different files joined together, eve
 
 When joining, you must specify a unique `name` for the join and an `on` expression defining how the data relates. Use `bundle.` to reference columns from the bundle's existing data in the join expression.
 
-You can optionally specify a `location` for the initial data and a `how` for the join type (`"inner"`, `"left"`, `"right"`, or `"full"`).
+You can optionally specify a `location` for the initial data and a join type (`"inner"`, `"left"`, `"right"`, or `"full"`). The join type parameter is named `how` in the sync API and `join_type` in the async API.
 
 ## Basic Usage
 
@@ -17,7 +17,7 @@ You can optionally specify a `location` for the initial data and a `how` for the
     await bundle.attach("customers.parquet")
 
     # Join with orders data
-    await bundle.join("orders", on="bundle.customer_id = orders.id",
+    await bundle.join("orders", "bundle.customer_id = orders.id",
                  location="s3://external/orders.parquet")
     print(await bundle.to_pandas())
     ```
@@ -58,7 +58,7 @@ You can join with the query output of another committed bundle using a `bundle:/
 === "Async API"
 
     ```python
-    await bundle.join("other", on="bundle.id = other.id",
+    await bundle.join("other", "bundle.id = other.id",
                  location="bundle:///path/to/other/bundle")
     ```
 
@@ -80,7 +80,7 @@ You can join with the query output of another committed bundle using a `bundle:/
 === "Async API"
 
     ```python
-    await bundle.join("other", on="bundle.id = other.id",
+    await bundle.join("other", "bundle.id = other.id",
                  location="bundle+s3://bucket/path/to/bundle")
     ```
 
@@ -101,7 +101,7 @@ Create a join point without initial data. Data can be attached later using `atta
 === "Async API"
 
     ```python
-    await bundle.join("orders", on="bundle.customer_id = orders.id")
+    await bundle.join("orders", "bundle.customer_id = orders.id")
 
     # Attach data to the join later
     await bundle.attach("orders.parquet", pack="orders")
@@ -116,34 +116,28 @@ Create a join point without initial data. Data can be attached later using `atta
     bundle.attach("orders.parquet", pack="orders")
     ```
 
-=== "SQL"
-
-    ```sql
-    JOIN AS orders ON bundle.customer_id = orders.id
-    ```
-
 ## Join Types
 
 === "Async API"
 
     ```python
     # Left join (keep all customers, even without orders)
-    await bundle.join("orders", on="bundle.customer_id = orders.id",
-                 location="orders.parquet", how="left")
+    await bundle.join("orders", "bundle.customer_id = orders.id",
+                 location="orders.parquet", join_type="left")
 
     # Full outer join
-    await bundle.join("all_data", on="bundle.id = all_data.id",
-                 location="other.parquet", how="full")
+    await bundle.join("all_data", "bundle.id = all_data.id",
+                 location="other.parquet", join_type="full")
     ```
 
 === "Sync API"
 
     ```python
-    bundle.join("orders", on="bundle.customer_id = orders.id",
-           location="orders.parquet", how="left")
+    bundle.join("orders", "bundle.customer_id = orders.id",
+           location="orders.parquet", join_type="left")
 
-    bundle.join("all_data", on="bundle.id = all_data.id",
-           location="other.parquet", how="full")
+    bundle.join("all_data", "bundle.id = all_data.id",
+           location="other.parquet", join_type="full")
     ```
 
 === "SQL"
@@ -184,17 +178,14 @@ Rename an existing join.
     await bundle.rename_join("orders", new_name="customer_orders")
     ```
 
-=== "Sync API"
-
-    ```python
-    bundle.rename_join("orders", new_name="customer_orders")
-    ```
-
 === "SQL"
 
     ```sql
     RENAME JOIN orders TO customer_orders
     ```
+
+!!! note
+    `rename_join()` is not available in the sync API yet.
 
 !!! note
     Until you commit, join changes will not be used when the bundle is reopened.

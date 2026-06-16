@@ -39,7 +39,7 @@ import bundlebase
 # Each method call returns a chain
 c = await bundlebase.create()  # CreateChain
 c = await c.attach("data.parquet")  # OperationChain
-c = await c.filter("age >= 18")  # OperationChain
+c = await c.filter("SELECT * FROM bundle WHERE age >= 18")  # OperationChain
 c = await c.drop_column("ssn")  # OperationChain
 
 # Final await executes all queued operations
@@ -56,7 +56,7 @@ import bundlebase
 # Chain operations before execution
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("active = true")
+    .filter("SELECT * FROM bundle WHERE active = true")
     .drop_column("temp"))
 
 # Execute when needed
@@ -73,7 +73,7 @@ import bundlebase
 # All operations are queued
 chain = (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .rename_column("fname", "first_name"))
 
 # Single await executes creation + all operations
@@ -94,7 +94,7 @@ original = await bundlebase.open("/path/to/bundle")
 # Extend with chained operations
 extended = await (original.extend("/path/to/new/bundle")
     .attach("new_data.parquet")
-    .filter("year >= 2020"))
+    .filter("SELECT * FROM bundle WHERE year >= 2020"))
 
 # Commit the extended bundle
 await extended.commit("Added 2020+ data")
@@ -110,7 +110,7 @@ import bundlebase
 # Start with a chain
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18"))
+    .filter("SELECT * FROM bundle WHERE age >= 18"))
 
 # Continue with direct calls
 c = await c.drop_column("ssn")
@@ -118,8 +118,8 @@ c = await c.rename_column("fname", "first_name")
 
 # Or resume chaining
 c = await (c
-    .query("SELECT id, first_name, last_name FROM bundle")
-    .filter("active = true"))
+    .filter("SELECT * FROM bundle WHERE active = true")
+    .drop_column("middle_name"))
 
 df = await c.to_pandas()
 ```
@@ -134,13 +134,13 @@ Chaining keeps the code readable:
 # With chaining
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .drop_column("ssn"))
 
 # Without chaining (more verbose)
 c = await bundlebase.create()
 c = await c.attach("data.parquet")
-c = await c.filter("age >= 18")
+c = await c.filter("SELECT * FROM bundle WHERE age >= 18")
 c = await c.drop_column("ssn")
 ```
 
@@ -152,13 +152,13 @@ Operations are queued and executed together, reducing async overhead:
 # Good: Single async call
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .drop_column("ssn"))  # All operations execute together
 
 # Less optimal: Multiple async calls
 c = await bundlebase.create()
 c = await c.attach("data.parquet")  # Separate async call
-c = await c.filter("age >= 18")  # Separate async call
+c = await c.filter("SELECT * FROM bundle WHERE age >= 18")  # Separate async call
 c = await c.drop_column("ssn")  # Separate async call
 ```
 
@@ -172,7 +172,7 @@ import bundlebase
 # IDE knows c is PyBundleBuilder
 c = await (bundlebase.create()
     .attach("data.parquet")  # Autocomplete available
-    .filter("age >= 18")  # Autocomplete available
+    .filter("SELECT * FROM bundle WHERE age >= 18")  # Autocomplete available
     .drop_column("ssn"))  # Autocomplete available
 ```
 
@@ -190,7 +190,7 @@ chain = bundlebase.create().attach("data.parquet")
 
 # Conditionally add operations
 if filter_active:
-    chain = chain.filter("active = true")
+    chain = chain.filter("SELECT * FROM bundle WHERE active = true")
 
 if remove_pii:
     chain = chain.drop_column("email")
@@ -211,7 +211,7 @@ from bundlebase.chain import OperationChain
 def clean_customer_data(chain: OperationChain) -> OperationChain:
     """Standard customer data cleaning."""
     return (chain
-        .filter("active = true")
+        .filter("SELECT * FROM bundle WHERE active = true")
         .drop_column("email")
         .drop_column("phone")
         .rename_column("fname", "first_name")
@@ -237,7 +237,7 @@ chain = bundlebase.create().attach("data.parquet")
 
 # Add operations from a list
 operations = [
-    ("filter", ["age >= 18"], {}),
+    ("filter", ["SELECT * FROM bundle WHERE age >= 18"], {}),
     ("drop_column", ["ssn"], {}),
     ("rename_column", ["fname", "first_name"], {}),
 ]
@@ -268,7 +268,7 @@ import bundlebase.sync as dc
 # Chains work in sync API too
 c = (dc.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .drop_column("ssn"))
 
 df = c.to_pandas()  # No await needed

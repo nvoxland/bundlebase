@@ -107,18 +107,14 @@ Discard all uncommitted changes, reverting to the last committed state.
     await bundle.reset()  # Discards the attach
     ```
 
-=== "Sync API"
-
-    ```python
-    bundle.attach("wrong_file.csv")
-    bundle.reset()  # Discards the attach
-    ```
-
 === "SQL"
 
     ```sql
     RESET
     ```
+
+!!! note
+    `reset()` and `undo()` are not available in the sync API yet.
 
 ## Undo
 
@@ -130,14 +126,6 @@ Undo the last uncommitted operation. Can be called multiple times to undo severa
     await bundle.attach("a.csv")
     await bundle.attach("b.csv")
     await bundle.undo()  # Undoes the attach of b.csv
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.attach("a.csv")
-    bundle.attach("b.csv")
-    bundle.undo()  # Undoes the attach of b.csv
     ```
 
 === "SQL"
@@ -161,15 +149,6 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     results = await bundle.verify_data(update_versions=True)
     ```
 
-=== "Sync API"
-
-    ```python
-    results = bundle.verify_data()
-    print(results)
-
-    results = bundle.verify_data(update_versions=True)
-    ```
-
 === "SQL"
 
     ```sql
@@ -178,14 +157,17 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     VERIFY DATA UPDATE
     ```
 
+!!! note
+    `verify_data()` is not available in the sync API yet.
+
 ## Format Compatibility
 
-Every bundle records the minimum and maximum bundlebase version required to open it. These are set automatically when a bundle is created and track the major.minor version (e.g., `0.9`).
+Every bundle records the minimum bundlebase version required to open it. This is set automatically when a bundle is created and tracks the major.minor version (e.g., `0.9`). A maximum version can also be recorded, but new bundles leave it unset so any future bundlebase version can open them.
 
 When opening a bundle:
 
 - If the current bundlebase version is **below** the bundle's minimum version, an error is returned. This means the bundle uses features that this version of bundlebase doesn't support.
-- If the current bundlebase version is **above** the bundle's maximum version, an error is returned with a suggestion to upgrade.
+- If the bundle has a maximum version recorded and the current bundlebase version is **above** it, an error is returned with a suggestion to upgrade the bundle.
 
 Old bundles created before version tracking was added will open without restriction.
 

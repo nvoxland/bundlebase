@@ -6,7 +6,7 @@ This document describes bundlebase's performance characteristics, optimization s
 
 Bundlebase is designed to handle **datasets larger than RAM** through streaming execution:
 
-1. **Constant memory usage** - RAM independent of dataset size
+1. **Constant memory usage** - RAM independent of dataset size *on the streaming paths* (`execute_stream()` in Rust, `stream_batches()` in Python). Final conversions like `to_pandas()` necessarily materialize the result.
 2. **Streaming-first** - Process data incrementally, never load entire dataset
 3. **Lazy evaluation** - Execute queries only when results needed
 4. **Predicate pushdown** - Filter at data source when possible
@@ -20,7 +20,9 @@ Bundlebase is designed to handle **datasets larger than RAM** through streaming 
 
 ## Expected Performance
 
-### Memory Usage
+### Memory Usage (streaming path)
+
+When consuming data through `stream_batches()` / `as_pyarrow_stream()` (Python) or `execute_stream()` (Rust):
 
 | Dataset Size | RAM Usage | Explanation |
 |--------------|-----------|-------------|
@@ -30,9 +32,9 @@ Bundlebase is designed to handle **datasets larger than RAM** through streaming 
 | 100 GB       | ~50 MB    | Same - no dataset loaded into memory |
 | 1 TB         | ~50 MB    | Same - streaming is key |
 
-**Key insight:** Memory usage is **constant** regardless of dataset size.
+**Key insight:** On the streaming path, memory usage is **constant** regardless of dataset size. If memory grows with dataset while streaming → streaming violation (bug).
 
-**If memory grows with dataset → streaming violation (bug).**
+**Materializing conversions are different:** `to_pandas()` / `to_polars()` stream batches from Rust but accumulate every batch to build the final DataFrame — peak memory is roughly **2x the dataset size** (batches + final frame; see `python/src/bundlebase/conversion.py`). `as_pyarrow()` uses DataFusion `collect()` and materializes everything. Use these only when the result fits comfortably in RAM.
 
 ---
 
@@ -118,8 +120,7 @@ Usage  │ │ │ │ │ │ │ │ │ Constant
 
 ```python
 # Only reads "name" and "age" columns from Parquet
-c.query("SELECT name, age FROM bundle")
-df = c.to_pandas()
+df = c.query("SELECT name, age FROM bundle").to_pandas()
 
 # DataFusion automatically pushes projection to ParquetExec
 # Result: Reads only 2 columns instead of all 100 columns
@@ -137,7 +138,7 @@ df = c.to_pandas()
 
 ```python
 # DataFusion pushes filter into Parquet reader
-c.filter("age > 18")
+c.filter("SELECT * FROM bundle WHERE age > 18")
 df = c.to_pandas()
 
 # ParquetExec skips row groups where max(age) <= 18
@@ -155,10 +156,10 @@ df = c.to_pandas()
 **Pattern:** Defer execution until query time
 
 ```python
-# These operations don't execute yet (just recorded)
-c.filter("age > 18")  # Recorded
-c.query("SELECT name FROM bundle")  # Recorded
-c.filter("age < 65")   # Recorded
+# These operations don't execute the data pipeline yet (just recorded)
+c.filter("SELECT * FROM bundle WHERE age > 18")  # Recorded
+c.filter("SELECT * FROM bundle WHERE age < 65")  # Recorded
+c.add_column("age_band", "age / 10")             # Recorded
 
 # Execution happens here (all operations in single pass)
 df = c.to_pandas()  # NOW execute entire pipeline
@@ -224,11 +225,13 @@ df = pa.Table.from_batches(batches)  # Entire dataset in memory
 
 **Right:**
 ```python
-# Let Rust handle streaming internally
-df = c.to_pandas()  # Streams internally, constant memory
+# Process each batch and keep only the reduced result
+totals = 0
+for batch in c.stream_batches():
+    totals += batch.column("amount").to_pandas().sum()
 ```
 
-**Impact:** Defeats streaming, memory grows with dataset
+**Impact:** Defeats streaming, memory grows with dataset. (Note: `to_pandas()` does this accumulation internally by design — that's why it should only be used when the result fits in RAM.)
 
 ---
 
@@ -258,8 +261,8 @@ fn process(df: DataFrame) -> DataFrame {
 **Wrong:**
 ```python
 # Two passes over data
-count = c.count()  # Pass 1
-df = c.to_pandas()  # Pass 2
+count = c.num_rows()  # Pass 1
+df = c.to_pandas()    # Pass 2
 ```
 
 **Right:**
@@ -283,8 +286,7 @@ names = df["name"]  # Only needed one column
 
 **Right:**
 ```python
-c.query("SELECT name FROM bundle")  # Project before reading
-df = c.to_pandas()  # Reads only 1 column
+df = c.query("SELECT name FROM bundle").to_pandas()  # Reads only 1 column
 ```
 
 **Impact:** 100x more data read than necessary
@@ -299,16 +301,19 @@ df = c.to_pandas()  # Reads only 1 column
 import psutil
 import os
 
+import bundlebase.sync as bb
+
 def test_streaming_memory():
     process = psutil.Process(os.getpid())
 
-    c = bundlebase.create()
+    c = bb.create()
     c.attach("large_10gb.parquet")
 
     mem_before = process.memory_info().rss / 1024 / 1024  # MB
 
-    # Process entire dataset
-    df = c.to_pandas()
+    # Stream the entire dataset without materializing it
+    for batch in c.stream_batches():
+        pass
 
     mem_after = process.memory_info().rss / 1024 / 1024  # MB
     mem_growth = mem_after - mem_before
@@ -317,7 +322,7 @@ def test_streaming_memory():
     assert mem_growth < 100, f"Memory grew by {mem_growth}MB"
 ```
 
-**Expected:** <100MB growth regardless of dataset size
+**Expected:** <100MB growth regardless of dataset size when streaming. (A `to_pandas()` of the same data would grow by ~2x the dataset size — that is expected, not a bug.)
 
 ---
 
@@ -329,9 +334,9 @@ import time
 def test_execution_time():
     start = time.time()
 
-    c = bundlebase.create()
+    c = bb.create()
     c.attach("large_10gb.parquet")
-    c.filter("age > 18")
+    c.filter("SELECT * FROM bundle WHERE age > 18")
     df = c.to_pandas()
 
     elapsed = time.time() - start
@@ -354,7 +359,7 @@ def test_scalability():
     times = []
 
     for size in sizes:
-        c = bundlebase.create()
+        c = bb.create()
         c.attach(f"test_data_{size}.parquet")
 
         start = time.time()
@@ -513,9 +518,9 @@ rg "\.collect\(\)" --type rust
 3. Profile to find bottleneck
 
 **Solution:**
-- Add `select()` to read fewer columns
+- Use `query("SELECT col1, col2 FROM bundle")` to read fewer columns
 - Ensure filters use indexed columns
-- Check DataFusion query plan
+- Check DataFusion query plan (`explain()`)
 
 ---
 
@@ -578,7 +583,7 @@ rg "\.collect\(\)" --type rust
 
 **Key Performance Characteristics:**
 
-1. **Memory:** Constant (~50MB) regardless of dataset size
+1. **Memory:** Constant (~50MB) regardless of dataset size when streaming (`stream_batches()` / `execute_stream()`); ~2x dataset size at peak for materializing conversions (`to_pandas()` / `to_polars()`)
 2. **Time:** Linear scaling with data size (O(n))
 3. **I/O:** Limited by SSD read speed (~300-500 MB/s)
 4. **CPU:** Minimal overhead (DataFusion optimized)

@@ -22,8 +22,8 @@ Monthly export from a CRM, stripped of PII, normalized, and shared with the data
             "Monthly CRM export. Enterprise accounts only, closed-won deals. "
             "PII removed. Normalized column names."
         )
-        .always_delete("WHERE customer_tier != 'enterprise'")
-        .always_delete("WHERE status != 'closed_won'")
+        .always_delete("customer_tier != 'enterprise'")
+        .always_delete("status != 'closed_won'")
         .attach("s3://crm-raw/2026-01.csv")
         .attach("s3://crm-raw/2026-02.csv")
         .attach("s3://crm-raw/2026-03.csv")
@@ -35,7 +35,7 @@ Monthly export from a CRM, stripped of PII, normalized, and shared with the data
         .drop_column("ssn"))
 
     bundle.commit("Initial Q1 export")
-    print(f"Exported {bundle.num_rows:,} rows")
+    print(f"Exported {bundle.num_rows():,} rows")
 
     # Monthly update — rules fire automatically, no need to re-specify filters
     bundle = bb.open("s3://team-data/crm-export").extend()
@@ -45,27 +45,28 @@ Monthly export from a CRM, stripped of PII, normalized, and shared with the data
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/crm-export --create
+    ```
+
     ```sql
     -- First run
-    CREATE 's3://team-data/crm-export';
     SET NAME 'CRM — Enterprise Closed Won';
     SET DESCRIPTION 'Monthly CRM export. Enterprise accounts only, closed-won deals. PII removed. Normalized column names.';
-    ALWAYS DELETE WHERE customer_tier != 'enterprise';
-    ALWAYS DELETE WHERE status != 'closed_won';
+    ALWAYS DELETE FROM bundle WHERE customer_tier != 'enterprise';
+    ALWAYS DELETE FROM bundle WHERE status != 'closed_won';
     ATTACH 's3://crm-raw/2026-01.csv';
     ATTACH 's3://crm-raw/2026-02.csv';
     ATTACH 's3://crm-raw/2026-03.csv';
     NORMALIZE COLUMN NAMES;
-    CAST COLUMN amount AS FLOAT64;
-    CAST COLUMN close_date AS DATE;
+    CAST COLUMN amount TO float64;
+    CAST COLUMN close_date TO date32;
     DROP COLUMN email;
     DROP COLUMN phone;
     DROP COLUMN ssn;
     COMMIT 'Initial Q1 export';
 
-    -- Monthly update
-    OPEN 's3://team-data/crm-export';
-    EXTEND;
+    -- Monthly update (reopen the bundle in a later session)
     ATTACH 's3://crm-raw/2026-04.csv';
     COMMIT 'Monthly refresh — April 2026';
     ```
@@ -83,9 +84,9 @@ Monthly export from a CRM, stripped of PII, normalized, and shared with the data
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://team-data/crm-export';
-    SELECT region, SUM(amount) as total FROM bundle GROUP BY region;
+    ```bash
+    bundlebase query --bundle s3://team-data/crm-export \
+      "SELECT region, SUM(amount) as total FROM bundle GROUP BY region"
     ```
 
 ---
@@ -104,8 +105,8 @@ An internal API publishes a JSON endpoint. This pipeline fetches new records dai
     bundle = (bb.create("s3://analytics/usage-events")
         .set_name("Customer Usage Events")
         .set_description("Daily pull from /api/v2/events. All accounts, all event types.")
-        .always_delete("WHERE event_type = 'internal_test'")
-        .always_update("SET event_type = LOWER(event_type)")
+        .always_delete("event_type = 'internal_test'")
+        .always_update("SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL")
         .create_source("http", {
             "url": "https://api.internal/v2/events/export",
             "headers": "Authorization: Bearer TOKEN",
@@ -124,12 +125,15 @@ An internal API publishes a JSON endpoint. This pipeline fetches new records dai
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/usage-events --create
+    ```
+
     ```sql
     -- First run
-    CREATE 's3://analytics/usage-events';
     SET NAME 'Customer Usage Events';
-    ALWAYS DELETE WHERE event_type = 'internal_test';
-    ALWAYS UPDATE SET event_type = LOWER(event_type);
+    ALWAYS DELETE FROM bundle WHERE event_type = 'internal_test';
+    ALWAYS UPDATE bundle SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL;
     CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.internal/v2/events/export',
         headers = 'Authorization: Bearer TOKEN',
@@ -139,9 +143,7 @@ An internal API publishes a JSON endpoint. This pipeline fetches new records dai
     FETCH base ADD;
     COMMIT 'Initial load';
 
-    -- Daily run
-    OPEN 's3://analytics/usage-events';
-    EXTEND;
+    -- Daily run (reopen the bundle in a later session)
     FETCH base ADD;
     COMMIT 'Daily refresh';
     ```
@@ -160,59 +162,54 @@ Combine data from multiple vendors (SFTP, HTTP) into a single queryable bundle. 
 
     bundle = (bb.create("s3://analytics/vendor-sales")
         .set_name("Vendor Sales — Combined Feed")
-        .always_update("SET currency = UPPER(currency)")
-        .always_update("SET region = UPPER(region)")
-        .create_source("sftp_directory", {
-            "url": "sftp://vendor-a.example.com/outbound/",
+        .always_update("SET currency = UPPER(currency) WHERE currency IS NOT NULL")
+        .always_update("SET region = UPPER(region) WHERE region IS NOT NULL")
+        .create_source("remote_dir", {
+            "url": "sftp://pipeline-user@vendor-a.example.com/outbound/",
             "patterns": "sales_*.csv",
-            "username": "pipeline-user",
             "key_path": "/etc/keys/vendor_a_rsa"
         })
         .create_source("http", {
             "url": "https://api.vendor-b.com/export/sales",
             "format": "json",
             "json_record_path": "records"
-        }, name="vendor_b"))
+        }))
 
     bundle.fetch("base", "add")
-    bundle.fetch("vendor_b", "add")
     bundle.commit("Initial combined load")
 
-    # Weekly refresh
+    # Weekly refresh — both sources feed the base pack
     bundle = bb.open("s3://analytics/vendor-sales").extend()
-    bundle.fetch("base", "add")       # Vendor A: new SFTP drops
-    bundle.fetch("vendor_b", "sync")  # Vendor B: full replacement (snapshot API)
+    bundle.fetch("base", "add")       # picks up new SFTP drops and API records
     bundle.commit(f"Weekly refresh — {date.today()}")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/vendor-sales --create
+    ```
+
     ```sql
     -- Setup
-    CREATE 's3://analytics/vendor-sales';
     SET NAME 'Vendor Sales — Combined Feed';
-    ALWAYS UPDATE SET currency = UPPER(currency);
-    ALWAYS UPDATE SET region = UPPER(region);
-    CREATE SOURCE FOR base USING sftp_directory WITH (
-        url = 'sftp://vendor-a.example.com/outbound/',
+    ALWAYS UPDATE bundle SET currency = UPPER(currency) WHERE currency IS NOT NULL;
+    ALWAYS UPDATE bundle SET region = UPPER(region) WHERE region IS NOT NULL;
+    CREATE SOURCE FOR base USING remote_dir WITH (
+        url = 'sftp://pipeline-user@vendor-a.example.com/outbound/',
         patterns = 'sales_*.csv',
-        username = 'pipeline-user',
         key_path = '/etc/keys/vendor_a_rsa'
     );
-    CREATE SOURCE FOR vendor_b USING http WITH (
+    CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.vendor-b.com/export/sales',
         format = 'json',
         json_record_path = 'records'
     );
     FETCH base ADD;
-    FETCH vendor_b ADD;
     COMMIT 'Initial combined load';
 
-    -- Weekly refresh
-    OPEN 's3://analytics/vendor-sales';
-    EXTEND;
+    -- Weekly refresh (reopen the bundle in a later session)
     FETCH base ADD;
-    FETCH vendor_b SYNC;
     COMMIT 'Weekly refresh';
     ```
 
@@ -242,7 +239,7 @@ A bundle as durable, queryable state for a multi-session agent. The agent can re
 
     # Session 2: the agent opens the bundle and reconstructs context
     bundle = bb.open("s3://agent-workspace/research")
-    print(f"{bundle.name}: {bundle.num_rows:,} rows at {bundle.version}")
+    print(f"{bundle.name}: {bundle.num_rows():,} rows at {bundle.version}")
     for entry in bundle.history():
         print(f"  {entry}")
 
@@ -254,9 +251,12 @@ A bundle as durable, queryable state for a multi-session agent. The agent can re
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://agent-workspace/research --create
+    ```
+
     ```sql
     -- Session 1
-    CREATE 's3://agent-workspace/research';
     SET NAME 'Competitive Research';
     CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.competitor-a.com/pricing',
@@ -266,13 +266,11 @@ A bundle as durable, queryable state for a multi-session agent. The agent can re
     FETCH base ADD;
     COMMIT 'Session 1: initial competitor A fetch';
 
-    -- Session 2: reconstruct context
-    OPEN 's3://agent-workspace/research';
+    -- Session 2: reopen the bundle and reconstruct context
     SHOW STATUS;
     SHOW HISTORY;
 
     -- Continue
-    EXTEND;
     FETCH base ADD;
     COMMIT 'Session 2: daily refresh';
     ```

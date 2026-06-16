@@ -45,8 +45,8 @@ For detailed documentation, see the modular guides in the `.context/` directory:
   - [002-datafusion-arrow.md](.context/decisions/002-datafusion-arrow.md) - DataFusion and Arrow choice
   - [003-streaming-only.md](.context/decisions/003-streaming-only.md) - Streaming execution mandate
   - [004-three-tier-architecture.md](.context/decisions/004-three-tier-architecture.md) - Three-tier design
-  - [005-mutable-operations.md](.context/decisions/005-mutable-operations.md) - `&mut Self` return pattern
-  - [006-lazy-evaluation.md](.context/decisions/006-lazy-evaluation.md) - Three-phase operation pattern
+  - [005-mutable-operations.md](.context/decisions/005-mutable-operations.md) - Interior-mutability operation pattern (`&self -> Result<&Self>`)
+  - [006-lazy-evaluation.md](.context/decisions/006-lazy-evaluation.md) - Lazy evaluation and the operation lifecycle
   - [007-no-unwrap.md](.context/decisions/007-no-unwrap.md) - No `.unwrap()` allowed
   - [008-no-mod-rs.md](.context/decisions/008-no-mod-rs.md) - Named module files convention
 
@@ -71,10 +71,10 @@ The published end-user facing documentation is manged in the `docs` directory.
 ## Key Principles
 
 - **Always start with Rust**, then write Python bindings
-- **All Operations mutate in place** - modification methods return `&mut self`
+- **All Operations mutate in place** - modification methods take `&self` and return `Result<&Self>`, mutating shared state via interior mutability (`Arc<RwLock<...>>`)
 - **Lazy evaluation** - queries execute on demand, not when operations are recorded
 - **Streaming execution** - use `execute_stream()`, never `collect()` for memory efficiency
-- **Three phases** - operations validate, reconfigure state, then apply to DataFrames
+- **Operation lifecycle** - operations `check()` (validate), `apply()` (update bundle state), then `apply_dataframe()` (transform the lazy DataFrame)
 - **Tests live in Rust** - most test coverage (including e2e) belongs in `rust/bundlebase/tests/`. Python tests exist only to verify the Python binding itself and should stay thin and high-level — they do NOT re-test underlying Rust logic.
 
 See [.context/development.md](.context/development.md) for full development workflow.
@@ -120,11 +120,11 @@ See [scripts/README.md](scripts/README.md) for detailed explanation.
 
 Bundlebase uses streaming execution throughout to handle datasets larger than RAM:
 
-- ✅ **Python**: Use `to_pandas()` / `to_polars()` - they stream internally (constant memory)
-- ✅ **Python**: Use `stream_batches()` for custom incremental processing
+- ✅ **Python**: Use `stream_batches()` for bounded-memory incremental processing
+- ⚠️ **Python**: `to_pandas()` / `to_polars()` stream batches internally but accumulate them all to build the final DataFrame (~2x dataset size at peak) - fine when the result fits in RAM; use `stream_batches()` otherwise
 - ✅ **Rust**: Always use `execute_stream()` for query execution
 - ❌ **Rust**: Never use `collect()` - materializes entire dataset in memory (3x size)
-- ❌ **Python**: Avoid `as_pyarrow()` for large datasets - use `stream_batches()` instead
+- ❌ **Python**: Avoid `as_pyarrow()` for large datasets (it uses DataFusion `collect()`) - use `stream_batches()` instead
 
 **See:**
 - [.context/architecture.md](.context/architecture.md#streaming-execution-architecture) for architectural details

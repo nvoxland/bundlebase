@@ -62,7 +62,7 @@ Results include all columns from the bundle plus a `_score` column with the BM25
     SELECT * FROM search('machine learning')
 
     -- Specify index name
-    SELECT * FROM search('desc_search', 'machine learning')
+    SELECT * FROM search('idx_description', 'machine learning')
 
     -- Order by relevance
     SELECT title, description, _score

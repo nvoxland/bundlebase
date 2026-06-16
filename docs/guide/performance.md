@@ -9,13 +9,13 @@ For datasets larger than RAM, use streaming:
     ```python
     import bundlebase
 
-    # Open large dataset
-    c = await bundlebase.open("huge_dataset.parquet")
+    # Attach large dataset
+    c = await bundlebase.create().attach("huge_dataset.parquet")
 
     # Stream batches instead of loading everything
     total_rows = 0
     async for batch in bundlebase.stream_batches(c):
-        # Each batch is ~100MB, not entire dataset
+        # Each batch is a slice of the data, not the entire dataset
         total_rows += batch.num_rows
         # Memory is freed after each iteration
 
@@ -33,7 +33,7 @@ For datasets larger than RAM, use streaming:
     # Stream batches instead of loading everything
     total_rows = 0
     for batch in dc.stream_batches(c):
-        # Each batch is ~100MB, not entire dataset
+        # Each batch is a slice of the data, not the entire dataset
         total_rows += batch.num_rows
         # Memory is freed after each iteration
 

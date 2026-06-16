@@ -60,8 +60,8 @@ See [scripts/README.md](../scripts/README.md) for technical details.
 
 ### Step 2: Write Python Bindings
 
-- Add PyO3 bindings in `src/python/`
-- Remember: PyO3 code should only be used in the python module
+- Add PyO3 bindings in `rust/bundlebase-python/src/`
+- Remember: PyO3 code should only be used in the `bundlebase-python` crate
 - Don't create mod.rs files
 - Use proper error handling with `.map_err()` to convert Rust errors to Python exceptions
 
@@ -185,25 +185,25 @@ Before committing Python code:
 
 ## File Organization
 
-- **Rust source**: `src/` directory
-- **Python bindings**: `src/python/` directory
-- **Python package**: `python/Bundlebase/` directory
-- **Rust tests**: `tests/` directory
-- **Python tests**: `python/tests/test_e2e.py`
+- **Rust source**: `rust/` workspace crates (`bundlebase`, `bundlebase-common`, `bundlebase-command`, `bundlebase-python`, `bundlebase-cli`, etc.)
+- **Python bindings**: `rust/bundlebase-python/src/` directory
+- **Python package**: `python/src/bundlebase/` directory
+- **Rust tests**: `rust/bundlebase/tests/` directory
+- **Python tests**: `python/tests/` directory
 - **Test data**: `test_data/` directory
-- **Configuration**: `Cargo.toml`, `pyproject.toml`
+- **Configuration**: `Cargo.toml` (workspace), `pyproject.toml`
 
 ## Common Commands
 
 ```bash
-# Build development version
-maturin develop
+# Build development version (NEVER use `maturin develop` directly)
+./scripts/maturin-dev.sh
 
 # Run all tests
-cargo test && poetry run pytest
+cargo test --profile test && poetry run pytest
 
 # Run Rust tests only
-cargo test
+cargo test --profile test
 
 # Run Python tests only
 poetry run pytest
@@ -212,7 +212,7 @@ poetry run pytest
 poetry run pytest -v -s
 
 # Build release
-maturin build --release
+./scripts/maturin-build.sh --release
 ```
 
 ## Git Workflow
@@ -229,10 +229,10 @@ When implementing features:
 - Use `&self` methods on any container type
 
 **For mutation operations:**
-- Only work with BundlebaseBuilder
+- Only work with BundleBuilder
 - Use `&mut self` methods that return `&mut Self`
 - Operations modify container in place and can be chained
 
 **For serialization:**
-- Use `Operation::config()` to serialize operations
-- Deserialize via `OperationRegistry` to reconstruct operations
+- Operations derive `Serialize`/`Deserialize` and are tagged via the `AnyOperation` enum (`define_any_operation!` macro in `operation.rs`)
+- Commits serialize operations to YAML; deserializing a commit reconstructs them

@@ -1,11 +1,11 @@
 ---
 title: Bundlebase for AI Assistant Users — Query Bundles in Natural Language
-description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Start the MCP server and your assistant gets schema, history, sample, and query as native tools.
+description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Set up the MCP server and your assistant gets schema, history, sample, and query as native tools.
 ---
 
 # Use Case: AI Assistant User
 
-You have a bundle. You want to ask questions about the data, explore it, and get answers — without writing SQL or Python yourself. Start the MCP server once and your AI assistant (Claude, ChatGPT, or any MCP-compatible assistant) gets direct access to the bundle.
+You have a bundle. You want to ask questions about the data, explore it, and get answers — without writing SQL or Python yourself. Set up the MCP server once and your AI assistant (Claude, ChatGPT, or any MCP-compatible assistant) gets direct access to the bundle.
 
 ## Setup
 
@@ -27,13 +27,18 @@ After setup, your assistant has these tools available whenever it works with a b
 
 | Tool | What it does |
 |------|-------------|
-| `status` | Bundle path, version, row count, last commit |
+| `open_bundle` / `create_bundle` / `close_bundle` | Open, create, or close a bundle by path |
+| `status` | Bundle status including uncommitted changes |
 | `schema` | Column names and types |
+| `count` | Total row count |
 | `sample` | First N rows as a preview |
 | `history` | Full commit log |
-| `query` | Run any SQL against the bundle |
+| `query` | Run any SQL or bundlebase command against the bundle |
+| `generate_report` | Build a PDF report from a markdown template |
+| `list_bundles` | List currently open bundles |
+| `upgrade_bundle` | Upgrade a bundle's format version |
 
-Point your AI assistant at the running MCP server and start asking questions.
+The assistant launches the MCP server itself from the installed config -- just start asking questions.
 
 ## Exploring what you have
 

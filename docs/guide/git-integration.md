@@ -68,7 +68,7 @@ await c.commit("Enable git-based version tracking")
 ```
 
 ```sql
-SAVE CONFIG 'git_versioning' = 'true' FOR 'system'
+SAVE CONFIG git_versioning = 'true' FOR 'system'
 ```
 
 After it's saved, every `bb.open()` of the bundle picks up the flag from
@@ -111,7 +111,8 @@ git checkout -b stricter-validation
 ```python
 import bundlebase
 c = await bundlebase.open(".")
-await c.filter("email LIKE '%@%.%'")
+c = await c.extend()
+await c.filter("SELECT * FROM bundle WHERE email LIKE '%@%.%'")
 await c.commit("Drop rows with malformed emails")
 ```
 
@@ -135,7 +136,7 @@ history either way.
   on first use. New contributors should know this so they don't think
   the bundle is broken.
 - **`git diff` on binary data is opaque.** You see that a file
-  changed, not what changed inside it. Use `bundlebase log` and
-  `bundlebase show` to inspect what an operation did to the data; git
-  just tracks that something moved.
+  changed, not what changed inside it. Use `SHOW HISTORY` and
+  `SHOW STATUS` (via `bundlebase query`) to inspect what an operation
+  did to the data; git just tracks that something moved.
 

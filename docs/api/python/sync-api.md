@@ -64,7 +64,7 @@ import bundlebase.sync as dc
 # Create and process data
 c = dc.create()
 c.attach("userdata.parquet")
-c.filter("salary > 50000")
+c.filter("SELECT * FROM bundle WHERE salary > 50000")
 c.drop_column("email")
 
 # Export
@@ -80,7 +80,7 @@ import bundlebase.sync as dc
 df = (dc.create()
       .attach("data.parquet")
       .drop_column("email")
-      .filter("active = true")
+      .filter("SELECT * FROM bundle WHERE active = true")
       .rename_column("fname", "first_name")
       .to_pandas())
 ```
@@ -111,7 +111,7 @@ c = dc.create().attach("huge_dataset.parquet")
 
 total_rows = 0
 for batch in dc.stream_batches(c):
-    # Process batch (~100MB)
+    # Process one batch at a time
     total_rows += batch.num_rows
     print(f"Processed {batch.num_rows} rows")
 
@@ -126,7 +126,7 @@ import bundlebase.sync as dc
 # Create and save
 c = dc.create("/tmp/my_bundle")
 c.attach("data.parquet")
-c.filter("year >= 2020")
+c.filter("SELECT * FROM bundle WHERE year >= 2020")
 c.commit("Filtered to 2020+")
 
 # Later, load
@@ -180,13 +180,13 @@ Chaining operations reduces overhead:
 # Good: One event loop call
 df = (dc.create()
       .attach("data.parquet")
-      .filter("x > 10")
+      .filter("SELECT * FROM bundle WHERE x > 10")
       .to_pandas())
 
 # Less optimal: Multiple event loop calls
 c = dc.create()
 c.attach("data.parquet")
-c.filter("x > 10")
+c.filter("SELECT * FROM bundle WHERE x > 10")
 df = c.to_pandas()
 ```
 
@@ -216,7 +216,7 @@ import bundlebase
 async def process():
     c = await bundlebase.create()
     c = await c.attach("data.parquet")
-    c = await c.filter("x > 10")
+    c = await c.filter("SELECT * FROM bundle WHERE x > 10")
     return await c.to_pandas()
 ```
 
@@ -227,7 +227,7 @@ import bundlebase.sync as dc
 
 c = dc.create()
 c.attach("data.parquet")
-c.filter("x > 10")
+c.filter("SELECT * FROM bundle WHERE x > 10")
 df = c.to_pandas()
 ```
 

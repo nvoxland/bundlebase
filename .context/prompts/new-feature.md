@@ -38,7 +38,7 @@ See [ai-rules.md](../ai-rules.md) for full list.
 
 - [ ] Read all required documentation files
 - [ ] Understand how feature fits into architecture
-- [ ] Identify which tier(s) the feature touches (Bundle trait, Bundle, BundleBuilder)
+- [ ] Identify which tier(s) the feature touches (BundleFacade trait, Bundle, BundleBuilder) and which crate it belongs in (e.g. `bundlebase`, `bundlebase-data`, `bundlebase-command`)
 - [ ] Check if feature requires new dependencies
 - [ ] Sketch out API design (Rust and Python)
 - [ ] Identify potential performance impacts
@@ -57,7 +57,7 @@ See [ai-rules.md](../ai-rules.md) for full list.
 ### 3. Python Bindings (if applicable)
 
 - [ ] Read [python-bindings.md](../python-bindings.md)
-- [ ] Create PyO3 wrapper in `python/bundlebase/src/`
+- [ ] Create PyO3 wrapper in `rust/bundlebase-python/src/`
 - [ ] Handle async/sync bridge if needed (see [sync-api.md](../sync-api.md))
 - [ ] Map Rust errors to Python exceptions
 - [ ] Add type hints (use `typing` module)

@@ -31,16 +31,19 @@ If your API already returns JSON or CSV, Bundlebase can pull from it directly. Y
             "url": "https://api.yourservice.com/v2/metrics/export",
             "headers": "Authorization: Bearer YOUR_TOKEN\nAccept: application/json",
             "json_record_path": "data"
-        })
-        .fetch("base", "replace"))  # replace = full refresh each time
+        }))
 
+    bundle.fetch("base", "sync")  # sync = full refresh each time
     bundle.commit("Weekly usage metrics — 2026-04-04")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/usage-metrics --create
+    ```
+
     ```sql
-    CREATE 's3://team-data/usage-metrics';
     SET NAME 'Customer Usage Metrics';
     SET DESCRIPTION 'Weekly pull from /api/v2/metrics. Covers all accounts, all event types.';
 
@@ -54,7 +57,7 @@ If your API already returns JSON or CSV, Bundlebase can pull from it directly. Y
     COMMIT 'Weekly usage metrics — 2026-04-04';
     ```
 
-`fetch("base", "replace")` does a full refresh — it replaces the previous data with the current API response. Use `"add"` instead if your API returns only new records and you want to accumulate.
+`fetch("base", "sync")` does a full refresh — it replaces the previous data with the current API response. Use `"add"` instead if your API returns only new records and you want to accumulate.
 
 !!! note "Authentication"
     The `headers` field takes `Name: Value` pairs, one per line. For tokens that rotate, you can template this via environment variables or a wrapper script that sets the header before calling `fetch()`.
@@ -85,10 +88,11 @@ If your API takes date ranges or other parameters, use POST:
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://team-data/usage-metrics';
-    EXTEND;
+    ```bash
+    bundlebase repl --bundle s3://team-data/usage-metrics
+    ```
 
+    ```sql
     CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.yourservice.com/v2/metrics/export',
         method = 'POST',
@@ -125,10 +129,11 @@ Then a small Python script (or cron job) publishes it as a bundle:
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://team-data/usage-metrics';
-    EXTEND;
+    ```bash
+    bundlebase repl --bundle s3://team-data/usage-metrics
+    ```
 
+    ```sql
     ATTACH 's3://team-data/raw/usage-2026-04-04.parquet';
     COMMIT 'Usage metrics week of 2026-03-28';
     ```
@@ -149,7 +154,7 @@ Once you've committed the bundle, the data science team consumes it without invo
     # See what's in it before loading
     print(bundle.name)           # "Customer Usage Metrics"
     print(bundle.description)    # what it covers, how it's sourced
-    print(bundle.num_rows)       # current row count
+    print(bundle.num_rows())     # current row count
     print(bundle.version)        # which commit they're on
 
     # Pull into pandas
@@ -168,10 +173,13 @@ Once you've committed the bundle, the data science team consumes it without invo
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/usage-metrics
+    ```
+
     ```sql
-    OPEN 's3://team-data/usage-metrics';
     SHOW STATUS;
-    SHOW SCHEMA;
+    SHOW COLUMNS;
 
     SELECT * FROM bundle;
 
@@ -218,18 +226,19 @@ Wrap the publish step in a script and run it from a cron job or CI pipeline:
         "url": "https://api.yourservice.com/v2/metrics/export",
         "headers": f"Authorization: Bearer {API_TOKEN}"
     })
-    bundle.fetch("base", "replace")
+    bundle.fetch("base", "sync")
     bundle.commit(f"Weekly usage metrics — {date.today()}")
 
-    print(f"Published: {bundle.num_rows:,} rows at version {bundle.version}")
+    print(f"Published: {bundle.num_rows():,} rows at version {bundle.version}")
     ```
 
 === "SQL"
 
-    ```sql
-    OPEN 's3://team-data/usage-metrics';
-    EXTEND;
+    ```bash
+    bundlebase repl --bundle s3://team-data/usage-metrics
+    ```
 
+    ```sql
     CREATE SOURCE FOR base USING http WITH (
         url = 'https://api.yourservice.com/v2/metrics/export',
         headers = 'Authorization: Bearer <API_TOKEN>'

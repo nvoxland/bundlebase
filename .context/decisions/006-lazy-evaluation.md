@@ -1,12 +1,12 @@
 # ADR-006: Lazy Operation Evaluation
 
-**Status:** Accepted
+**Status:** Accepted — Amended June 2026 (mechanism description updated to match the implemented `Operation` trait; there is no `BundleState` type or `reconfigure()` method)
 
-**Date:** December 2024 (documented retroactively)
+**Date:** December 2024 (documented retroactively); amended June 2026
 
 ## Context
 
-When users call operations like `filter()` or `select()`, should the operation execute immediately or be deferred until query time?
+When users call operations like `filter()` or `drop_column()`, should the operation execute immediately or be deferred until query time?
 
 ### The Problem
 
@@ -25,185 +25,180 @@ When users call operations like `filter()` or `select()`, should the operation e
 ### Alternatives Considered
 
 **Option 1: Eager/immediate execution** (like Pandas)
-```rust
-container.filter("age > 18"); // Executes filter immediately
-container.query("SELECT name FROM bundle"); // Executes query immediately
-df = container.to_pandas(); // Just returns already-filtered data
-```
 - Pros: Simple, immediate feedback on errors
 - Cons: Can't optimize query, forces data load even if not queried
 
 **Option 2: Fully lazy** (like Spark RDDs)
-```rust
-container.filter("age > 18"); // Records operation
-container.query("SELECT name FROM bundle"); // Records operation
-df = container.to_pandas(); // NOW executes entire pipeline
-```
 - Pros: Maximum optimization potential, deferred execution
 - Cons: Late error feedback, hard to debug
 
 **Option 3: Hybrid lazy** (chosen - like DataFusion)
-```rust
-container.filter("age > 18")?; // Records + validates
-container.query("SELECT name FROM bundle")?; // Records + validates schema
-df = container.to_pandas().await?; // Executes pipeline
-```
 - Pros: Early validation, optimization potential, clear execution point
 - Cons: Complexity in implementation (validate without executing)
 
 ## Decision
 
-**Record operations when called, execute lazily during query with early validation.**
+**Record operations when called, validate immediately, and rebuild the DataFrame lazily on demand.**
 
-### Three-Phase Pattern
+### The Real Operation Trait
 
-Each operation implements:
-
-1. **Validation phase** (`check()`): Validate operation is legal (immediate)
-2. **Schema update** (`reconfigure()`): Update schema/metadata (immediate)
-3. **DataFrame transformation** (`apply_dataframe()`): Execute on data (lazy)
+Operations implement the `Operation` trait (rust/bundlebase/src/bundle/operation.rs):
 
 ```rust
-pub trait Operation {
-    // Phase 1: Validate (immediate)
-    fn check(&self, state: &BundleState) -> Result<()>;
+pub trait Operation: Send + Sync + Clone + Serialize + Debug + Into<AnyOperation> {
+    /// Human-readable description of this operation
+    fn describe(&self) -> String;
 
-    // Phase 2: Update state (immediate)
-    fn reconfigure(&self, state: &mut BundleState) -> Result<()>;
+    /// Validate this operation against the current bundle (immediate, fail fast)
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError>;
 
-    // Phase 3: Execute (lazy - only during query)
-    async fn apply_dataframe(&self, df: DataFrame) -> Result<DataFrame>;
+    /// Apply side effects to the bundle via interior mutability (immediate) —
+    /// e.g. register a pack, set the name, record a view. Default for many ops: no-op.
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError>;
+
+    /// Transform the DataFrame (LAZY — called when the dataframe is rebuilt).
+    /// Default implementation returns the DataFrame unchanged.
+    async fn apply_dataframe(
+        &self,
+        df: DataFrame,
+        ctx: Arc<SessionContext>,
+        bundle_schema: &mut BundleSchema,
+    ) -> Result<DataFrame, BundlebaseError>;
+
+    // Plus: version(), allowed_on_view(), to_empty() — see operation.rs
 }
 ```
+
+There is **no `BundleState` type and no `reconfigure()` method** (an earlier design that was never implemented this way). Schema/name tracking is done by `BundleSchema` (a `ColumnId -> name` map threaded through `apply_dataframe`).
+
+### How Lazy Evaluation Works
+
+1. **Recording** — `Bundle::apply_operation(&self, op)` runs `check()` and `apply()` immediately, pushes the op onto `Bundle::operations`, and **clears the cached DataFrame** (`self.dataframe.clear()`).
+
+2. **Rebuilding on demand** — `Bundle::dataframe()` (in `bundle.rs`) returns the cached DataFrame if present; otherwise it rebuilds:
+   - Start from the base pack table
+   - Compute `BundleSchema::initial(&ops)` and `resolve_cast_ops(&ops)` (cancels reverted casts)
+   - Apply each active operation's `apply_dataframe()` in order (joins are executed inline when a `CreateJoin` op is reached)
+   - Finally rename internal `col_<id>` columns to user-visible names and cache the result
 
 ### Example Flow
 
 ```rust
-// User code
-container.filter("age >= 18")?; // Phase 1+2: validate, update schema
-container.query("SELECT name FROM bundle")?; // Phase 1+2: validate, update schema
+// User code (via BundleBuilderExt)
+builder.filter("SELECT * FROM bundle WHERE age >= 18", vec![]).await?; // check + record
+builder.drop_column("ssn").await?;                                     // check + record
 
 // Later... (maybe much later)
-df = container.to_pandas().await?; // Phase 3: execute all operations
+let df = builder.dataframe().await?; // NOW apply_dataframe runs for every recorded op
 ```
 
 ## Consequences
 
 ### Positive
 
-- **Early validation**: Catch errors (bad SQL, missing columns) immediately
-- **Schema tracking**: Know output schema before execution
-- **Query optimization**: Can reorder/combine operations before executing
-- **Deferred execution**: Only execute when data actually needed
-- **Composable**: Build up transformation pipeline incrementally
-- **Efficient**: Avoid redundant execution if query never happens
+- **Early validation**: `check()` catches errors (missing columns, bad references) when the operation is recorded
+- **Deferred execution**: `apply_dataframe()` only runs when data is actually needed
+- **Query optimization**: The rebuilt DataFrame is a DataFusion logical plan — optimization and predicate pushdown happen at execution
+- **Composable**: Build up the transformation pipeline incrementally
+- **Serializable**: Recorded operations are saved/loaded via manifests (serde with `AnyOperation`)
 
 ### Negative
 
-- **Complex implementation**: Three-phase pattern more code than simple execution
+- **Complex implementation**: Validation/side-effect/DataFrame phases are more code than simple execution
 - **Mental model**: Users must understand when operations execute
-- **Testing complexity**: Must test both validation and execution phases
-- **Partial errors**: Operation may validate but fail during execution
-- **Debug difficulty**: Error might occur far from where operation was added
+- **Partial errors**: An operation may pass `check()` but fail later in `apply_dataframe()`
+- **Cache invalidation**: Every recorded operation clears the cached DataFrame and `BundleSchema`
 
 ### Neutral
 
-- **Operation serialization**: Recorded operations can be saved/loaded from manifests
-- **Inspection**: Can query operation list without executing them
-- **Row count approximation**: Can track approximate row counts before execution
+- **Inspection**: Operation list can be queried without executing (`describe()`, `bundle_info` tables)
+- **Versioning**: Each operation contributes a content hash to the bundle version (`version()`)
 
-## Implementation Examples
+## Implementation Examples (from the codebase)
 
-### Filter Operation
-
-```rust
-impl Operation for FilterBlock {
-    fn check(&self, state: &BundleState) -> Result<()> {
-        // Validate SQL syntax
-        parse_sql(&self.expression)?;
-        // Validate referenced columns exist
-        validate_columns(&self.expression, state.schema())?;
-        Ok(())
-    }
-
-    fn reconfigure(&self, state: &mut BundleState) -> Result<()> {
-        // Schema unchanged, but row count may decrease
-        state.set_row_count_approximate();
-        Ok(())
-    }
-
-    async fn apply_dataframe(&self, df: DataFrame) -> Result<DataFrame> {
-        // NOW actually filter data
-        df.filter(col(&self.column).gt(lit(18)))
-    }
-}
-```
-
-### Select Operation
+### RenameColumnOp (metadata-only)
 
 ```rust
-impl Operation for SelectColumns {
-    fn check(&self, state: &BundleState) -> Result<()> {
-        // Validate all columns exist
-        for col in &self.columns {
-            if !state.schema().column_with_name(col).is_some() {
-                return Err(format!("Column not found: {}", col).into());
-            }
+// rust/bundlebase/src/bundle/operation/rename_column.rs
+impl Operation for RenameColumnOp {
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        bundle.column_name(&self.id)
+            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
+        if bundle.bundle_schema().column_id(&self.new_name).is_some() {
+            return Err(format!("Column '{}' already exists in the schema", self.new_name).into());
         }
         Ok(())
     }
 
-    fn reconfigure(&self, state: &mut BundleState) -> Result<()> {
-        // Update schema to only selected columns
-        let new_schema = state.schema().project(&self.columns)?;
-        state.set_schema(new_schema);
-        Ok(())
+    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
+        Ok(()) // no bundle side effects
     }
 
-    async fn apply_dataframe(&self, df: DataFrame) -> Result<DataFrame> {
-        // Execute selection
-        df.select_columns(&self.columns)
+    async fn apply_dataframe(
+        &self,
+        df: DataFrame,
+        _ctx: Arc<SessionContext>,
+        bundle_schema: &mut BundleSchema,
+    ) -> Result<DataFrame, BundlebaseError> {
+        // Metadata-only: update the name map for the final rename step.
+        bundle_schema.insert(self.id, self.new_name.clone());
+        Ok(df)
+    }
+
+    fn describe(&self) -> String {
+        format!("RENAME COLUMN: {} to {}", self.id, self.new_name)
     }
 }
 ```
 
-## Benefits for Query Optimization
-
-Lazy evaluation enables optimizations:
+### FilterOp (DataFrame transformation)
 
 ```rust
-// User code
-container
-    .filter("age >= 18")?
-    .query("SELECT name, age FROM bundle")?
-    .filter("age < 65")?;
+// rust/bundlebase/src/bundle/operation/filter.rs (simplified)
+impl Operation for FilterOp {
+    async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+        Ok(())
+    }
 
-// Optimizer can:
-// 1. Combine filters: "age >= 18 AND age < 65"
-// 2. Push select before filter: select(filter(data))
-// 3. Push filters into data source (predicate pushdown)
+    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
+        Ok(())
+    }
+
+    async fn apply_dataframe(
+        &self,
+        df: DataFrame,
+        ctx: Arc<SessionContext>,
+        bundle_schema: &mut BundleSchema,
+    ) -> Result<DataFrame, BundlebaseError> {
+        // Translate user-visible column names to stable col_<id> names,
+        // register `df` as the `bundle` table in an ephemeral context,
+        // and run the stored SELECT against it.
+        let translated_query = bundle_schema.translate_sql(&self.query);
+        // ... create plan with parameters, execute_logical_plan ...
+    }
+}
 ```
 
 ## User Mental Model
 
 **What users see**:
 ```python
-c.filter("age >= 18") # "Records filter operation"
-c.query("SELECT name FROM bundle") # "Records query operation"
-df = await c.to_pandas() # "NOW executes pipeline"
+c = c.filter("age >= 18")        # "Records filter operation"
+c = c.drop_column("ssn")         # "Records drop operation"
+df = await c.to_pandas()         # "NOW executes pipeline"
 ```
 
 **What happens internally**:
-1. `filter()` - validate SQL, update schema, record operation
-2. `query()` - validate columns exist, update schema, record operation
-3. `to_pandas()` - execute all recorded operations via DataFusion
+1. `filter()` - `check()` validates, op recorded, cached DataFrame cleared
+2. `drop_column()` - same
+3. `to_pandas()` - `dataframe()` rebuilds the DataFrame through every recorded op, then streams results
 
 ## Related Decisions
 
 - [ADR-002](002-datafusion-arrow.md) - DataFusion provides lazy DataFrame evaluation
-- [ADR-004](004-three-tier-architecture.md) - Operations recorded on BundleBuilder
-- [ADR-005](005-mutable-operations.md) - Operations chainable via `&mut Self`
-- See [architecture.md](../architecture.md#three-phase-operation-pattern)
+- [ADR-004](004-three-tier-architecture.md) - Operations recorded through BundleBuilder
+- [ADR-005](005-mutable-operations.md) - Interior mutability for shared access
+- See [architecture.md](../architecture.md#operation-pattern-checkapplyapply_dataframe)
 
 ## Trade-offs
 
@@ -214,3 +209,8 @@ df = await c.to_pandas() # "NOW executes pipeline"
 | Hybrid ✓ | ✅ Early | ✅ Good | ⚠️ Medium | ✅ Clear |
 
 **Conclusion**: Hybrid approach balances optimization potential with usability.
+
+## Decision History
+
+- **Dec 2024**: Recorded with a three-phase `check()/reconfigure()/apply_dataframe()` trait operating on a `BundleState` type.
+- **Amended June 2026**: The implemented trait is `check(&Bundle)` / `apply(&Bundle)` / `apply_dataframe(df, ctx, &mut BundleSchema)`; `BundleState` was never built. The lazy-evaluation decision itself stands — only the mechanism description changed.

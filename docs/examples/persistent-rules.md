@@ -18,21 +18,23 @@ Remove rows that should never be in the bundle, regardless of what the source se
 
     bundle = bb.open("s3://analytics/crm-export").extend()
 
-    bundle.always_delete("WHERE amount < 0")
-    bundle.always_delete("WHERE status = 'test'")
-    bundle.always_delete("WHERE user_id IS NULL")
+    bundle.always_delete("amount < 0")
+    bundle.always_delete("status = 'test'")
+    bundle.always_delete("user_id IS NULL")
 
     bundle.commit("Added persistent cleanup rules")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/crm-export
+    ```
+
     ```sql
-    OPEN 's3://analytics/crm-export';
-    EXTEND;
-    ALWAYS DELETE WHERE amount < 0;
-    ALWAYS DELETE WHERE status = 'test';
-    ALWAYS DELETE WHERE user_id IS NULL;
+    ALWAYS DELETE FROM bundle WHERE amount < 0;
+    ALWAYS DELETE FROM bundle WHERE status = 'test';
+    ALWAYS DELETE FROM bundle WHERE user_id IS NULL;
     COMMIT 'Added persistent cleanup rules';
     ```
 
@@ -55,13 +57,9 @@ Now every future attach cleans automatically — no need to remember to add the 
 === "SQL"
 
     ```sql
-    OPEN 's3://analytics/crm-export';
-    EXTEND;
     ATTACH 'jan_raw.csv';   -- rules fire automatically
     COMMIT 'January';
 
-    OPEN 's3://analytics/crm-export';
-    EXTEND;
     ATTACH 'feb_raw.csv';   -- rules fire automatically
     COMMIT 'February';
     ```
@@ -75,20 +73,20 @@ Normalize or transform column values on every incoming record:
 === "Python"
 
     ```python
-    bundle.always_update("SET currency = UPPER(currency)")
+    bundle.always_update("SET currency = UPPER(currency) WHERE currency IS NOT NULL")
     bundle.always_update("SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe')")
-    bundle.always_update("SET amount = ROUND(amount, 2)")
-    bundle.always_update("SET event_type = LOWER(event_type)")
+    bundle.always_update("SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL")
+    bundle.always_update("SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL")
     bundle.commit("Added normalization rules")
     ```
 
 === "SQL"
 
     ```sql
-    ALWAYS UPDATE SET currency = UPPER(currency);
-    ALWAYS UPDATE SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe');
-    ALWAYS UPDATE SET amount = ROUND(amount, 2);
-    ALWAYS UPDATE SET event_type = LOWER(event_type);
+    ALWAYS UPDATE bundle SET currency = UPPER(currency) WHERE currency IS NOT NULL;
+    ALWAYS UPDATE bundle SET region = 'EMEA' WHERE region IN ('Europe', 'EU', 'europe');
+    ALWAYS UPDATE bundle SET amount = ROUND(amount, 2) WHERE amount IS NOT NULL;
+    ALWAYS UPDATE bundle SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL;
     COMMIT 'Added normalization rules';
     ```
 
@@ -106,26 +104,29 @@ Rules are applied in definition order — deletes first, then updates:
     bundle = bb.create("s3://analytics/events")
 
     # Remove records that should never be ingested
-    bundle.always_delete("WHERE event_type = 'internal_test'")
-    bundle.always_delete("WHERE user_id IS NULL")
+    bundle.always_delete("event_type = 'internal_test'")
+    bundle.always_delete("user_id IS NULL")
 
     # Normalize what remains
-    bundle.always_update("SET event_type = LOWER(event_type)")
-    bundle.always_update("SET region = UPPER(region)")
-    bundle.always_update("SET currency = UPPER(currency)")
+    bundle.always_update("SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL")
+    bundle.always_update("SET region = UPPER(region) WHERE region IS NOT NULL")
+    bundle.always_update("SET currency = UPPER(currency) WHERE currency IS NOT NULL")
 
     bundle.commit("Initial setup with cleanup rules")
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://analytics/events --create
+    ```
+
     ```sql
-    CREATE 's3://analytics/events';
-    ALWAYS DELETE WHERE event_type = 'internal_test';
-    ALWAYS DELETE WHERE user_id IS NULL;
-    ALWAYS UPDATE SET event_type = LOWER(event_type);
-    ALWAYS UPDATE SET region = UPPER(region);
-    ALWAYS UPDATE SET currency = UPPER(currency);
+    ALWAYS DELETE FROM bundle WHERE event_type = 'internal_test';
+    ALWAYS DELETE FROM bundle WHERE user_id IS NULL;
+    ALWAYS UPDATE bundle SET event_type = LOWER(event_type) WHERE event_type IS NOT NULL;
+    ALWAYS UPDATE bundle SET region = UPPER(region) WHERE region IS NOT NULL;
+    ALWAYS UPDATE bundle SET currency = UPPER(currency) WHERE currency IS NOT NULL;
     COMMIT 'Initial setup with cleanup rules';
     ```
 
@@ -133,19 +134,14 @@ Rules are applied in definition order — deletes first, then updates:
 
 ## Viewing defined rules
 
-=== "Python"
+```bash
+bundlebase repl --bundle s3://analytics/events
+```
 
-    ```python
-    bundle = bb.open("s3://analytics/events")
-    print(bundle.always_rules)
-    ```
-
-=== "SQL"
-
-    ```sql
-    OPEN 's3://analytics/events';
-    SHOW ALWAYS RULES;
-    ```
+```sql
+SHOW ALWAYS DELETES;
+SHOW ALWAYS UPDATES;
+```
 
 ---
 

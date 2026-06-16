@@ -56,9 +56,9 @@ bundle = bb.open("s3://bucket/path").extend()
 bundle.attach("data.parquet")
 bundle.attach("s3://other/data.csv")
 bundle.attach("https://example.com/feed.json")
-bundle.filter("amount > 0")                          # WHERE clause string
-bundle.filter("amount > $1 AND status = $2", [0, "active"])  # parameterized
-bundle.join("orders", on="id = order_id", location="orders.parquet", how="inner")
+bundle.filter("SELECT * FROM bundle WHERE amount > 0")
+bundle.filter("SELECT * FROM bundle WHERE amount > $1 AND status = $2", [0, "active"])  # parameterized
+bundle.join("orders", "id = order_id", location="orders.parquet", join_type="inner")
 bundle.drop_column("ssn")
 bundle.rename_column("fname", "first_name")
 bundle.add_column("full_name", "first_name || ' ' || last_name")
@@ -68,8 +68,8 @@ bundle.set_name("My Bundle")
 bundle.set_description("Description")
 
 # Persistent data hygiene rules (fire on every future attach)
-bundle.always_delete("WHERE amount < 0")
-bundle.always_delete("WHERE status = 'test'")
+bundle.always_delete("amount < 0")
+bundle.always_delete("status = 'test'")
 bundle.always_update("SET currency = UPPER(currency)")
 bundle.always_update("SET region = 'EMEA' WHERE region IN ('Europe', 'EU')")
 
@@ -96,7 +96,6 @@ bundle.create_view("active_users", "SELECT * FROM bundle WHERE active = true")
 
 # Versioning
 bundle.commit("Added customer data")
-bundle.reset()                   # discard uncommitted changes
 
 # Querying
 result = bundle.query("SELECT region, SUM(amount) FROM bundle GROUP BY region")
@@ -116,7 +115,7 @@ bundle.name           # str or None (property)
 bundle.description    # str or None (property)
 bundle.version        # 12-char hex string (property)
 bundle.url            # storage path (property)
-bundle.num_rows       # int (property)
+bundle.num_rows()     # int
 bundle.schema         # PySchema — .fields, .field(name)
 bundle.history()      # list of commits
 bundle.status()       # list of uncommitted operations
@@ -167,7 +166,8 @@ IMPORT CONNECTOR <name> FROM '<runtime>::<entrypoint>'
 DROP CONNECTOR <name>
 
 -- Indexes
-CREATE INDEX <column>
+CREATE BTREE INDEX ON <column>
+CREATE TEXT INDEX ON <column>
 DROP INDEX <column>
 
 -- Versioning

@@ -30,7 +30,7 @@ import bundlebase.sync as bb
 
 bundle = bb.create("my/data")
 bundle.import_temp_connector('example.connector', 'python::example_connector:ExampleConnector')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 bundle.fetch("base", "add")
 ```
 
@@ -43,7 +43,7 @@ Compiled languages build a shared library (`.so` / `.dylib` / `.dll`) that expor
 ```python
 # Load a Rust, Go, or Java shared library
 bundle.import_connector('example.connector', 'ffi::./target/release/libexample_connector.so')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 Each language has its own approach to generating the C ABI:

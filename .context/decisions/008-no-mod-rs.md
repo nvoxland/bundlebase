@@ -65,13 +65,13 @@ pub struct Bundle { ... }
 
 // Submodules
 mod builder;
-mod state;
-mod operations;
+mod facade;
+mod operation;
 
 // Re-exports
 pub use builder::BundleBuilder;
-pub use state::BundleState;
-pub use operations::Operation;
+pub use facade::BundleFacade;
+pub use operation::Operation;
 ```
 
 ### Rationale
@@ -149,15 +149,18 @@ rust/bundlebase/src/
 ├── bundle/
 │   ├── builder.rs
 │   ├── facade.rs
+│   ├── operation.rs   # ✅ Named file
+│   ├── operation/
+│   │   └── ...
 │   └── ...
-├── functions.rs       # ✅ Named file
-├── functions/
-│   ├── registry.rs
+├── catalog.rs         # ✅ Named file
+├── catalog/
 │   └── ...
-└── io.rs             # ✅ Named file
+├── data.rs            # ✅ Named file
+└── index.rs           # ✅ Named file
 ```
 
-**No `mod.rs` files** exist in the codebase.
+**No `mod.rs` files** exist in `src/` directories across the workspace crates.
 
 ### Enforcement
 
@@ -210,4 +213,6 @@ src/bundle.rs
 
 ## Exceptions
 
-**None**. All modules use named files. Even for single-file modules (e.g., `io.rs` with no submodules), the convention remains consistent.
+**One**: `tests/common/mod.rs` files (e.g., `rust/bundlebase/tests/common/mod.rs`, `rust/bundlebase-cli/tests/common/mod.rs`). This is the standard cargo idiom for sharing helper code between integration tests — naming it `tests/common.rs` would make cargo treat it as a test target of its own. These are allowed.
+
+All `src/` modules use named files. Even for single-file modules, the convention remains consistent.

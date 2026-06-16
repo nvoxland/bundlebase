@@ -32,9 +32,8 @@ Bundlebase includes several built-in connectors that don't need to be imported:
 
 | Connector | Description |
 |-----------|-------------|
-| `remote_dir` | Files from a remote directory (S3, HTTP, etc.) |
-| `ftp_directory` | Files from an FTP server |
-| `sftp_directory` | Files from an SFTP server |
+| `remote_dir` | Files from a remote directory -- S3, GCS, Azure, FTP (`ftp://`), SFTP (`sftp://`), or local paths |
+| `http` | A single file from an HTTP(S) URL |
 | `kaggle` | Datasets from Kaggle |
 | `web_scrape` | Data scraped from web pages |
 | `postgres` | Data from a PostgreSQL database |
@@ -131,8 +130,8 @@ Creates a named connector. The connector definition is **persisted** into the bu
 
 Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization to prevent naming collisions when sharing bundles. For example:
 
-- `mycompany.sales.crm` -- "mycompany" namespace
-- `jdoe.weather.noaa` -- personal namespace
+- `mycompany.sales_crm` -- "mycompany" namespace
+- `jdoe.noaa_weather` -- personal namespace
 - `acme.weather` -- organization namespace
 
 The name must contain exactly one dot.
@@ -213,7 +212,7 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
     ```python
     # Custom connector (no extra args)
-    bundle = await bundle.create_source('acme.weather')
+    bundle = await bundle.create_source('acme.weather', {})
 
     # Custom connector with extra args forwarded to discover/data
     bundle = await bundle.create_source('acme.weather', {
@@ -236,7 +235,7 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
     ```python
     # Custom connector (no extra args)
-    bundle.create_source('acme.weather')
+    bundle.create_source('acme.weather', {})
 
     # Custom connector with extra args forwarded to discover/data
     bundle.create_source('acme.weather', {
@@ -276,7 +275,7 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `connector` | `str` | *(required)* | Connector name -- either a built-in name or a dot-separated custom connector name |
-| `args` | `dict` | `{}` | Key-value arguments passed to the connector. For custom connectors, these are forwarded as extra arguments to `discover()`, `data()`, and `stable_url()` |
+| `args` | `dict` | *(required -- pass `{}` for none)* | Key-value arguments passed to the connector. For custom connectors, these are forwarded as extra arguments to `discover()`, `data()`, and `stable_url()` |
 | `pack` | `str` | `"base"` | Which pack to attach discovered files to |
 
 ---
@@ -478,7 +477,7 @@ An IPC connector runs as a subprocess that Bundlebase launches and communicates 
 
 ### Location
 
-A `Location` represents a discovered data file. Every SDK provides this type with the same fields:
+A `Location` represents a discovered data file. The SDKs provide this type with the following fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -523,28 +522,10 @@ Use with [`IMPORT CONNECTOR`](#import-connector):
 
 ```python
 bundle.import_connector('example.connector', 'docker::myorg/example-connector:latest')
-bundle.create_source('example.connector')
+bundle.create_source('example.connector', {})
 ```
 
 The container receives JSON-RPC on stdin and writes responses to stdout.
-
-## Getting Started
-
-!!! tip "Scaffold a new project"
-    Use the `bundlebase init-sdk` command to generate a new connector or function project with all the boilerplate:
-
-    ```bash
-    # Scaffold a Python connector project
-    bundlebase init-sdk python my_connector --type connector
-
-    # Scaffold a Go function project
-    bundlebase init-sdk go my_functions --type function
-
-    # Scaffold both connector and function
-    bundlebase init-sdk rust my_project --type both
-    ```
-
-    Supported languages: `python`, `go`, `java`, `rust`.
 
 ## SDK Quick Start
 
@@ -615,7 +596,7 @@ Each SDK handles the protocol for you. Implement the connector interface and cho
     impl Connector for ExampleConnector {
         fn discover(&self, _attached: &[String], _args: &HashMap<String, String>)
             -> Result<Vec<Location>, Box<dyn std::error::Error>> {
-            Ok(vec![Location { location: "data.parquet".into(), ..Location::new("data.parquet") }])
+            Ok(vec![Location::new("data.parquet")])
         }
 
         fn data(&self, _location: &Location, _args: &HashMap<String, String>)

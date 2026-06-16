@@ -201,14 +201,14 @@ Goodbye!
 The `list-bundles` subcommand discovers all bundles in a directory and prints their name and description.
 
 ```bash
-bundlebase list-bundles [path]
+bundlebase list-bundles [--path <path>]
 ```
 
 ### Arguments
 
 | Argument | Default | Description |
 |---|---|---|
-| `path` | `.` | Path or URL to search for bundles |
+| `--path <path>` | `.` | Path or URL to search for bundles |
 
 ### Examples
 
@@ -224,7 +224,7 @@ bundlebase list-bundles --path s3://my-bucket/bundles/
 ```
 
 ```
-$ bundlebase list-bundles /data
+$ bundlebase list-bundles --path /data
 customers : Customer Data
     US customer records from 2025
 

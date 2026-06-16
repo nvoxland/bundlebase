@@ -2,83 +2,79 @@
 
 ## Three-Tier Architecture
 
-### Bundlebase Trait
-Common interface for all container types (`rust/bundlebase/src/bundle.rs`):
-- Defines methods for schema introspection, querying, and data conversion
-- Implemented by both Bundlebase and BundlebaseBuilder
+### BundleFacade Trait
+Common interface for both bundle types (`rust/bundlebase/src/bundle/facade.rs`):
+- Defines methods for schema introspection (`schema()`, `bundle_schema()`), querying (`query()`, `dataframe()`, `num_rows()`), metadata (`name()`, `version()`, `history()`, `operations()`), views, reports, and export
+- Implemented by both `Bundle` and `BundleBuilder`
+- Catalog schema providers and the CLI work against `dyn BundleFacade` so they support either type
 
-### Bundlebase
-Read-only container loaded from disk:
-- Represents a committed snapshot of the container
-- Loaded from versioned manifests in `{data_dir}/_bundlebase/`
-- Cannot be modified directly
-- Can be extended via `extend(new_data_dir)` to create a new BundlebaseBuilder
-- Immutable and thread-safe
+### Bundle
+A bundle loaded from persistent storage (`rust/bundlebase/src/bundle.rs`):
+- Represents committed state, loaded from versioned manifests in `{data_dir}/_bundlebase/`
+- **Interior mutability**: all mutable state lives in `Arc<RwLock<T>>` fields (~25 of them: operations, packs, sources, views, reports, config, cached dataframe, etc.)
+- Mutation happens only through `pub(crate) async fn apply_operation(&self, op)` — external code cannot record operations on a bare `Bundle`
+- `Clone` shares all `Arc<RwLock<...>>` state: mutations in one clone are visible in all clones (intentional — schema providers see live state)
+- Thread-safe; shareable as `Arc<Bundle>` across async tasks, server sessions, and Python
+- Can be extended via `extend(data_dir)` to create a `BundleBuilder`
 
-### BundlebaseBuilder
-Mutable container for modifications:
-- Wraps an Bundlebase with a working directory
-- Tracks new operations applied since the base container
-- All modification methods mutate in-place and return `&mut self`
-- Methods: `attach()`, `drop_column()`, `rename_column()`, `normalize_column_names()`, `filter()`, `select()`, `join()`, `import_function()`, `import_connector()`, `set_name()`, `set_description()`
-- Can be committed via `commit(message)` to create a new versioned snapshot
-- Can be re-opened via `open_extending(url)` to load the latest state
+### BundleBuilder
+Working copy with change tracking (`rust/bundlebase/src/bundle/builder.rs`):
+- Wraps an `Arc<Bundle>` plus: `in_progress_change`, uncommitted `status` (list of `BundleChange`s), and pending deletes/updates accumulated by DELETE/UPDATE commands
+- Modification methods take `&self` and return `Result<&Self, BundlebaseError>` for chaining with `?` (interior mutability — see ADR-005)
+- Core methods on the struct: `create()`, `extend()`, `commit(message)`, `reset()`, `undo()`, `do_change()`, `run_command()`, `apply_operation()`
+- Convenience methods (`attach()`, `drop_column()`, `rename_column()`, `cast_column()`, `filter()`, `join()`, `import_function()`, `import_connector()`, `create_view()`, `set_name()`, `set_description()`, `create_index()`, ...) live on the **`BundleBuilderExt` trait** in `rust/bundlebase-command/src/builder_ext.rs`; each runs a command through `run_command` for change tracking and rollback-on-failure
+- `commit(message)` persists all accumulated changes as a new versioned manifest
 
-### BundlebaseState
-Shared state extracted for both container types:
-- Schema (Arrow SchemaRef)
-- Metadata (name, description)
-- Row count tracking
-- SessionContext for DataFusion
-- Function registry
-- Adapter factory
+There is no separate `BundleState` type — schema/name tracking is handled by `BundleSchema` (a `ColumnId -> user-visible name` map, `rust/bundlebase/src/bundle/bundle_schema.rs`), and everything else lives directly on `Bundle`.
+
+### Workspace Crates
+
+The Rust workspace has 12 crates under `rust/`:
+`bundlebase` (core), `bundlebase-command` (command parsing + `BundleBuilderExt`), `bundlebase-cli` (CLI binary), `bundlebase-python` (PyO3 bindings), `bundlebase-common` (errors, RowId, ObjectId, Platform, arrow type parsing), `bundlebase-data` (reader plugins, DataReaderFactory), `bundlebase-io` (storage abstraction), `bundlebase-catalog` (DataFusion `bundle_info.*` schema providers), `bundlebase-connector` (connector definitions), `bundlebase-index` (BTree indexes), `bundlebase-udf` (function runtimes/bridges), `bundlebase-report` (report generation).
 
 ## Operation Pipeline
 
-Operations are recorded and applied in sequence when querying:
-- **AttachBlock**: Add data from sources (union operation)
-- **RemoveColumns**: Filter out columns
-- **RenameColumn**: Rename columns
-- **Filter**: Filter rows based on predicates
-- **Select**: Select specific columns
-- **Join**: Join with other data sources
-- **Query**: Execute custom SQL
-- **ImportFunction**: Register a user-defined SQL scalar function
-- **RenameFunction**: Rename a function definition
-- **DropFunction**: Remove a user-defined SQL function
-- **ImportConnector**: Register a connector definition
-- **RenameConnector**: Rename a connector definition
-- **DropConnector**: Remove a connector definition
-- **SetName**: Set container name
-- **SetDescription**: Set container description
-- **IndexData**: Track row indexing metadata
-- **DescribeConnector**: Returns metadata table (name, runtime, entrypoint, platform, temporary) for a registered connector
-- **CreateReport**: Store a markdown report template in the bundle (auto-replaces if id exists)
-- **DropReport**: Remove a stored report template
+Operations are recorded in `Bundle::operations` and applied in sequence when the DataFrame is (re)built. The full set is defined in one place — the `define_any_operation!` macro invocation in `rust/bundlebase/src/bundle/operation.rs`, which generates the `AnyOperation` enum, its `Operation` impl, and `From` impls for each concrete op type.
 
-## Adapter System
+Representative operations (see `operation.rs` for the complete list of ~39):
+- **AttachBlock / DetachBlock / ReplaceBlock**: Add, remove, or replace data blocks (attach unions rows)
+- **AddColumn / DropColumn / RenameColumn / CastColumn / DropCastColumn**: Column manipulation
+- **Filter**: Apply a stored SELECT against the current DataFrame
+- **CreateJoin / DropJoin / RenameJoin**: Join with other data sources
+- **Delete / UpdateData / AlwaysDelete / AlwaysUpdate (+ Drop variants)**: Row-level changes and persistent rules
+- **CreateSource / ImportConnector / RenameConnector / DropConnector**: Data source and connector management
+- **ImportFunction / RenameFunction / DropFunction**: User-defined SQL functions
+- **CreateView / RenameView / DropView**: Named views
+- **CreateIndex / DropIndex / IndexBlocks**: Row indexing
+- **CreateReport / DropReport**: Stored markdown report templates
+- **SetName / SetDescription / SetMinVersion / SetMaxVersion / SaveConfig / UpdateVersion**: Metadata
 
-Plugin architecture for data sources (`src/data_adapter/`):
-- **CsvPlugin**: CSV file support (`.csv`). All columns import as Utf8 text — type inference from samples is unreliable.
-- **JsonPlugin**: Line-delimited JSON support (`.json`, `.jsonl`). Types are preserved from the JSON data.
+**Adding a new operation**: create `bundle/operation/your_op.rs`, declare the module and re-export at the top of `operation.rs`, and add one line to the `define_any_operation!` invocation. See [prompts/add-operation.md](prompts/add-operation.md).
+
+## Reader Plugin System
+
+Plugin architecture for data sources. Format readers implement the `ReaderPlugin` trait in `rust/bundlebase-data/src/plugin.rs`; the bundle-reference plugin lives in `rust/bundlebase/src/data/plugin/`:
+- **CsvPlugin / TsvPlugin**: CSV/TSV file support. All columns import as Utf8 text — type inference from samples is unreliable. The reader reads only the header row for schema inference.
+- **JsonlPlugin**: Line-delimited JSON support (`.jsonl`). Types are preserved from the JSON data.
 - **ParquetPlugin**: Apache Parquet support (`.parquet`). Types are preserved from the embedded schema.
-- **BundlebasePlugin**: References other committed bundles via `bundle://` (filesystem) or `bundle+<scheme>://` (remote) URLs
+- **BundlebasePlugin**: References other committed bundles via `bundle://` (filesystem) or `bundle+<scheme>://` (remote) URLs (`rust/bundlebase/src/data/plugin/bundlebase_reader.rs`)
 
-Each plugin implements `FileFormatConfig` (extensions, format, file source) and `DataReader` (schema, data source, statistics). The CSV reader reads only the header row for schema inference (no type inference), so all columns are naturally Utf8.
+Plugins are registered with `DataReaderFactory` (`rust/bundlebase-data/src/reader_factory.rs`). A plugin's `reader()` method decides whether it applies (by extension and/or `read_options`) and returns `Option<Arc<dyn DataReader>>`.
 
 ## User-Defined SQL Functions
 
 Custom SQL function system supporting both scalar and aggregate functions.
 
-**Key Files:**
-- `src/bundle/function_entry.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
-- `src/arrow_types.rs` — Arrow type parsing (`parse_arrow_type_name`)
-- `src/platform.rs` — `Platform` struct for Docker-style os/arch matching
-- `src/function/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
-- `src/function/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`
-- `src/function/python_bridge.rs` — Trait for Python function invocation
-- `src/function/ffi_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
-- `src/function/manifest.rs` — Shared `Manifest`/`ManifestEntry` types used by all runtimes
+**Key Files** (function system lives in the `bundlebase-udf` and `bundlebase-common` crates; `rust/bundlebase/src/lib.rs` re-exports it as the `function` module):
+- `rust/bundlebase-udf/src/function_entry.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
+- `rust/bundlebase-common/src/arrow_types.rs` — Arrow type parsing (`parse_arrow_type_name`)
+- `rust/bundlebase-common/src/platform.rs` — `Platform` struct for Docker-style os/arch matching
+- `rust/bundlebase-udf/src/bridge/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
+- `rust/bundlebase-udf/src/bridge/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`
+- `rust/bundlebase-udf/src/bridge/python_bridge.rs` — Trait for Python function invocation
+- `rust/bundlebase-udf/src/bridge/ffi_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
+- `rust/bundlebase-udf/src/bridge/manifest.rs` — Shared `Manifest`/`ManifestEntry` types used by all runtimes
+- `rust/bundlebase-udf/src/runtime/` — Per-runtime loaders (`python.rs`, `ffi.rs`, `java.rs`, `docker.rs`, `ipc.rs`)
 
 **Core Components:**
 - **FunctionEntry**: Stores function metadata (name, input/return types, runtime, entrypoint, platform, kind)
@@ -150,48 +146,67 @@ Custom SQL function system supporting both scalar and aggregate functions.
 
 ## Clone Semantics and Arc Usage
 
-Both container types use `Arc` (Atomic Reference Counting) for shared state:
+Both bundle types use `Arc` (Atomic Reference Counting) for shared state:
 
-**Bundlebase:**
-- **Cheap cloning**: BundlebaseState is shared via Arc
-- **Immutable snapshots**: Each clone represents the same committed state
+**Bundle:**
+- **Cheap cloning**: every mutable field is `Arc<RwLock<T>>`; `Clone` just bumps Arc counters
+- **Shared state**: clones share state with the original — mutations in one clone are visible in all clones. This is intentional: schema providers (`BundleInfoSchemaProvider`) hold a clone and must see live state. (The cached DataFrame holder gets a fresh `RwLock` per clone.)
 
-**BundlebaseBuilder:**
-- **Cheap cloning**: Arc-based state and directory reference
-- **Independent operation tracking**: Each clone can have different new operations
-- **Shared base**: All clones reference the same base (committed) container
-- **Shared data directory**: All clones write to the same directory when committed
-- **Enables branching**: Can create multiple modified versions from one base
+**BundleBuilder:**
+- **Cheap cloning**: shares the underlying `Arc<Bundle>`
+- **Independent change tracking**: `in_progress_change`, `status`, and pending deletes/updates are deep-copied per clone
 
 **Key implications:**
-- Cloning containers is fast (just Arc counter increments)
-- `commit()` creates a new Bundlebase snapshot
-- `open_extending(url)` loads the latest BundlebaseBuilder from manifests
+- Cloning bundles is fast (just Arc counter increments)
+- `commit()` persists uncommitted changes as a new manifest version
+- `Bundle::open(url).extend(...)` loads the latest committed state into a new BundleBuilder
 
-## Three-Phase Operation Pattern
+## Operation Pattern: check/apply/apply_dataframe
 
-Operations implement a three-phase pattern via the `Operation` trait:
+Operations implement the `Operation` trait (`rust/bundlebase/src/bundle/operation.rs`):
 
-1. **Validation phase**: `check()` - checks if operation is valid
-2. **State modification phase**: `reconfigure()` - updates schema, row count, metadata
-3. **DataFrame transformation phase**: `apply_dataframe()` - called LAZILY when query() is executed
+```rust
+pub trait Operation: Send + Sync + Clone + Serialize + Debug + Into<AnyOperation> {
+    fn describe(&self) -> String;
+
+    /// Validate against the current bundle (immediate, fail fast)
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError>;
+
+    /// Apply side effects to the bundle via interior mutability (immediate) —
+    /// e.g. register a pack/view/index definition. No-op for many ops.
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError>;
+
+    /// Transform the DataFrame (LAZY — runs when the dataframe is rebuilt).
+    /// Default implementation returns df unchanged.
+    async fn apply_dataframe(
+        &self,
+        df: DataFrame,
+        ctx: Arc<SessionContext>,
+        bundle_schema: &mut BundleSchema,
+    ) -> Result<DataFrame, BundlebaseError>;
+
+    // Also: version() (content hash), allowed_on_view(), to_empty()
+}
+```
 
 **Application flow:**
 
-1. **When adding operation**:
-   - Validate operation (immediate)
-   - Update schema, row count (immediate)
-   - Store for later execution
+1. **When recording an operation** (`Bundle::apply_operation`):
+   - `check()` validates (immediate)
+   - `apply()` updates bundle state via locks (immediate)
+   - Op is pushed onto `Bundle::operations`; the operation's `version()` hash is fed into the bundle version; the cached DataFrame and `BundleSchema` are cleared
 
-2. **When querying**:
-   - Transform DataFrame through each operation (lazy)
+2. **When querying** (`Bundle::dataframe()`):
+   - If a cached DataFrame exists, return it
+   - Otherwise rebuild: start from the base pack table, compute `resolve_cast_ops()` (cancels reverted casts), run each active op's `apply_dataframe()` in order (`CreateJoin` ops execute the join inline), then rename `col_<id>` columns to user-visible names and cache the result
 
 **Why this pattern?**
-- Schema tracking is immediate (know column names/types without executing query)
 - Validation happens early (fail fast)
 - Actual data transformation is deferred until needed
-- Row count tracking is accurate
-- Supports operation serialization via `config()`
+- Operations serialize to/from manifests (serde via `AnyOperation`)
+- Each operation contributes a content hash to the bundle version
+
+**Registration:** the `define_any_operation!` macro in `operation.rs` generates the `AnyOperation` enum, its trait impl, and `From<ConcreteOp>` impls. New operations are registered by adding one line to the macro invocation.
 
 ## Streaming Execution Architecture
 
@@ -215,7 +230,7 @@ let stream = dataframe.execute_stream().await?;  // SendableRecordBatchStream
 
 ### Rust Layer: PyRecordBatchStream
 
-**Location:** `rust/Bundlebase/src/python/record_batch_stream.rs`
+**Location:** `rust/bundlebase-python/src/record_batch_stream.rs`
 
 **Purpose:** Exposes DataFusion's streaming execution to Python with zero-copy data transfer.
 
@@ -232,7 +247,7 @@ let stream = dataframe.execute_stream().await?;  // SendableRecordBatchStream
 
 ### Python Layer: stream_batches()
 
-**Location:** `python/src/Bundlebase/conversion.py`
+**Location:** `python/src/bundlebase/conversion.py`
 
 **Purpose:** Async generator for batch-by-batch processing in Python.
 
@@ -302,7 +317,7 @@ Multiple `attach()` calls perform SQL UNION ALL (combining rows, not joining):
 
 **Example:**
 ```python
-c = await Bundlebase.create("memory:///test_container")
+c = await bundlebase.create("memory://test_bundle")
 await c.attach("users1.parquet")  # 1000 rows
 await c.attach("users2.parquet")  # 500 rows
 results = await c.to_dict()       # 1500 total rows
@@ -314,12 +329,12 @@ Each column has a stable `ColumnId` (64-bit hex, e.g., `0a3f1b2c9d4e7f80`) assig
 
 - **DataBlock** (`data_block.rs`): The `TableProvider::schema()` returns `col_<id>` field names. Reader batches are renamed from physical names to `col_<id>` at scan time (zero-copy schema swap).
 - **Operations**: `apply_dataframe()` methods work with `col_<id>` column names in the DataFrame. `RenameColumnOp` is metadata-only (just updates the name map). `DropColumnOp`/`CastColumnOp` reference `col_<id>` directly.
-- **SQL in operations**: All stored SQL (WHERE clauses, expressions, filters) uses `col_<id>` references. The command layer translates user-visible names to `col_<id>` at creation time via `translate_sql_to_col_ids()`.
-- **Final rename**: `dataframe()` in `bundle.rs` applies all operations, then as the last step renames every `col_<id>` column to its user-visible name using the `col_names` map.
+- **SQL in operations**: All stored SQL (WHERE clauses, expressions, filters) uses `col_<id>` references. The command layer translates user-visible names to `col_<id>` at creation time via `BundleBuilder::translate_sql()` / `BundleSchema::translate_sql()`.
+- **Final rename**: `dataframe()` in `bundle.rs` applies all operations, then as the last step calls `BundleSchema::rename_to_real_names()` to rename every `col_<id>` column to its user-visible name.
 
 This design means stored operations are resilient to column renames — an `ALWAYS DELETE WHERE col_<id> < 0` remains valid even if the column is renamed.
 
-**Key files**: `column_metadata.rs` (helpers: `col_id_name()`, `parse_col_id_name()`, `translate_sql_to_col_ids()`), `data_block.rs`, `schema_rename_filter.rs`.
+**Key files**: `bundle/bundle_schema.rs` (helpers: `generate_internal_name()`, `parse_internal_name()`, `translate_sql()`, `rename_to_real_names()`), `bundle/data_block.rs`, `bundle/schema_rename_filter.rs`.
 
 ## CLI Modes
 

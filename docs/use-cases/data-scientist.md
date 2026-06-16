@@ -33,15 +33,18 @@ You want to share a stable, versioned view of this with the engineering team who
         .attach("exports/2026-02.csv")
         .attach("exports/2026-03.csv")
         .normalize_column_names()          # fixes "Ticket ID", "ticket_id", "TicketId" -> consistent
-        .filter("customer_tier = 'enterprise' AND status = 'resolved'")
+        .filter("SELECT * FROM bundle WHERE customer_tier = 'enterprise' AND status = 'resolved'")
         .drop_column("internal_notes")     # strip content you don't want shared
         .drop_column("assignee_email"))
     ```
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/support-tickets --create
+    ```
+
     ```sql
-    CREATE 's3://team-data/support-tickets';
     ATTACH 'exports/2026-01.csv';
     ATTACH 'exports/2026-02.csv';
     ATTACH 'exports/2026-03.csv';
@@ -64,7 +67,7 @@ The tickets have a `product_id` column but the dashboard needs the product name.
     bundle.join("products",
         on="bundle.product_id = products.id",
         location="s3://team-data/products/lookup.parquet",
-        how="left")
+        join_type="left")
     ```
 
 === "SQL"
@@ -113,7 +116,7 @@ The engineering team opens it:
     bundle = bb.open("s3://team-data/support-tickets")
     print(bundle.name)
     print(bundle.description)
-    print(bundle.num_rows)
+    print(bundle.num_rows())
 
     df = bundle.to_pandas()
     # or
@@ -122,8 +125,11 @@ The engineering team opens it:
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/support-tickets
+    ```
+
     ```sql
-    OPEN 's3://team-data/support-tickets';
     SHOW STATUS;
     SELECT * FROM bundle;
     ```
@@ -167,9 +173,11 @@ When April's export arrives, you don't create a new bundle — you extend the ex
 
 === "SQL"
 
+    ```bash
+    bundlebase repl --bundle s3://team-data/support-tickets
+    ```
+
     ```sql
-    OPEN 's3://team-data/support-tickets';
-    EXTEND;
     ATTACH 'exports/2026-04.csv';
     COMMIT 'Added April 2026 data';
     ```

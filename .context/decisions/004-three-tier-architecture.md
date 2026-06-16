@@ -1,23 +1,22 @@
 # ADR-004: Three-Tier Architecture
 
-**Status:** Accepted
+**Status:** Accepted — Amended June 2026 (type names and mutability mechanism updated to match implementation; crate layout documented)
 
-**Date:** December 2024 (documented retroactively)
+**Date:** December 2024 (documented retroactively); amended June 2026
 
 ## Context
 
 Bundlebase needed clear separation between:
-- **Immutable snapshots** (committed containers) that can be safely shared and cloned
-- **Mutable builders** (uncommitted containers) that accumulate operations before committing
+- **Committed bundles** (loaded from manifests) that can be safely shared
+- **Working bundles** (uncommitted) that accumulate operations before committing
 - **Common interface** shared by both for reading/querying operations
 
 ### The Problem
 
 Without clear boundaries:
-- Risk of accidentally mutating committed containers
+- Risk of accidentally recording operations on committed bundles
 - Confusion about when operations are recorded vs executed
 - Unclear ownership and sharing semantics
-- Type system doesn't enforce immutability
 
 ### Alternatives Considered
 
@@ -30,170 +29,150 @@ Without clear boundaries:
 - Cons: Awkward to convert between types, duplication of read methods
 
 **Option 3: Three-tier with shared trait** (chosen)
-- Pros: Type-enforced immutability, shared interface, clear semantics
+- Pros: Shared read/query interface, clear semantics for committed vs working state
 - Cons: More complex type system, learning curve
 
-## Decision
+## Decision (as amended)
 
-**Implement three-tier architecture: Bundle trait, Bundle (read-only), BundleBuilder (mutable).**
+**Implement three tiers: the `BundleFacade` trait (common interface), `Bundle` (committed/persistent), and `BundleBuilder` (working copy with change tracking).**
 
 ### Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│         Bundlebase Trait            │
+│         BundleFacade Trait          │
 │  (Common read/query interface)      │
 └─────────────────────────────────────┘
               ▲         ▲
               │         │
-     ┌────────┴──┐  ┌──┴──────────┐
+     ┌────────┴──┐  ┌──┴────────────┐
      │  Bundle   │  │ BundleBuilder │
-     │(immutable)│  │   (mutable)   │
+     │(committed)│  │ (working copy)│
      └───────────┘  └───────────────┘
 ```
 
-**Bundlebase Trait**:
-- Common interface for schema(), query(), to_pandas(), etc.
-- Implemented by both Bundle and BundleBuilder
-- Contains all read/query operations
+**BundleFacade trait** (rust/bundlebase/src/bundle/facade.rs):
+- Common interface: `schema()`, `dataframe()`, `query()`, `num_rows()`, `operations()`, `views()`, `extend()`, `export_tar()`, etc.
+- Implemented by both `Bundle` and `BundleBuilder`
+- Used by the catalog/schema providers and CLI so they work with either type
 
-**Bundle** (read-only):
-- Represents committed snapshot
-- Loaded from manifest files
-- Cannot be modified (`&self` methods only)
-- Cheap to clone (Arc-based sharing)
-- Can be extended via `.extend()` → creates new BundleBuilder
+**Bundle** (rust/bundlebase/src/bundle.rs):
+- Represents a bundle loaded from persistent storage (committed manifests)
+- **Not a frozen immutable struct**: all mutable state lives in `Arc<RwLock<T>>` fields (~25 of them), enabling thread-safe interior mutability
+- Mutation only happens through the `pub(crate) apply_operation(&self, op)` path — external users cannot record operations on a bare `Bundle`
+- `Clone` shares all `Arc` state: clones see each other's mutations (intentional, used by schema providers)
+- Extended via `.extend()` → creates a `BundleBuilder`
 
-**BundleBuilder** (mutable):
-- Contains uncommitted operations
-- All mutation methods take `&mut self` and return `&mut Self`
-- Methods: `attach()`, `filter()`, `drop_column()`, `commit()`
-- Wraps a base Bundle + list of new operations
+**BundleBuilder** (rust/bundlebase/src/bundle/builder.rs):
+- Wraps an `Arc<Bundle>` plus change tracking: `in_progress_change`, `status` (uncommitted `BundleChange`s), pending deletes/updates
+- Modification methods take `&self` and return `Result<&Self>` (interior mutability — see [ADR-005](005-mutable-operations.md))
+- Convenience methods (`attach()`, `filter()`, `drop_column()`, ...) live on the `BundleBuilderExt` trait in the `bundlebase-command` crate (builder_ext.rs); they run commands through `run_command`/`do_change` for change tracking and rollback
+- `commit(message)` persists accumulated changes as a new manifest version
+- `reset()` / `undo()` discard or roll back uncommitted changes
 
-### Implementation Details
+### Crate Layout
 
-```rust
-// Trait (common interface)
-pub trait Bundlebase {
-    fn schema(&self) -> &Schema;
-    async fn to_pandas(&self) -> Result<DataFrame>;
-    // ... read operations
-}
+The "tiers" sit inside a 12-crate workspace (`rust/`):
 
-// Read-only (immutable)
-pub struct Bundle {
-    state: Arc<BundleState>, // Shared immutable state
-    // No mutation methods
-}
-
-// Mutable (builder)
-pub struct BundleBuilder {
-    base: Bundle,              // Base committed state
-    operations: Vec<Operation>, // New operations
-}
-
-impl BundleBuilder {
-    pub fn filter(&mut self, expr: &str) -> &mut Self {
-        self.operations.push(Operation::Filter(expr.to_string()));
-        self // Chainable
-    }
-}
-```
+| Crate | Role |
+|-------|------|
+| `bundlebase` | Core: Bundle, BundleBuilder, operations, packs, catalog glue |
+| `bundlebase-command` | Command layer: SQL-ish command parsing (pest grammar), `BundleBuilderExt` |
+| `bundlebase-cli` | CLI binary: repl/query/extend/server/mcp subcommands |
+| `bundlebase-python` | PyO3 bindings (the only crate with PyO3 code) |
+| `bundlebase-common` | Shared types: errors, RowId, ObjectId, Platform, arrow type parsing |
+| `bundlebase-data` | Reader plugins (CSV/TSV/JSONL/Parquet), DataReaderFactory, page maps |
+| `bundlebase-io` | IO abstraction over local/object storage |
+| `bundlebase-catalog` | DataFusion catalog/schema providers (`bundle_info.*`) |
+| `bundlebase-connector` | Connector definitions and validation |
+| `bundlebase-index` | BTree row indexes |
+| `bundlebase-udf` | User-defined function runtimes (python/lib/java/docker/ipc) and bridges |
+| `bundlebase-report` | Stored report generation |
 
 ## Consequences
 
 ### Positive
 
-- **Type safety**: Rust type system enforces immutability (can't call `.filter()` on Bundle)
-- **Clear semantics**: Obvious when data can/cannot be modified
-- **Safe sharing**: Bundle can be cloned and shared across threads without locks
+- **Clear semantics**: `Bundle` = committed state; `BundleBuilder` = uncommitted changes with status/undo/commit
+- **Safe sharing**: Both types are `Arc`-shareable across threads, async tasks, server sessions, and Python
 - **Clone efficiency**: Arc-based state sharing makes cloning cheap
-- **Familiar pattern**: Similar to Rust's `String` vs `&str`, `Vec<T>` vs `&[T]`
-- **Explicit conversions**: `.extend()` creates mutable from immutable with clear intent
+- **Generic programming**: Functions can take `&dyn BundleFacade` to work with either type
+- **Explicit conversions**: `.extend()` creates a working copy from a committed bundle with clear intent
 
 ### Negative
 
-- **Learning curve**: Users must understand three types and when to use each
+- **Mutation not compiler-enforced**: Because both types use interior mutability, immutability of `Bundle` is enforced by API visibility (`pub(crate) apply_operation`) and the operation/commit flow, not by `&self` vs `&mut self`
+- **Learning curve**: Users must understand the trait + two types
 - **API complexity**: More types in the API surface than single-type approach
-- **Conversion overhead**: Need to explicitly convert between types
-- **Documentation burden**: Must explain the architecture to new users
-- **Python mapping**: Harder to map to Python (Python doesn't have ownership)
 
 ### Neutral
 
-- **Code duplication**: Some methods appear on both types (via trait)
-- **Method availability**: Read methods on both types, write methods only on BundleBuilder
-- **Generic programming**: Can write functions generic over `T: Bundlebase`
+- **Code duplication**: Some methods appear on both types (via the trait)
+- **Method availability**: Read methods on both types; change-tracked write methods only on `BundleBuilder`
 
 ## Usage Patterns
 
-### Loading and Querying (immutable)
+### Loading and Querying (committed)
 
 ```rust
-// Load committed container (immutable)
-let bundle = Bundle::open("/path").await?;
+// Load committed bundle
+let bundle: Arc<Bundle> = Bundle::open("file:///path/to/bundle", None).await?;
 
 // Read operations work
-let schema = bundle.schema();
-let df = bundle.to_pandas().await?;
+let schema = bundle.schema().await?;
+let results = bundle.query("SELECT * FROM bundle", vec![], None).await?;
 
-// Mutation doesn't compile
-bundle.filter("age > 18"); // ❌ Compile error
+// There is no `bundle.filter(...)` — recording operations requires a BundleBuilder
 ```
 
-### Building and Modifying (mutable)
+### Building and Modifying (working copy)
 
 ```rust
-// Create mutable container
-let mut builder = BundleBuilder::create("/path").await?;
+use bundlebase_command::BundleBuilderExt;
 
-// Chain mutations
-builder
-    .attach("data.parquet")?
-    .filter("active = true")?
-    .drop_column("temp")?;
-
-// Commit creates immutable snapshot
-builder.commit("Initial load").await?;
+let builder = BundleBuilder::create("file:///path/to/bundle", None).await?;
+builder.attach("data.parquet", None).await?
+    .filter("SELECT * FROM bundle WHERE active = true", vec![]).await?
+    .drop_column("temp").await?
+    .commit("Initial load").await?;
 ```
 
-### Extending (immutable → mutable)
+### Extending (committed → working copy)
 
 ```rust
-// Load committed
-let base = Bundle::open("/base").await?;
-
-// Extend to new mutable container
-let mut extended = base.extend("/extended").await?;
-extended.attach("more_data.parquet")?;
+let base = Bundle::open("file:///base", None).await?;
+let extended = base.extend(Some("/extended")).await?; // Arc<BundleBuilder>
+extended.attach("more_data.parquet", None).await?;
 extended.commit("Added data").await?;
 ```
 
 ## Related Decisions
 
-- [ADR-005](005-mutable-operations.md) - Mutable operations return `&mut Self` for chaining
-- [ADR-006](006-lazy-evaluation.md) - Operations recorded on BundleBuilder, executed later
+- [ADR-005](005-mutable-operations.md) - Interior mutability (`&self -> Result<&Self>`)
+- [ADR-006](006-lazy-evaluation.md) - Operations recorded, DataFrame rebuilt lazily
 - See [architecture.md](../architecture.md) for detailed implementation
 
 ## Python Mapping
 
 Python doesn't have ownership, so we map:
-- `Bundle` (Rust) → `Bundle` (Python read-only wrapper)
-- `BundleBuilder` (Rust) → `BundleBuilder` (Python mutable wrapper)
-
-Python users see two classes but don't need to understand Rust ownership:
+- `Bundle` (Rust) → `PyBundle` / `Bundle` (Python, read/query only)
+- `BundleBuilder` (Rust) → `PyBundleBuilder` / `BundleBuilder` (Python, mutation methods)
 
 ```python
-# Immutable (loaded)
+# Committed (loaded)
 bundle = await bundlebase.open("/path")
 df = await bundle.to_pandas() # OK
-# bundle.filter(...) # Would error
+# bundle.filter(...) # AttributeError — not a builder
 
-# Mutable (created)
-builder = await bundlebase.create("/path")
-builder.attach("data.parquet") # OK
+# Working copy (created or extended)
+builder = await bundlebase.create("/path").attach("data.parquet")
 await builder.commit("Done")
 ```
+
+## Decision History
+
+- **Dec 2024**: Recorded as "Bundlebase trait / Bundle (immutable, `&self` only) / BundleBuilder (`&mut self`)" with a shared `BundleState` struct.
+- **Amended June 2026**: The trait is named `BundleFacade`; there is no `BundleState` type; both `Bundle` and `BundleBuilder` use interior mutability and `&self` methods (see ADR-005). The three-tier separation itself (trait + committed type + working type) stands and is implemented.
 
 ## References
 

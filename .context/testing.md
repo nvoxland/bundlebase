@@ -12,6 +12,13 @@ layer works end-to-end. They do NOT re-test underlying Rust business logic.
 If you find yourself wanting to add a Python test to check operation
 correctness, add a Rust test instead.
 
+> **Current state (2026-06):** the Python suite does not yet match this
+> strategy — `python/tests/test_e2e.py` is ~2,860 lines with 144 tests, many
+> of which re-test operation semantics already covered in Rust. Slimming it
+> back to binding-only scope is tracked as open work in
+> [debt.md](debt.md). Do not add to the problem: new Python tests must stay
+> within the binding-verification scope described here.
+
 ## Test Coverage Overview
 
 **Rust Lib Tests** (`src/`):

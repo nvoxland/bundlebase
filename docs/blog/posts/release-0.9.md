@@ -14,7 +14,7 @@ Preparing for a beta release with stored reports, connector improvements, "hollo
 
 ### Stored reports
 
-You can now define named queries and store them in the bundle with [`CREATE REPORT`](../../sql-reference/index.md#create-report). Run one with `GENERATE REPORT`, list them with `SHOW REPORTS`, and remove with `DROP REPORT`. Useful for packaging canned analyses alongside the data. See the [reports guide](../../guide/reports.md#stored-reports) for the full syntax.
+You can now define named queries and store them in the bundle with [`CREATE REPORT`](../../guide/reports.md#creating-a-report). Run one with `GENERATE REPORT`, list them with `SHOW REPORTS`, and remove with `DROP REPORT`. Useful for packaging canned analyses alongside the data. See the [reports guide](../../guide/reports.md#stored-reports) for the full syntax.
 
 ### JSON normalization options
 
@@ -28,7 +28,7 @@ If you want to keep the original data formats attached, use `SAVE AS REF` or `SA
 
 ### EXPORT DATA and EXPORT HOLLOW
 
-The old `EXPORT` command is now [`EXPORT DATA`](../../sql-reference/index.md#export-data) for clarity. New: [`EXPORT HOLLOW`](../../sql-reference/index.md#export-hollow) exports the bundle structure and schema without the data — useful for sharing a template or moving a bundle definition without copying large files.
+The old `EXPORT` command is now [`EXPORT DATA`](../../sql-reference/index.md#export-data) for clarity. New: [`EXPORT HOLLOW`](../../sql-reference/index.md#export-empty) exports the bundle structure and schema without the data — useful for sharing a template or moving a bundle definition without copying large files.
 
 ### HTTP connector POST/PUT
 

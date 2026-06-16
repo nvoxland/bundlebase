@@ -50,10 +50,10 @@ This document tracks known technical debt in bundlebase - shortcuts, workarounds
 **Example:**
 ```rust
 // Some operations validate minimally
-fn check(&self, state: &BundleState) -> Result<()> {
+async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
     // Only checks column exists, doesn't validate types
-    if !state.schema().column_with_name(&self.column).is_some() {
-        return Err(...);
+    if bundle.bundle_schema().column_id(&self.column).is_none() {
+        return Err(format!("Column '{}' not found", self.column).into());
     }
     Ok(())
 }
@@ -219,7 +219,25 @@ row = c.get_row(1000001)  # ~1ms
 
 **Related:** [decisions/003-streaming-only.md](decisions/003-streaming-only.md), [testing.md](testing.md)
 
-**Status:** Planned for v0.3.0
+**Status:** Planned
+
+---
+
+#### 🟡 Python E2E Suite Exceeds Intended Scope
+
+**Issue:** `python/tests/test_e2e.py` (~2,860 lines, 144 tests) re-tests operation semantics that belong in Rust
+
+**Impact:** Slower test runs, duplicated coverage, drift from the documented testing strategy (Python tests should only verify the binding layer)
+
+**Proposed solution:** Slim the Python suite to thin binding checks; move any uniquely-covered operation semantics into `rust/bundlebase/tests/`
+
+**Cost to fix:** Medium - need to audit which Python tests have Rust equivalents
+
+**Benefit:** Faster CI, single source of truth for operation behavior
+
+**Related:** [testing.md](testing.md)
+
+**Status:** Not started
 
 ---
 
@@ -291,27 +309,25 @@ row = c.get_row(1000001)  # ~1ms
 
 ### Architecture
 
-#### 🔴 Missing Features (Planned)
+#### 🟡 Missing Features (Planned)
 
-**Issue:** Core features not yet implemented
+**Issue:** Some features not yet implemented
 
-**Impact:** Users can't accomplish some common tasks
+**Impact:** Users can't accomplish some tasks
 
-**Missing features:**
-- **Joins** - No way to join multiple containers
-- **Aggregations** - No built-in group by / aggregate
-- **Window functions** - No support for window operations
-- **Data modification** - No UPDATE/DELETE operations
-- **Custom UDFs** - Limited ability to add custom functions
+**Already implemented (no longer debt):**
+- **Joins** - `JOIN` / `IMPORT JOIN` commands (`CreateJoinOp`), Python `join()` with `join_type`
+- **Aggregations & window functions** - `query()` passes SQL straight to DataFusion, so `GROUP BY`, aggregates, and window functions all work
+- **Data modification** - `UPDATE` / `DELETE` (`UpdateDataOp`/`DeleteOp` overlays) plus `ALWAYS UPDATE` / `ALWAYS DELETE` rules
+- **Custom UDFs** - `IMPORT FUNCTION` with multi-runtime support via `bundlebase-udf`
+
+**Still missing:**
+- **Schema auto-alignment** - Multi-source attach requires matching schemas (see "Schema Mismatch Handling in UNIONs" above)
+- **Open-at-version** - Can only open the latest commit, not an arbitrary historical version
+- **Push/pull** - No remote sync of bundles between locations
+- **Diff** - No way to compare two bundle versions
 
 **Status:** Roadmap items for future versions
-
-**Priority varies:**
-- Joins: 🔴 High priority (v0.3.0 planned)
-- Aggregations: 🔴 High priority (v0.3.0 planned)
-- Window functions: 🟡 Medium priority (v0.4.0)
-- Data modification: 🟢 Low priority (read-only is OK for now)
-- Custom UDFs: 🟡 Medium priority (v0.4.0)
 
 ---
 
@@ -331,7 +347,7 @@ row = c.get_row(1000001)  # ~1ms
 
 **Benefit:** More robust, better error messages, more features
 
-**Status:** Deferred to v0.4.0 (current system sufficient for now)
+**Status:** Deferred (current system sufficient for now)
 
 ---
 
@@ -339,9 +355,9 @@ row = c.get_row(1000001)  # ~1ms
 
 #### 🟢 DataFusion Version Lock
 
-**Issue:** Locked to DataFusion v51, haven't upgraded to v52+
+**Issue:** Pinned to DataFusion v53 (Arrow v58); newer releases require explicit upgrade work
 
-**Impact:** Missing new DataFusion features and optimizations
+**Impact:** New DataFusion features and optimizations arrive only when we upgrade
 
 **Reason for debt:** API changes require code updates, testing
 
@@ -351,7 +367,7 @@ row = c.get_row(1000001)  # ~1ms
 
 **Related:** [dependencies.md](dependencies.md)
 
-**Status:** Planned for v0.3.0 after testing
+**Status:** Upgrade as needed when a new DataFusion release offers something we want
 
 ---
 
@@ -497,9 +513,9 @@ Track debt over time:
 
 | Version | High Priority | Medium Priority | Low Priority | Total |
 |---------|---------------|-----------------|--------------|-------|
+| v0.13.0 | 1             | 8               | 4            | 13    |
 | v0.2.1  | 2             | 4               | 4            | 10    |
 | v0.2.0  | 3             | 5               | 3            | 11    |
-| v0.1.5  | 5             | 4               | 2            | 11    |
 
 **Trend:** Debt stable (adding and resolving at similar rate)
 
@@ -559,19 +575,18 @@ Debt is not an excuse for low quality:
 
 ## Summary
 
-**Current state:** 10 debt items (2 high, 4 medium, 4 low)
+**Current state:** 13 debt items (1 high, 8 medium, 4 low)
 
 **High priority items:**
 1. Limited large dataset testing
-2. Missing core features (joins, aggregations)
 
 **Next quarter focus:**
 - Add large dataset tests (prevents streaming violations)
-- Plan joins feature (most requested)
+- Slim the Python E2E suite back to binding-only scope
 
 **Philosophy:** Debt is tracked, prioritized, and paid down regularly. We accept strategic debt but never sacrifice critical constraints.
 
 ---
 
-**Last Updated:** January 2026
-**Next Review:** April 2026
+**Last Updated:** 2026-06-10
+**Next Review:** September 2026

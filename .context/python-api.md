@@ -1,16 +1,17 @@
 # Python API Reference
 
+This is the **async** API (`import bundlebase`). For the synchronous wrapper see [sync-api.md](sync-api.md). The classes are `PyBundleBuilder` (mutable, from `create()`/`extend()`) and `PyBundle` (read-only, from `open()`/`view()`).
+
 ## Basic Usage Example
 
 ```python
-import Bundlebase
-import pyarrow as pa
+import bundlebase
 
-# Create a writable BundlebaseBuilder with a working directory
-c = await Bundlebase.create("memory:///test_container")  # Returns BundlebaseBuilder
+# Create a writable bundle builder with a working directory
+c = await bundlebase.create("memory:///test_bundle")  # Returns PyBundleBuilder
 
 # Attach data source
-await c.attach("userdata.parquet")
+c = await c.attach("userdata.parquet")
 
 # Register a user-defined SQL scalar function (temporary, for Python runtime)
 await c.import_temp_function(
@@ -25,59 +26,65 @@ await c.import_function(
     from_="ipc::weather-binary"
 )
 
-# Transform data (modifies container in place)
+# Transform data (modifies the bundle in place)
 await c.drop_column("title")
 await c.rename_column("first_name", "full_name")
+await c.filter("SELECT * FROM bundle WHERE salary > $1", [50000])
 
-# Chain multiple operations (each mutates the container)
-await c.filter("salary > $1", [50000])
-await c.query("SELECT id, full_name, salary FROM bundle")
+# Access metadata
+print(f"Name: {c.name}")            # property
+print(f"Rows: {await c.num_rows()}")  # async method
+print(f"Schema: {await c.schema()}")  # async method
 
-# Access metadata (properties, not methods)
-print(f"Name: {c.name}")  # Property access
-print(f"Rows: {c.num_rows}")
-print(f"Schema: {c.schema}")
+# Query - returns a QueryResult (does NOT modify the bundle)
+result = await c.query("SELECT id, full_name, salary FROM bundle")
+df = await result.to_pandas()
 
-# Query results - convert to preferred format
+# Or convert the whole bundle to a preferred format
 df = await c.to_pandas()  # pandas DataFrame
 # df = await c.to_polars()  # Polars DataFrame
 # data = await c.to_dict()  # Dictionary of lists
 
-# Commit the container state
+# Commit the bundle state
 await c.commit("Added data and transformations")
 ```
 
-## Mutable Operations Pattern
+## Mutable Operations and Chaining
 
-**Important:** All transformation methods mutate the container in place:
+**Important:** All transformation methods mutate the bundle in place and resolve to the builder, so `c = await c.attach(...)` and `await c.attach(...)` are equivalent.
+
+Mutation methods actually return an `OperationChain` (see `python/src/bundlebase/chain.py`), which queues operations and executes them all on a single `await`:
 
 ```python
-c = await Bundlebase.create("/path/to/container")
-c = await c.attach("data.parquet")
-
-# c is now modified with the attached data
-c = await c.drop_column("title")  # c is further modified
-c = await c.rename_column("name", "full_name")  # c continues to be modified
-
-# All modifications are on the same container instance
+c = await (bundlebase.create(path)        # CreateChain
+          .attach("data.parquet")
+          .drop_column("title")
+          .rename_column("name", "full_name"))
 ```
+
+Only methods registered in `_original_methods` in `python/src/bundlebase/__init__.py` are chainable — that dict must be kept in sync when new Rust binding methods are added. Read methods (`schema()`, `num_rows()`, `explain()`) and result-returning methods (`query()`, `fetch()`) are not chainable. Conversion methods (`to_pandas`, `to_polars`, `to_numpy`, `to_dict`, `as_pyarrow_stream`) can terminate a chain: they execute the queued operations first, then convert.
 
 **Directory-Based Persistence:**
 ```python
-# Container created with data_dir stores manifests in {data_dir}/_bundlebase/
-c = await Bundlebase.create("/my/container/dir")
+# Bundle created with data_dir stores manifests in {data_dir}/_bundlebase/
+c = await bundlebase.create("/my/bundle/dir")
 await c.attach("data.parquet")
 await c.commit("Initial data load")  # Creates versioned manifest
 
-# Later, reopen the same container
-c = await Bundlebase.open("/my/container/dir")
-```
+# Later, reopen the bundle (read-only PyBundle)
+b = await bundlebase.open("/my/bundle/dir")
 
-**Note:** FunctionRegistry is shared across all container instances. When you define a function in one container, it's available globally. This is intentional for function reuse.
+# To modify it, extend (returns an ExtendChain -> PyBundleBuilder)
+c = await b.extend().attach("more_data.parquet")
+```
 
 ## Supported Mutation Methods
 
-- `attach(url)` - Add data source (CSV columns import as text; use `cast_column` to convert types)
+- `attach(location, pack="base")` - Add data source (CSV columns import as text; use `cast_column` to convert types)
+- `detach_block(location)` - Remove an attached block
+- `replace_block(old_location, new_location)` - Repoint a block to a new location
+- `create_source(connector, args, pack="base", fetch=True)` - Define a connector-backed source
+- `fetch(pack="base", mode="add")` / `fetch_all(mode="add")` - Pull new/changed data from sources (return `FetchResults` lists, not the builder)
 - `drop_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
 - `normalize_column_names()` - Convert all column names to lowercase+underscore identifiers
@@ -89,33 +96,56 @@ c = await Bundlebase.open("/my/container/dir")
 - `drop_always_delete(where_clause=None)` - Remove one or all always-delete rules
 - `always_update(set_where)` - Register persistent auto-update rule (applies to all future attaches)
 - `drop_always_update(rule_text=None)` - Remove one or all always-update rules
-- `filter(query, params)` - Filter rows with a SELECT query (e.g., `"SELECT * FROM bundle WHERE salary > $1"`)
-- `join(url, expression, join_type)` - Join with another source
-- `set_name(name)` - Set container name
-- `set_description(description)` - Set container description
-- `import_connector(name, from_, platform)` - Define a persistent custom connector
-- `import_temp_connector(name, from_, platform)` - Define a session-only custom connector (required for Python runtime)
-- `drop_connector(name, platform)` - Drop a connector definition
-- `drop_temp_connector(name, platform)` - Drop runtime-only connector
-- `import_function(name, from_, platform)` - Define a persistent SQL function (types auto-detected from manifest)
-- `import_temp_function(name, from_, platform)` - Define a session-only SQL function (types auto-detected from manifest)
-- `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
+- `filter(query, params=None)` - Filter rows with a full SELECT query (e.g., `"SELECT * FROM bundle WHERE salary > $1"`)
+- `join(name, expression, location=None, join_type=None)` - Join with another source (location optional; attach later with `attach(loc, pack=name)`)
+- `drop_join(name)` / `rename_join(old, new)` - Manage joins
+- `set_name(name)` - Set bundle name
+- `set_description(description)` - Set bundle description
+- `save_config(scope, key, value)` / `set_config(scope, key, value)` - Persist or session-set config values
+- `import_connector(name, from_, platform="*/*", src=None)` - Define a persistent custom connector
+- `import_temp_connector(name, from_, platform="*/*")` - Define a session-only custom connector (required for Python runtime)
+- `drop_connector(name, platform=None)` / `rename_connector(old, new)` - Manage connectors
+- `drop_temp_connector(name, platform=None)` - Drop runtime-only connector
+- `import_function(name, from_, platform="*/*")` - Define a persistent SQL function (types auto-detected from manifest)
+- `import_temp_function(name, from_, platform="*/*")` - Define a session-only SQL function (types auto-detected from manifest)
+- `drop_function(name, platform=None, input_types=None)` / `rename_function(old, new)` - Manage functions
 - `create_view(name, sql)` - Create a named view from a SQL query
+- `rename_view(old, new)` / `drop_view(name)` - Manage views
+- `create_index(columns, index_type, args=None, name=None)` - Create a "btree" or "text" index
+- `drop_index(column)` / `rebuild_index(column)` / `reindex()` - Index maintenance
 - `create_report(id, name, description, content)` - Create or replace a stored report template
 - `drop_report(id)` - Drop a stored report
 - `generate_report(id, output, no_branding=False)` - Generate a PDF from a stored report
-- `query(sql, params)` - Execute a SQL query and return streaming results
+- `reset()` - Drop all uncommitted operations
+- `undo()` - Undo the last uncommitted operation
+- `commit(message)` - Persist uncommitted changes
+- `export_tar(tar_path, gzip=False)` - Export the bundle as a single tar archive
+- `export_empty(path)` - Export bundle structure only (recipients `fetch()` their own data)
+
+## Querying
+
+`query()` executes SQL and returns a `QueryResult` wrapper (it does **not** modify the bundle):
+
+```python
+result = await c.query("SELECT * FROM bundle WHERE id > $1", [100], hard_limit=1000)
+
+df = await result.to_pandas()      # or to_polars() / to_dict()
+# or stream:
+async for batch in result.stream_batches():
+    process(batch)
+```
+
+A `QueryResult` wraps a one-shot stream — after any conversion or `stream_batches()` consumes it, run the query again for fresh results. `describe_data(columns)`, `test_connector(name, **kwargs)`, and `test_temp_connector(from_, **kwargs)` also return `QueryResult`.
 
 ## Schema Introspection
 
-BundlebaseBuilder provides rich schema information through the `PySchema` and `PySchemaField` classes:
+`schema()` is an async method returning a `PySchema`:
 
 ```python
-c = await Bundlebase.create("memory:///test_container")
+c = await bundlebase.create("memory:///test_bundle")
 await c.attach("users.parquet")
 
-# Get schema object
-schema = c.schema
+schema = await c.schema()
 
 # Schema properties
 print(f"Column count: {len(schema)}")
@@ -137,7 +167,7 @@ print(schema)  # Human-readable schema dump
 **PySchema methods and properties:**
 - `fields` (property) - List of all PySchemaField objects
 - `field(name)` - Get specific field by name, raises ValueError if not found
-- `__len__()` - Number of fields
+- `__len__()` / `__getitem__(idx)` - Number of fields / field by index
 - `is_empty()` - Check if schema has any fields
 - `__str__()` - Pretty-printed schema with all columns and types
 
@@ -151,7 +181,7 @@ print(schema)  # Human-readable schema dump
 After building your data transformation pipeline, convert results to your preferred format:
 
 ```python
-c = await Bundlebase.create("memory:///test_container")
+c = await bundlebase.create("memory:///test_bundle")
 await c.attach("data.parquet")
 
 # Option 1: Pandas DataFrame (widely used in data science)
@@ -169,9 +199,8 @@ ids = arrays["id"]  # numpy.ndarray
 # Option 4: Python dictionaries (generic Python usage)
 data = await c.to_dict()
 names = data["name"]  # list of values
-first_name = data["name"][0]
 
-# Option 5: Raw PyArrow batches (low-level access)
+# Option 5: Raw PyArrow batches (low-level access; materializes everything)
 batches = await c.as_pyarrow()
 for batch in batches:
     print(f"Batch with {batch.num_rows} rows")
@@ -179,19 +208,18 @@ for batch in batches:
 
 **When to use each method:**
 
-| Format | Use Case | Performance | Memory |
-|--------|----------|-------------|--------|
-| **to_pandas()** | Data analysis, visualization, scientific computing | Moderate | **Streaming** (constant memory) |
-| **to_polars()** | Modern alternative to pandas, better performance | Excellent | **Streaming** (constant memory) |
-| **to_numpy()** | NumPy array operations, machine learning | Good | Full materialization |
-| **to_dict()** | Generic Python usage, JSON serialization | Good | Full materialization |
-| **as_pyarrow()** | Legacy batch access (use `stream_batches()` instead) | Excellent | Full materialization |
-| **stream_batches()** | **Manual batch processing for large datasets** | Excellent | **Constant memory** |
+| Format | Use Case | Memory |
+|--------|----------|--------|
+| **to_pandas()** | Data analysis, visualization | Full materialization (~2x dataset at peak) |
+| **to_polars()** | Modern alternative to pandas | Full materialization (~2x dataset at peak) |
+| **to_numpy()** | NumPy array operations, ML | Full materialization (via `as_pyarrow()`) |
+| **to_dict()** | Generic Python usage, JSON serialization | Full materialization |
+| **as_pyarrow()** | Legacy batch access (uses DataFusion `collect()`) | Full materialization |
+| **stream_batches()** | **Incremental processing of large datasets** | **Bounded** (one batch at a time) |
 
 **Important notes:**
 - All conversion methods are `async` - must be awaited
-- Raise `ValueError` if container has no data attached
-- **`to_pandas()` and `to_polars()` now use streaming internally** - safe for large datasets
+- Raise `ValueError` if the bundle has no data attached
 - Return types:
   - `to_pandas()` → `pandas.DataFrame`
   - `to_polars()` → `polars.DataFrame`
@@ -202,33 +230,27 @@ for batch in batches:
 
 ## Streaming API for Large Datasets
 
-**All conversion methods now use streaming internally** to handle datasets larger than available RAM. The streaming architecture processes data in batches, maintaining constant memory usage regardless of dataset size.
+What actually streams with bounded memory:
 
-### Automatic Streaming (Recommended)
+- `bundlebase.stream_batches(c)` / `QueryResult.stream_batches()` - pull one batch at a time from a Rust `execute_stream()`; only the current batch (plus whatever you keep) is in memory
+- `as_pyarrow_stream()` - the underlying `PyRecordBatchStream` object
 
-For most use cases, simply use the standard conversion methods - they handle streaming automatically:
+What does **not**:
 
-```python
-# These methods now stream internally - safe for multi-GB datasets!
-df = await c.to_pandas()    # Streams batches, then concatenates
-df = await c.to_polars()    # Streams batches, constructs efficiently
-```
+- `to_pandas()` / `to_polars()` stream batches from Rust but **accumulate every batch** and then build the final DataFrame (`pd.concat` / `pa.Table.from_batches`) - peak memory is roughly 2x the dataset size (see `python/src/bundlebase/conversion.py`)
+- `as_pyarrow()` uses DataFusion `collect()` and materializes the entire result
 
-**Memory footprint**: Constant per batch (~8-64MB typical), NOT proportional to total dataset size.
-
-### Manual Batch Processing
-
-For custom processing or maximum memory control, use `stream_batches()`:
+For datasets that don't fit comfortably in RAM, use `stream_batches()`:
 
 ```python
-import Bundlebase
+import bundlebase
 
-c = await Bundlebase.create()
-await c.attach("huge_file.parquet")  # 10GB+ file
+c = await bundlebase.create()
+c = await c.attach("huge_file.parquet")  # 10GB+ file
 
-# Process one batch at a time - constant memory usage
+# Process one batch at a time - bounded memory usage
 total_rows = 0
-async for batch in Bundlebase.stream_batches(c):
+async for batch in bundlebase.stream_batches(c):
     # Each batch is a pyarrow.RecordBatch
     chunk_df = batch.to_pandas()
 
@@ -239,11 +261,11 @@ async for batch in Bundlebase.stream_batches(c):
 print(f"Processed {total_rows} rows with minimal memory")
 ```
 
-**Use cases for manual streaming:**
+**Use cases for streaming:**
 - **Custom aggregations**: Incremental statistics, rolling calculations
 - **Data validation**: Check each batch independently, early termination
 - **Streaming writes**: Process and write batches to another system
-- **Memory constraints**: Absolute control over peak memory usage
+- **Memory constraints**: Datasets larger than (or near) available RAM
 
 ### Direct Stream Access
 
@@ -261,21 +283,17 @@ while True:
 
     # Process batch
     print(f"Batch: {batch.num_rows} rows")
-
-# Access stream metadata
-schema = stream.schema  # PySchema object
 ```
 
 ### Streaming Performance Guidelines
 
 **DO:**
-- ✅ Use `to_pandas()` / `to_polars()` for most workflows - they stream automatically
-- ✅ Use `stream_batches()` for custom incremental processing
+- ✅ Use `to_pandas()` / `to_polars()` when the result comfortably fits in RAM (remember the ~2x peak)
+- ✅ Use `stream_batches()` for large datasets or custom incremental processing
 - ✅ Process batches independently - avoid accumulating results
-- ✅ Trust the streaming infrastructure for large files (10GB+)
 
 **DON'T:**
-- ❌ Don't use `as_pyarrow()` for large datasets - it materializes everything
+- ❌ Don't use `as_pyarrow()` or `to_pandas()` for datasets near or beyond RAM size
 - ❌ Don't collect all batches into a list - defeats streaming purpose
 - ❌ Don't implement custom batching - use built-in streaming
 
@@ -309,29 +327,27 @@ total = sum(results)  # Only aggregates kept in memory
 - Each batch freed when Python reference count drops to zero
 
 **Python Layer:**
-- `stream_batches()` async generator yields batches one at a time
-- `to_pandas()` streams batches → `pd.concat()` → single DataFrame
-- `to_polars()` streams batches → constructs Polars DataFrame efficiently
-
-**Memory profile:**
-- **Old behavior** (`collect()`): `3x dataset size` (raw + Arrow + pandas)
-- **New behavior** (streaming): `~50MB per batch` (constant, regardless of total size)
+- `stream_batches()` async generator yields batches one at a time (bounded memory)
+- `to_pandas()` / `to_polars()` consume that stream but accumulate all chunks before building the final DataFrame (~2x dataset peak)
 
 ## Parameterized SQL and Filtering
 
-Use parameterized queries to safely handle user input:
+Use parameterized queries to safely handle user input. Note that `filter()` takes a **full SELECT query**, not a bare predicate:
 
 ```python
-import Bundlebase
+import bundlebase
 
-c = await Bundlebase.create("memory:///test_container")
+c = await bundlebase.create("memory:///test_bundle")
 await c.attach("users.parquet")
 
 # Basic filter with parameters ($1 placeholder)
-filtered = await c.filter("salary > $1", [50000.0])
+await c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
 # Multiple parameters
-filtered = await c.filter("salary > $1 AND department = $2", [50000.0, "Engineering"])
+await c.filter(
+    "SELECT * FROM bundle WHERE salary > $1 AND department = $2",
+    [50000.0, "Engineering"],
+)
 
 # Parameterized SQL query
 results = await c.query(
@@ -354,20 +370,17 @@ results = await c.query(
 
 ```python
 # String parameter
-await c.filter('country = $1', ["USA"])
+await c.filter("SELECT * FROM bundle WHERE country = $1", ["USA"])
 
 # Date/timestamp parameter
-await c.filter('created_at > $1', ["2023-01-01"])
+await c.filter("SELECT * FROM bundle WHERE created_at > $1", ["2023-01-01"])
 
 # Boolean parameter
-await c.filter('is_active = $1', [True])
-
-# NULL parameter
-await c.filter('notes IS NOT NULL OR special_field = $1', [None])
+await c.filter("SELECT * FROM bundle WHERE is_active = $1", [True])
 
 # Multiple types
 await c.filter(
-    'name = $1 AND age > $2 AND active = $3',
+    "SELECT * FROM bundle WHERE name = $1 AND age > $2 AND active = $3",
     ["Alice", 25, True]
 )
 ```
@@ -393,10 +406,11 @@ await c.import_connector('acme.weather', 'ffi::libweather.so', platform='linux/a
 - `name` - Dot-separated connector name (e.g., `"acme.weather"`)
 - `from_` - URI in `runtime::entrypoint` format (e.g., `"ipc::my_connector"`); supported runtimes: `"ipc"`, `"ffi"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
 - `platform` (optional) - Target platform (e.g., `"linux/amd64"`, default `"*/*"`)
+- `src` (optional, keyword-only) - Path to a source archive (zip) bundled alongside the connector
 
 ### import_temp_connector()
 
-Defines a session-only connector. Nothing is persisted — the connector exists only at runtime. Required for Python in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
+Defines a session-only connector. Nothing is persisted — the connector exists only at runtime. Required for Python in-process connectors. Works on both `PyBundle` (read-only) and `PyBundleBuilder`.
 
 ```python
 # Python in-process connector (most common)
@@ -406,7 +420,7 @@ await c.import_temp_connector('acme.weather', 'python::my_module:MyConnector')
 await c.import_temp_connector('acme.weather', 'ipc::my_connector')
 ```
 
-**Parameters:** Same as `import_connector()`, but the `from_` parameter accepts all runtimes including `"python"`.
+**Parameters:** Same as `import_connector()` (minus `src`), but the `from_` parameter accepts all runtimes including `"python"`.
 
 ### drop_connector()
 
@@ -425,145 +439,107 @@ await c.drop_connector('acme.weather', platform='linux/amd64')
 Removes runtime-only connector entries.
 
 ```python
-# Drop all temporary connectors
-count = await c.drop_temp_connector('acme.weather')
+# Drop all temporary entries for the connector
+await c.drop_temp_connector('acme.weather')
 
 # Drop for a specific platform
-count = await c.drop_temp_connector('acme.weather', platform='*/*')
+await c.drop_temp_connector('acme.weather', platform='*/*')
 ```
 
-**Returns:** The number of connector entries removed.
+**Returns:** A message describing what was dropped.
 
 See [Custom Connectors](../docs/guide/custom-connectors/index.md) for full details on runtimes, SDKs, and protocol.
 
 ## Views
 
-Views are named snapshots of container transformations that are stored and versioned within the bundle. They allow you to create reusable query patterns that automatically inherit changes from their parent container.
+Views are named SQL snapshots that are stored and versioned within the bundle. They automatically inherit new commits from their parent bundle.
 
 ### Creating Views
 
-Use `create_view()` to create a named view from a BundleBuilder with uncommitted operations:
+`create_view(name, sql)` takes a **SQL string** and returns the new view's builder:
 
 ```python
-c = await bundlebase.create("/path/to/container")
+c = await bundlebase.create("/path/to/bundle")
 await c.attach("customers.csv")
 await c.commit("Initial data")
 
-# Create view from query
-adults = await c.query("SELECT * FROM bundle WHERE age > 21")
-await c.create_view("adults", adults)
+# Create view from a SQL query
+await c.create_view("adults", "SELECT * FROM bundle WHERE age > 21")
 await c.commit("Add adults view")
-
-# Create view with multiple operations
-working_age = await c.query("SELECT * FROM bundle WHERE age > 21")
-await working_age.filter("age < 65")
-await c.create_view("working_age", working_age)
-await c.commit("Add working age view")
 ```
 
 **Method signature:**
 ```python
-await c.create_view(name: str, source: BundleBuilder) -> BundleBuilder
+await c.create_view(name: str, sql: str) -> PyBundleBuilder
 ```
 
 **Parameters:**
 - `name` - Unique name for the view
-- `source` - BundleBuilder containing operations to capture (typically from `query()`)
+- `sql` - SQL query defining the view contents (e.g., `"SELECT * FROM bundle WHERE age > 21"`)
 
-**Returns:** Self (for method chaining)
+**Returns:** A `PyBundleBuilder` for the created view
 
-### Opening Views
+### Opening and Listing Views
 
-Use `view()` to open a previously created view as a read-only Bundle:
+Use `view()` to open a previously created view as a read-only `PyBundle`, and `views()` to list them:
 
 ```python
-# Open view - returns Bundle (read-only)
-view = await c.view("adults")
+# Open view by name or ID - returns PyBundle (read-only)
+v = await c.view("adults")
+
+# List views: {view_id: view_name}
+print(c.views())
 
 # Access view operations
-print(f"View has {len(view.operations())} operations")
-for op in view.operations():
-    print(f"  {op.describe()}")
+print(f"View has {len(v.operations())} operations")
 ```
 
-**Method signature:**
-```python
-await c.view(name: str) -> Bundle
-```
+Views are not queryable as SQL tables — `view()` returns a sub-bundle scoped to the view's SQL, and the usual `query("... FROM bundle ...")` idioms apply against the returned bundle.
 
-**Parameters:**
-- `name` - Name of the view to open
-
-**Returns:** Read-only `Bundle` object (not `BundleBuilder`)
-
-**Raises:** Error if view doesn't exist
+**Raises:** `ValueError` if the view doesn't exist.
 
 ### View Characteristics
 
-**Read-only:** Views return `Bundle` not `BundleBuilder`, so transformation methods are not available:
+**Read-only:** Views return `PyBundle` not `PyBundleBuilder`, so transformation methods are not available:
 ```python
-view = await c.view("adults")
-# view.filter(...)  # ERROR: Bundle doesn't have filter()
-# view.attach(...)  # ERROR: Bundle doesn't have attach()
+v = await c.view("adults")
+# v.filter(...)  # ERROR: PyBundle doesn't have filter()
+# v.attach(...)  # ERROR: PyBundle doesn't have attach()
 ```
 
-**Dynamic inheritance:** Views automatically see new commits from their parent container:
+**Dynamic inheritance:** Views automatically see new commits from their parent bundle:
 ```python
 # Create view
 await c.attach("data-1.csv")
+await c.create_view("active", "SELECT * FROM bundle WHERE status = 'active'")
 await c.commit("v1")
-active = await c.query("SELECT * FROM bundle WHERE status = 'active'")
-await c.create_view("active", active)
-await c.commit("v2")
 
 # Add more data to parent
-c_bundle = await bundlebase.open("container")
-c_reopened = c_bundle.extend("container")
-await c_reopened.attach("data-2.csv")
-await c_reopened.commit("v3")
+b = await bundlebase.open("bundle")
+c2 = await b.extend().attach("data-2.csv")
+await c2.commit("v2")
 
 # View automatically includes new parent data
-view = await c_reopened.view("active")  # Sees both data-1.csv and data-2.csv
+v = await c2.view("active")  # Sees both data-1.csv and data-2.csv
 ```
 
-### Common Use Cases
+### Management
 
-**Reusable filters:**
-```python
-# Define standard views
-await c.create_view("high_value", await c.query("SELECT * FROM bundle WHERE amount > 1000"))
-await c.create_view("recent", await c.query("SELECT * FROM bundle WHERE date > today() - 30"))
-await c.commit("Add standard views")
+- `rename_view(old_name, new_name)` - Rename a view
+- `drop_view(name)` - Remove a view
 
-# Use later
-high_value_data = await c.view("high_value")
-```
+See [views.md](views.md) for detailed documentation on views architecture, storage structure, and advanced usage.
 
-**Multi-tenant access:**
-```python
-# Create per-tenant views
-tenant_a = await c.query("SELECT * FROM bundle WHERE tenant_id = 'A'")
-await c.create_view("tenant_a", tenant_a)
-await c.commit("Add tenant views")
-```
+## Other Useful Methods
 
-### Error Handling
+Brief pointers to the rest of the surface (see `python/src/bundlebase/__init__.pyi` for full signatures):
 
-```python
-# View not found
-try:
-    view = await c.view("nonexistent")
-except Exception as e:
-    print(f"Error: {e}")  # "View 'nonexistent' not found"
-
-# Duplicate view name
-await c.create_view("adults", await c.query("SELECT * FROM bundle WHERE age > 21"))
-await c.commit("v1")
-
-try:
-    await c.create_view("adults", await c.query("SELECT * FROM bundle WHERE age > 30"))
-except Exception as e:
-    print(f"Error: {e}")  # "View 'adults' already exists"
-```
-
-See [10-VIEWS.md](10-VIEWS.md) for detailed documentation on views architecture, storage structure, and advanced usage.
+- `c.status()` - Uncommitted changes (`PyBundleStatus`)
+- `c.history()` - List of `PyCommit` objects
+- `c.operations()` - List of `PyOperation` objects
+- `c.version` / `c.url` / `c.id` / `c.name` / `c.description` - Properties
+- `await c.explain(verbose=False, analyze=False, format=None, sql=None)` - Query plan stream
+- `await c.describe_data(columns)` - Per-column quality stats (`QueryResult`)
+- `await c.describe_function(name)` - Function metadata (`QueryResult`)
+- `await c.verify_data()` - Verify file integrity via SHA256 hashes
+- `bundlebase.test_datafile(name)` / `bundlebase.random_memory_url()` - Test helpers

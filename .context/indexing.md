@@ -2,7 +2,7 @@
 
 ## Overview
 
-Bundlebase provides an indexing system for query optimization. BTree indexes accelerate queries with equality, IN, and range predicates by avoiding full table scans. The system includes intelligent cost-based optimization to automatically choose the best index and skip indexes when a full scan would be faster.
+Bundlebase provides an indexing system for query optimization. BTree indexes accelerate queries with equality, IN, and range predicates by avoiding full table scans. Text column indexes (`text_column_index.rs` in `rust/bundlebase-index/`) accelerate text search. The system includes intelligent cost-based optimization to automatically choose the best index and skip indexes when a full scan would be faster. Indexes are built lazily — defining an index records it, and index files are built per block (e.g., via `index_blocks()` / reindex operations) rather than eagerly on attach.
 
 ## Key Concepts
 
@@ -59,15 +59,14 @@ The physical index structure stored on disk:
 pub struct BTreeIndex {
     column_name: String,
     data_type: DataType,
-    blocks: Vec<IndexBlock>,       // Value -> RowId mappings
-    directory: IndexDirectory,      // Block-level min/max for range queries
+    blocks: Vec<IndexBlock>,       // ~64KB blocks of value -> RowId entries
+    directory: BlockDirectory,     // Block-level min/max for range queries
     total_entries: u64,            // Total distinct values
     total_rows: u64,               // Total rows indexed
 }
 
-pub struct IndexBlock {
-    value: IndexedValue,
-    row_ids: Vec<RowId>,           // All rows with this value
+struct IndexBlock {
+    entries: Vec<BlockEntryValue>, // Each entry: value + all RowIds with that value
 }
 ```
 
@@ -263,29 +262,28 @@ SELECT * FROM bundle WHERE email = 'test@example.com' AND status = 'active';
 
 ```
 [Header: 32 bytes]
-  - Magic: "BBIDX001" (8 bytes)
-  - Version: 1 (1 byte)
+  - Magic: "BBBTRI01" (8 bytes)
+  - Version: 2 (1 byte)   # v1 stored row-id counts as u16 (could truncate);
+                          # v2 uses u32. v1 files remain readable.
   - Data Type: enum (1 byte)
   - Block Count: u32 (4 bytes)
   - Total Entries: u64 (8 bytes)
-  - Total Rows: u64 (8 bytes)  # Added in v1 for selectivity
+  - Total Rows: u64 (8 bytes)  # Used for selectivity
   - Reserved: (2 bytes)
 
-[Index Directory]
-  - Entry Count: u32 (4 bytes)
+[Index Directory] (24 bytes per block, count from header)
   - For each entry:
-    - Min Value: IndexedValue
-    - Max Value: IndexedValue
-    - Offset: u64 (8 bytes)
-    - Length: u32 (4 bytes)
+    - Min Value: 8 bytes (fixed; long values hashed to u64)
+    - Max Value: 8 bytes (fixed; long values hashed to u64)
+    - File Offset: u64 (8 bytes)
 
 [Index Blocks]
   - For each block:
-    - Value: IndexedValue (serialized)
-    - RowId Count: u32 (4 bytes)
-    - RowIds: [RowId; count]
-      - Block ID: u64 (8 bytes)
-      - Offset: u64 (8 bytes)
+    - Entry Count: u32 (4 bytes)
+    - For each entry:
+      - Value: IndexedValue (serialized)
+      - RowId Count: u32 (4 bytes)  # u16 in format v1
+      - RowIds: [u64; count]        # each RowId is a single u64
 ```
 
 ### Example
@@ -293,7 +291,7 @@ SELECT * FROM bundle WHERE email = 'test@example.com' AND status = 'active';
 For index on `email` column with 3 distinct values:
 
 ```
-Header: BBIDX001, Version=1, Type=Utf8, Blocks=3, Entries=3, Rows=1000
+Header: BBBTRI01, Version=2, Type=Utf8, Blocks=3, Entries=3, Rows=1000
 
 Directory:
   Entry 0: min="alice@...", max="alice@...", offset=100, length=50

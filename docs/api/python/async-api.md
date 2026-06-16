@@ -64,7 +64,6 @@ Mutable bundle class returned by `create()` and transformation methods.
         - always_update
         - drop_always_update
         - filter
-        - select
         - join
         - set_name
         - set_description
@@ -143,7 +142,7 @@ c = await bundlebase.create()
 c = await c.attach("data.parquet")
 
 # Transform
-c = await c.filter("age >= 18")
+c = await c.filter("SELECT * FROM bundle WHERE age >= 18")
 c = await c.drop_column("ssn")
 
 # Export
@@ -157,7 +156,7 @@ import bundlebase
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("active = true")
+    .filter("SELECT * FROM bundle WHERE active = true")
     .drop_column("temp")
     .rename_column("old", "new"))
 
@@ -176,7 +175,7 @@ c = await bundlebase.open("/path/to/bundle")
 c = await c.extend()
 
 # Add more operations
-c = await c.filter("year >= 2020")
+c = await c.filter("SELECT * FROM bundle WHERE year >= 2020")
 
 # Commit changes
 await c.commit("Filtered to 2020+")

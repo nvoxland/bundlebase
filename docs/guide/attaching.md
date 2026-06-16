@@ -35,7 +35,7 @@ By default, data attaches to the base pack. Use the `pack` parameter to attach d
 === "Async API"
 
     ```python
-    await bundle.join("orders", on="customer_id = orders.id")
+    await bundle.join("orders", "customer_id = orders.id")
     await bundle.attach("orders.parquet", pack="orders")
     ```
 

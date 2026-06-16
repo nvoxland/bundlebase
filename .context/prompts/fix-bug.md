@@ -106,7 +106,7 @@ Choose the appropriate fix:
 - [ ] **Missing validation** - Add check in `check()` phase
 - [ ] **Error handling** - Replace `.unwrap()` with `?` or `.ok_or()`
 - [ ] **Streaming violation** - Replace `collect()` with `execute_stream()`
-- [ ] **Schema mismatch** - Fix `reconfigure()` to update schema correctly
+- [ ] **Schema mismatch** - Fix the operation's `apply_dataframe()` / `BundleSchema` updates
 - [ ] **Python binding** - Fix Arc cloning or error mapping
 - [ ] **Logic error** - Fix algorithm or condition
 
@@ -121,13 +121,13 @@ Choose the appropriate fix:
 **Example fix:**
 ```rust
 // Before (buggy)
-pub fn filter(&mut self, expr: &str) -> Result<&mut Self> {
+pub async fn filter(&self, expr: &str) -> Result<&Self, BundlebaseError> {
     let parsed = parse_sql(expr).unwrap();  // ❌ Panics on bad SQL
     // ...
 }
 
 // After (fixed)
-pub fn filter(&mut self, expr: &str) -> Result<&mut Self> {
+pub async fn filter(&self, expr: &str) -> Result<&Self, BundlebaseError> {
     // Parse SQL expression, returning error if invalid
     let parsed = parse_sql(expr)
         .map_err(|e| format!("Invalid filter expression '{}': {}", expr, e))?;  // ✅ Proper error handling
@@ -212,22 +212,32 @@ while let Some(batch) = stream.next().await {
 
 **Symptom:** "Column 'x' not found" after operation that should preserve it
 
-**Root cause:** `reconfigure()` not updating schema correctly
+**Root cause:** Operation's `apply_dataframe()` not keeping `BundleSchema` in sync with the DataFrame
 
 **Fix:**
 ```rust
 // Before
-fn reconfigure(&self, state: &mut BundleState) -> Result<()> {
-    // ❌ Schema not updated after removing column
-    Ok(())
+async fn apply_dataframe(
+    &self,
+    df: DataFrame,
+    _ctx: Arc<SessionContext>,
+    _bundle_schema: &mut BundleSchema,
+) -> Result<DataFrame, BundlebaseError> {
+    // ❌ Drops the column from the DataFrame but leaves the stale
+    // entry in BundleSchema's name map
+    Ok(df.drop_columns(&[&internal_name])?)
 }
 
 // After
-fn reconfigure(&self, state: &mut BundleState) -> Result<()> {
-    // ✅ Update schema to reflect removed column
-    let new_schema = state.schema().project_exclude(&[&self.column])?;
-    state.set_schema(new_schema);
-    Ok(())
+async fn apply_dataframe(
+    &self,
+    df: DataFrame,
+    _ctx: Arc<SessionContext>,
+    bundle_schema: &mut BundleSchema,
+) -> Result<DataFrame, BundlebaseError> {
+    // ✅ Keep the name map consistent with the DataFrame
+    bundle_schema.remove(&self.id);
+    Ok(df.drop_columns(&[&internal_name])?)
 }
 ```
 
@@ -253,25 +263,30 @@ self.inner.filter(&expr)
 
 **Symptom:** Lifetime errors or "value moved" in Python bindings
 
-**Root cause:** Not cloning Arc wrapper for Python
+**Root cause:** Not cloning the Arc-shared inner builder before moving into the async block
 
 **Fix:**
 ```rust
 // Before
 #[pymethods]
 impl PyBundleBuilder {
-    fn filter(&mut self, expr: String) -> PyResult<&mut Self> {
-        self.inner.filter(&expr)?;
-        Ok(self)  // ❌ Can't return Rust reference to Python
+    fn filter<'py>(slf: PyRef<'_, Self>, expr: String, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            slf.inner.filter(&expr).await?;  // ❌ Borrows slf across await
+            Ok(())
+        })
     }
 }
 
 // After
 #[pymethods]
 impl PyBundleBuilder {
-    fn filter(&mut self, expr: String) -> PyResult<Self> {
-        self.inner.filter(&expr)?;
-        Ok(self.clone())  // ✅ Clone Arc (cheap)
+    fn filter<'py>(slf: PyRef<'_, Self>, expr: String, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();  // ✅ Clone Arc (cheap), move clone into future
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner.filter(&expr, vec![]).await.map_err(to_py_err)?;
+            Ok(())
+        })
     }
 }
 ```
@@ -326,19 +341,19 @@ def test_filter_with_apostrophe():
 
 ### 4. Investigate
 ```rust
-// Found the issue in filter operation
-fn check(&self, state: &BundleState) -> Result<()> {
-    parse_sql(&self.expression)?;  // ❌ Doesn't handle escaped quotes
+// Found the issue in the filter operation
+async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+    parse_sql(&self.query)?;  // ❌ Doesn't handle escaped quotes
     Ok(())
 }
 ```
 
 ### 5. Fix
 ```rust
-fn check(&self, state: &BundleState) -> Result<()> {
+async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
     // Parse SQL, allowing escaped quotes in string literals
-    parse_sql_with_escapes(&self.expression)
-        .map_err(|e| format!("Invalid SQL expression '{}': {}", self.expression, e))?;
+    parse_sql_with_escapes(&self.query)
+        .map_err(|e| format!("Invalid SQL expression '{}': {}", self.query, e))?;
     Ok(())
 }
 ```

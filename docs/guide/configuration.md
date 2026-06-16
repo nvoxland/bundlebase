@@ -21,6 +21,9 @@ This means a value set via `SET CONFIG` during a session always overrides the sa
 
 ## Configuration Methods
 
+!!! note
+    `set_config()` and `save_config()` are async-API and SQL only -- they are not available in the sync API yet. The sync API still accepts a passed `config` dict.
+
 ### Runtime Config -- SET CONFIG (Highest Priority)
 
 Use `SET CONFIG` or `set_config()` to set a configuration value for the current session only. This is the highest-priority config source. The value is not persisted and is lost when the session ends.
@@ -30,13 +33,6 @@ Use `SET CONFIG` or `set_config()` to set a configuration value for the current 
     ```python
     await bundle.set_config("s3", "region", "us-west-2")
     await bundle.set_config("s3/data", "endpoint", "http://localhost:9000")
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.set_config("s3", "region", "us-west-2")
-    bundle.set_config("s3/data", "endpoint", "http://localhost:9000")
     ```
 
 === "SQL"
@@ -105,13 +101,6 @@ Use `SAVE CONFIG` to persist configuration in the bundle manifest. These values 
     ```python
     await bundle.save_config("s3", "region", "us-west-2")
     await bundle.save_config("s3/data", "endpoint", "http://minio:9000")
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.save_config("s3", "region", "us-west-2")
-    bundle.save_config("s3/data", "endpoint", "http://minio:9000")
     ```
 
 === "SQL"
@@ -231,7 +220,7 @@ Each storage provider accepts specific configuration keys. Global defaults are n
 
 | Key | Description |
 |-----|-------------|
-| `base_url` | Kaggle API base URL (default: `https://www.kaggle.com`) |
+| `url` | Kaggle API base URL (default: `https://www.kaggle.com`) |
 | `username` | Kaggle username |
 | `key` | Kaggle API key |
 

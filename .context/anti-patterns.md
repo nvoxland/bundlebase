@@ -199,7 +199,7 @@ let result = rust_operation()
 // ❌ BAD: In rust/bundlebase/src/bundle.rs
 use pyo3::prelude::*;
 
-impl Bundlebase {
+impl Bundle {
     #[pymethod]  // PyO3 in core module!
     pub fn query(&self) -> PyResult<DataFrame> {
         // ...
@@ -210,7 +210,7 @@ impl Bundlebase {
 **Correct**:
 ```rust
 // ✅ GOOD: Core logic in rust/bundlebase/src/bundle.rs (NO PyO3)
-impl Bundlebase {
+impl Bundle {
     pub fn query(&self) -> Result<DataFrame> {
         // Pure Rust implementation
     }
@@ -221,7 +221,7 @@ use pyo3::prelude::*;
 
 #[pyclass]
 struct PyBundle {
-    inner: Bundlebase,
+    inner: Arc<Bundle>,
 }
 
 #[pymethods]
@@ -263,16 +263,16 @@ src/
 
 **See Also**: [ai-rules.md section 4.1](ai-rules.md), [overview.md](overview.md)
 
-### ❌ NEVER: Return &mut Self from Read-Only Methods
+### ❌ NEVER: Use &mut self in Bundle/BundleBuilder Methods
 
-**The Problem**: Violates immutability contract of read-only containers.
+**The Problem**: `Bundle` and `BundleBuilder` are shared via `Arc` across async tasks, server sessions, and Python bindings. `&mut self` methods cannot be called through an `Arc` and break the shared-state design.
 
 **Wrong**:
 ```rust
-// ❌ BAD: Read-only Bundle shouldn't return &mut self
-impl Bundle {
-    pub fn get_schema(&mut self) -> &mut Self {
-        // This is a read operation, why return &mut self?
+// ❌ BAD: &mut self — uncallable through Arc<BundleBuilder>
+impl BundleBuilder {
+    pub fn filter(&mut self, expr: &str) -> &mut Self {
+        self.operations.push(op);
         self
     }
 }
@@ -282,23 +282,20 @@ impl Bundle {
 ```rust
 // ✅ GOOD: Read operations use &self
 impl Bundle {
-    pub fn schema(&self) -> &Schema {
-        &self.state.schema  // Immutable reference
+    pub fn is_view(&self) -> bool {
+        *self.is_view.read()  // read lock on Arc<RwLock<bool>>
     }
 }
 
-// ✅ GOOD: Mutable operations on BundleBuilder use &mut self
-impl BundleBuilder {
-    pub fn filter(&mut self, expr: &str) -> &mut Self {
-        self.operations.push(Operation::Filter(expr.to_string()));
-        self  // Chainable mutations
-    }
-}
+// ✅ GOOD: Modification methods use &self + interior mutability,
+// return Result<&Self> for chaining (see builder_ext.rs)
+async fn filter(&self, query: &str, params: Vec<ScalarValue>)
+    -> Result<&Self, BundlebaseError>;
 ```
 
-**Why**: Maintains clear separation between read-only and mutable operations.
+**Why**: Interior mutability (`Arc<RwLock<T>>` fields) is the established pattern — see [decisions/005](decisions/005-mutable-operations.md). Don't hold locks across `.await` points: acquire, clone what you need, release, then await.
 
-**See Also**: [ai-rules.md section 2.1](ai-rules.md), [architecture.md](architecture.md)
+**See Also**: [ai-rules.md section 2.2](ai-rules.md), [architecture.md](architecture.md)
 
 ## 3. Python Binding Anti-Patterns
 
@@ -375,12 +372,14 @@ impl PyBundleBuilder {
 **Correct**:
 ```python
 # ✅ GOOD: Register in python/src/bundlebase/__init__.py
-for cls in [Bundle, BundleBuilder]:
-    # Register async method
-    register_async_method(cls, 'new_operation', 'new_operation')
+_original_methods = {
+    ...
+    "new_operation": _PyBundleBuilder.new_operation,
+}
 
-    # Register sync wrapper
-    register_sync_method(cls, 'new_operation', 'new_operation')
+# If it mutates the bundle and returns the builder, also add it to
+# mutation_methods so it's wrapped to return an OperationChain:
+mutation_methods = [..., "new_operation"]
 ```
 
 **Why**: Registration enables both async and sync APIs, ensures fluent chaining works.
@@ -435,89 +434,72 @@ AlwaysDeleteOp::new("salary < 0")
 **Right**:
 ```rust
 // ✅ GOOD: Translate at command creation time
-let col_names = builder.column_names();
-let translated = column_metadata::translate_sql_to_col_ids("salary < 0", &col_names);
+let translated = builder.translate_sql("salary < 0");
 AlwaysDeleteOp::new(&translated)  // stores "col_0a3f1b2c9d4e7f80 < 0"
 ```
 
-**Key Rule**: The command layer translates user input → `col_<id>` before creating operations. Operations never see user-visible column names. See `column_metadata::translate_sql_to_col_ids()`.
+**Key Rule**: The command layer translates user input → `col_<id>` before creating operations. Operations never see user-visible column names. See `BundleBuilder::translate_sql()` / `BundleSchema::translate_sql()`.
 
-### ❌ NEVER: Mutate Bundle (Read-Only)
+### ❌ NEVER: Mutate Bundle State Outside the Operation Pipeline
 
-**The Problem**: Bundle is designed to be immutable - attempting mutation breaks the architecture.
+**The Problem**: `Bundle` uses interior mutability (`Arc<RwLock<...>>` fields), so the compiler will happily let you write to its state. But every change must flow through `apply_operation()` so it is checked, recorded in the operation log, versioned, and persisted on commit.
 
 **Wrong**:
 ```rust
-// ❌ BAD: Trying to mutate immutable Bundle
-impl Bundle {
-    pub fn add_operation(&mut self, op: Operation) {
-        // Type system should prevent this
-        self.operations.push(op);
-    }
+// ❌ BAD: Writing Bundle state directly, bypassing the operation log
+pub async fn quick_rename(bundle: &Bundle, id: ColumnId, new: &str) {
+    bundle.bundle_schema.write().insert(id, new.to_string());
+    // Not recorded as an operation: won't version, persist, or replay
 }
 ```
 
 **Correct**:
 ```rust
-// ✅ GOOD: Only BundleBuilder has mutation methods
-impl BundleBuilder {
-    pub fn add_operation(&mut self, op: Operation) -> &mut Self {
-        self.operations.push(op);
-        self
-    }
-}
+// ✅ GOOD: Record an operation through the builder; Bundle::apply_operation
+// runs check() + apply(), records the op, and invalidates the cached DataFrame
+builder.apply_operation(RenameColumnOp::setup(id, "new_name").into()).await?;
 
-// ✅ GOOD: Bundle only has read operations
-impl Bundle {
-    pub fn operations(&self) -> &[Operation] {
-        &self.operations  // Read-only access
-    }
-}
+// ✅ GOOD: User-facing mutation goes through BundleBuilderExt methods,
+// which wrap commands in run_command() for change tracking and rollback
+builder.rename_column("old_name", "new_name").await?;
 ```
 
-**Why**: Three-tier architecture depends on clear mutability boundaries.
+**Why**: The three-tier architecture's mutability boundary is enforced by API design (`apply_operation` is `pub(crate)`), not the type system. Bypassing it silently corrupts versioning and persistence.
 
 **See Also**: [ai-rules.md section 2.1](ai-rules.md), [architecture.md](architecture.md)
 
 ### ❌ NEVER: Skip Operations During Query
 
-**The Problem**: Lazy evaluation requires ALL recorded operations to execute during query.
+**The Problem**: Lazy evaluation requires the recorded operations to execute, in order, when the DataFrame is rebuilt. Ad-hoc skipping breaks the contract between the operation log and query results.
 
 **Wrong**:
 ```rust
-// ❌ BAD: Skipping operations
-async fn execute(&self) -> Result<DataFrame> {
-    let mut df = self.initial_dataframe.clone();
-
-    for op in &self.operations {
-        // Skipping some operations based on flags
-        if op.should_apply() {  // ❌ Conditional execution
-            df = op.apply(df).await?;
-        }
+// ❌ BAD: Skipping operations based on ad-hoc flags
+for op in &ops {
+    if my_feature_flag && matches!(op, AnyOperation::Filter(_)) {
+        continue; // ❌ results no longer match the recorded history
     }
-
-    Ok(df)
+    df = op.apply_dataframe(df, ctx.clone(), &mut bundle_schema).await?;
 }
 ```
 
 **Correct**:
 ```rust
-// ✅ GOOD: Apply ALL operations
-async fn execute(&self) -> Result<DataFrame> {
-    let mut df = self.initial_dataframe.clone();
-
-    // Apply every recorded operation
-    for op in &self.operations {
-        df = op.apply(df).await?;
+// ✅ GOOD: Apply every active operation in order (Bundle::dataframe()).
+// The ONLY sanctioned skip is cast-revert resolution: resolve_cast_ops()
+// marks a CastColumn and its cancelling DropCastColumn both inactive.
+let cast_active = resolve_cast_ops(&ops);
+for (op, active) in ops.iter().zip(cast_active.iter()) {
+    if !active {
+        continue;
     }
-
-    Ok(df)
+    df = op.apply_dataframe(df, self.ctx.clone(), &mut bundle_schema).await?;
 }
 ```
 
-**Why**: Operations are the contract - what's recorded must execute.
+**Why**: Operations are the contract - what's recorded must execute. Cancellation semantics (cast reverts) are computed centrally in `resolve_cast_ops()`, not scattered through query code.
 
-**See Also**: [ai-rules.md section 2.3](ai-rules.md), [architecture.md](architecture.md)
+**See Also**: [ai-rules.md section 2.4](ai-rules.md), [architecture.md](architecture.md)
 
 ### ❌ NEVER: Maintain Compatibility for Unlaunched Project
 
@@ -541,7 +523,7 @@ pub fn process(&self, use_new_algorithm: bool) -> Result<Data> {
 }
 
 // ❌ BAD: Keeping unused parameters
-pub fn filter(&mut self, expr: &str, _legacy_mode: bool) -> &mut Self {
+async fn filter(&self, expr: &str, _legacy_mode: bool) -> Result<&Self, BundlebaseError> {
     // _legacy_mode ignored but kept for "compatibility"
 }
 ```
@@ -557,7 +539,7 @@ pub fn process(&self) -> Result<Data> {
 }
 
 // ✅ GOOD: Remove unused parameters
-pub fn filter(&mut self, expr: &str) -> &mut Self {
+async fn filter(&self, expr: &str) -> Result<&Self, BundlebaseError> {
     // Clean API
 }
 ```
@@ -605,7 +587,7 @@ fn process_internal_data(data: Vec<Record>) -> ProcessedData {
 }
 
 // ✅ GOOD: Validate only at system boundaries
-pub fn attach(&mut self, path: &str) -> Result<&mut Self> {
+pub async fn attach(&self, path: &str) -> Result<&Self, BundlebaseError> {
     // User input - MUST validate
     if path.is_empty() {
         return Err("path cannot be empty".into());

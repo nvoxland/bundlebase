@@ -5,7 +5,7 @@ The Bundlebase CLI can run as an [SQL](https://arrow.apache.org/docs/format/Flig
 ## Starting the Server
 
 ```bash
-bundlebase server --bundle <path> [options]
+bundlebase serve --bundle <path> [options]
 ```
 
 ### Flags
@@ -22,13 +22,13 @@ bundlebase server --bundle <path> [options]
 
 ```bash
 # Start with defaults (0.0.0.0:50051)
-bundlebase server --bundle ./my-bundle
+bundlebase serve --bundle ./my-bundle
 
 # Custom host and port
-bundlebase server --bundle ./my-bundle --host 127.0.0.1 --port 8080
+bundlebase serve --bundle ./my-bundle --host 127.0.0.1 --port 8080
 
 # Read-only server
-bundlebase server --bundle ./my-bundle --read-only
+bundlebase serve --bundle ./my-bundle --read-only
 ```
 
 To serve a new bundle, create it first with `bundlebase create`.

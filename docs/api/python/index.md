@@ -43,7 +43,7 @@ import bundlebase
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("active = true"))
+    .filter("SELECT * FROM bundle WHERE active = true"))
 
 df = await c.to_pandas()
 ```
@@ -60,7 +60,7 @@ import bundlebase.sync as dc
 
 c = (dc.create()
     .attach("data.parquet")
-    .filter("active = true"))
+    .filter("SELECT * FROM bundle WHERE active = true"))
 
 df = c.to_pandas()
 ```
@@ -75,14 +75,14 @@ All mutation methods return `self` for fluent chaining:
 # Async
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .drop_column("ssn")
     .rename_column("fname", "first_name"))
 
 # Sync
 c = (dc.create()
     .attach("data.parquet")
-    .filter("age >= 18")
+    .filter("SELECT * FROM bundle WHERE age >= 18")
     .drop_column("ssn")
     .rename_column("fname", "first_name"))
 ```
@@ -106,10 +106,10 @@ Use streaming for datasets larger than RAM:
 ```python
 import bundlebase
 
-c = await bundlebase.open("huge_dataset.parquet")
+c = await bundlebase.create().attach("huge_dataset.parquet")
 
 async for batch in bundlebase.stream_batches(c):
-    # Process batch (~100MB)
+    # Process one batch at a time
     process(batch)
 ```
 
@@ -125,7 +125,7 @@ async def process_data(path: str) -> pd.DataFrame:
     """Type-checked function using bundlebase."""
     c: PyBundleBuilder = await bundlebase.create()
     c = await c.attach(path)
-    c = await c.filter("active = true")
+    c = await c.filter("SELECT * FROM bundle WHERE active = true")
     df: pd.DataFrame = await c.to_pandas()
     return df
 ```

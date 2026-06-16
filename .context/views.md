@@ -224,10 +224,13 @@ await c.commit("Q4 2024 analysis")
 
 ## Limitations
 
-1. **Read-only** - Views return `Bundle` not `BundleBuilder`, so you can't call transformation methods
-2. **Query execution** - Currently views can access operations metadata but executing queries (`.to_pandas()`, `.dataframe()`) may have schema resolution issues
-3. **No nested views** - You cannot create a view of a view
-4. **Parent dependency** - View requires parent container to be accessible
+1. **Read-only** - Views return `Bundle` not `BundleBuilder`, so you can't call transformation methods (operations report `allowed_on_view() == false` where applicable)
+2. **No nested views** - You cannot create a view of a view (`CreateViewOp::allowed_on_view()` returns false)
+3. **Parent dependency** - View requires parent container to be accessible
+
+Query execution on views works: `.dataframe()`, `.num_rows()`, and conversions
+execute the parent's operations plus the view's captured operations (covered by
+`rust/bundlebase/tests/views_e2e.rs`).
 
 ## Implementation Notes
 
@@ -246,5 +249,4 @@ Potential improvements:
 - Support for materialized views (pre-computed results)
 - View-specific permissions and access control
 - View dependencies and composition
-- Better dataframe execution support for views
 - View usage statistics and monitoring
