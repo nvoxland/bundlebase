@@ -499,6 +499,85 @@ impl DataBlock {
         Ok(batches)
     }
 
+    /// Best-effort estimate of this block's in-memory (Arrow) size in bytes,
+    /// used to decide whether a full scan should materialize-and-cache or
+    /// stream with constant memory.
+    ///
+    /// Sources, in priority order:
+    ///   1. `cached_df_statistics.total_byte_size` (populated during pruning).
+    ///   2. The reader's `read_statistics().total_byte_size` (file size for
+    ///      CSV/JSONL/parquet).
+    ///
+    /// Returns `None` when no size is known. A `None` estimate is treated by
+    /// the caller as "unknown" — we conservatively take the streaming path so
+    /// an unexpectedly large block is never silently materialized.
+    ///
+    /// Note: file size is typically a *lower* bound on the decoded Arrow size,
+    /// so a block whose file already exceeds the cache threshold will certainly
+    /// exceed it in memory — making this a safe signal for "too big to cache".
+    async fn estimated_in_memory_bytes(&self) -> Option<usize> {
+        use datafusion::common::stats::Precision;
+
+        if let Some(stats) = self.cached_df_statistics.read().as_ref() {
+            if let Precision::Exact(n) | Precision::Inexact(n) = stats.total_byte_size {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        }
+
+        match self.reader.read_statistics().await {
+            Ok(Some(stats)) => match stats.total_byte_size {
+                Precision::Exact(n) | Precision::Inexact(n) if n > 0 => Some(n),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Build a streaming full-scan source for a block that is too large to
+    /// cache (or whose size is unknown). Reads through the reader with constant
+    /// memory and renames columns to internal names per-batch as they stream.
+    ///
+    /// `projection` is pushed into the reader so unused columns are never read.
+    /// The caller layers the deleted-row and update-overlay filters on top,
+    /// exactly as it does for the cached path.
+    async fn streaming_scan_source(
+        &self,
+        projection: Option<&Vec<usize>>,
+        limit: Option<usize>,
+    ) -> datafusion::common::Result<Arc<dyn datafusion::datasource::source::DataSource>> {
+        let inner_source = self
+            .reader
+            .data_source(projection, &[], limit, None)
+            .await?;
+        let projected_col_ids: Vec<ColumnId> = match projection {
+            Some(proj) => proj
+                .iter()
+                .filter_map(|&i| self.column_ids.get(i).copied())
+                .collect(),
+            None => self.column_ids.clone(),
+        };
+        let current_schema = self.schema.read().clone();
+        let projected_schema = match projection {
+            Some(proj) => {
+                let fields: Vec<_> = proj
+                    .iter()
+                    .filter_map(|&i| current_schema.fields().get(i).cloned())
+                    .collect();
+                Arc::new(arrow_schema::Schema::new(fields))
+            }
+            None => current_schema,
+        };
+        Ok(Arc::new(
+            crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
+                inner_source,
+                projected_schema,
+                projected_col_ids,
+            ),
+        ))
+    }
+
     /// Evaluate all indexable filters and select the most selective index
     /// Returns None if no suitable index is found or all have selectivity above threshold
     async fn select_best_index<'a>(
@@ -899,9 +978,13 @@ impl TableProvider for DataBlock {
                 self.validate_version()
                     .await
                     .map_err(datafusion::common::DataFusionError::External)?;
+                // Only push the limit into the reader when there are no deleted
+                // rows — otherwise the reader would stop at `lim` raw rows
+                // before deletion (see Phase 2.5 for the same reasoning).
+                let push_limit = if deleted.is_empty() { limit } else { None };
                 let inner_source = self
                     .reader
-                    .data_source(projection, &[], limit, None)
+                    .data_source(projection, &[], push_limit, None)
                     .await?;
                 let projected_col_ids: Vec<ColumnId> = proj
                     .iter()
@@ -928,6 +1011,17 @@ impl TableProvider for DataBlock {
                             Arc::new(deleted),
                         ),
                     );
+                    if let Some(lim) = limit {
+                        // Enforce the limit after deletion.
+                        let exec: Arc<dyn ExecutionPlan> = Arc::new(DataSourceExec::new(source));
+                        return Ok(Arc::new(
+                            datafusion::physical_plan::limit::GlobalLimitExec::new(
+                                exec,
+                                0,
+                                Some(lim),
+                            ),
+                        ));
+                    }
                 }
                 return Ok(Arc::new(DataSourceExec::new(source)));
             }
@@ -942,9 +1036,17 @@ impl TableProvider for DataBlock {
         // returned above.
         if let Some(lim) = limit {
             if overlays.is_empty() {
+                // Only push the limit into the reader when there are no deleted
+                // rows. With deletions, a reader limit would stop at `lim` raw
+                // rows BEFORE the delete filter runs, yielding fewer than `lim`
+                // surviving rows. In that case read without a reader limit and
+                // enforce the limit ABOVE the delete filter via GlobalLimitExec
+                // (which lazily stops the stream once `lim` survivors emerge, so
+                // memory stays bounded).
+                let push_limit = if deleted.is_empty() { Some(lim) } else { None };
                 let inner_source = self
                     .reader
-                    .data_source(projection, &[], Some(lim), None)
+                    .data_source(projection, &[], push_limit, None)
                     .await?;
                 let projected_col_ids: Vec<ColumnId> = match projection {
                     Some(proj) => proj
@@ -978,6 +1080,11 @@ impl TableProvider for DataBlock {
                             Arc::new(deleted),
                         ),
                     );
+                    // Enforce the limit after deletion.
+                    let exec: Arc<dyn ExecutionPlan> = Arc::new(DataSourceExec::new(source));
+                    return Ok(Arc::new(
+                        datafusion::physical_plan::limit::GlobalLimitExec::new(exec, 0, Some(lim)),
+                    ));
                 }
                 return Ok(Arc::new(DataSourceExec::new(source)));
             }
@@ -988,6 +1095,87 @@ impl TableProvider for DataBlock {
         let validated = self
             .version_validated
             .load(std::sync::atomic::Ordering::Relaxed);
+
+        // Stream-vs-materialize decision (made BEFORE reading any data).
+        //
+        // The materialize-and-cache path below collects the ENTIRE block into
+        // memory to populate the LRU block cache. But the cache silently drops
+        // any block larger than budget/2, so a large attached file (a block can
+        // be many GB) would be fully materialized on every query and never
+        // cached — violating the streaming mandate (ADR-003).
+        //
+        // So: estimate the block's in-memory size up front. If the cache would
+        // accept it (or it's already cached), keep the materialize+cache path
+        // (small blocks still benefit from the cache). Otherwise — too large,
+        // or size unknown — take a constant-memory streaming path that bypasses
+        // the cache entirely.
+        let already_cached = validated && GLOBAL_BLOCK_CACHE.get(&cache_key).is_some();
+        if !already_cached {
+            let est_bytes = self.estimated_in_memory_bytes().await;
+            let take_streaming = match est_bytes {
+                Some(n) => !GLOBAL_BLOCK_CACHE.would_cache(n),
+                // Unknown size: conservatively stream so an unexpectedly large
+                // block is never silently materialized.
+                None => true,
+            };
+            if take_streaming {
+                log::debug!(
+                    "Block {} too large to cache (est {:?} bytes); streaming full scan",
+                    self.id,
+                    est_bytes
+                );
+                record_cache_operation("block_cache", false);
+                // Preserve version validation: the first scan must validate the
+                // source version. The collect path did this implicitly by
+                // reading through VersionedObjectStoreFile; the streaming path
+                // defers reading to execution time, so validate explicitly here.
+                if !validated {
+                    self.validate_version()
+                        .await
+                        .map_err(datafusion::common::DataFusionError::External)?;
+                }
+                let mut source = self.streaming_scan_source(projection, limit).await?;
+                if !deleted.is_empty() {
+                    source = Arc::new(
+                        crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                            source,
+                            Arc::new(deleted.clone()),
+                        ),
+                    );
+                }
+                if !overlays.is_empty() {
+                    let projected_col_ids = match projection {
+                        Some(proj) => proj
+                            .iter()
+                            .filter_map(|&i| self.column_ids.get(i).copied())
+                            .collect::<Vec<_>>(),
+                        None => self.column_ids.clone(),
+                    };
+                    let current_schema = self.schema.read().clone();
+                    let projected_schema = match projection {
+                        Some(proj) => {
+                            let fields: Vec<_> = proj
+                                .iter()
+                                .filter_map(|&i| current_schema.fields().get(i).cloned())
+                                .collect();
+                            Arc::new(arrow_schema::Schema::new(fields))
+                        }
+                        None => current_schema,
+                    };
+                    let overlay_source =
+                        crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
+                            source.clone(),
+                            &overlays,
+                            &projected_col_ids,
+                            &projected_schema,
+                        );
+                    if overlay_source.has_updates() {
+                        source = Arc::new(overlay_source);
+                    }
+                }
+                return Ok(Arc::new(DataSourceExec::new(source)));
+            }
+        }
 
         // Try to serve from the block cache (stores base data with internal names).
         // Only use cache after version has been validated (first scan reads through reader).

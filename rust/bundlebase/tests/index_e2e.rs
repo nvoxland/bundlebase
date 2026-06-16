@@ -2551,3 +2551,58 @@ async fn test_count_star_from_search_works() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+/// The search() table provider must expose the LOGICAL (user-visible) schema
+/// that results from applying operations — including a column rename — not the
+/// raw physical schema. Renaming "Company" -> "Org" and then selecting "Org"
+/// from search() exercises the precomputed-output-schema path: if the provider
+/// reported the physical schema, planning "SELECT Org" would fail (no such
+/// column) or the rename would be invisible.
+#[tokio::test]
+async fn test_search_output_schema_reflects_rename() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    // Rename the indexed column to a user-visible name AFTER indexing so the
+    // logical schema differs from the physical one.
+    bundle.rename_column("Company", "Org").await?;
+    bundle.commit("Index + rename").await?;
+
+    // Selecting the renamed column proves the provider's schema() returns the
+    // logical schema (the planner resolves "Org" against it).
+    let stream = bundle
+        .query(
+            "SELECT \"Org\", _score FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert!(num_rows > 0, "search() should return matching rows");
+
+    let schema = rs[0].schema();
+    assert!(
+        schema.column_with_name("Org").is_some(),
+        "logical schema should expose renamed column 'Org', got fields: {:?}",
+        schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>()
+    );
+    assert!(
+        schema.column_with_name("Company").is_none(),
+        "physical column 'Company' should not be visible after rename"
+    );
+
+    Ok(())
+}

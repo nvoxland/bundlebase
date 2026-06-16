@@ -385,3 +385,78 @@ async fn test_tar_file_listing() {
         "Should have manifest files in _bundlebase directory"
     );
 }
+
+/// Round-trip test that the bytes written into the tar archive for each data
+/// file exactly match the bytes of the source file. This guards the streamed
+/// (non-buffered) per-file write path: a size mismatch or truncated stream
+/// would corrupt the archive, which this comparison would catch.
+#[tokio::test]
+async fn test_export_tar_bytes_match_source() {
+    use std::io::Read;
+
+    init();
+    let temp_dir = TempDir::new().unwrap();
+    let tar_path = temp_dir.path().join("roundtrip.tar");
+
+    let bundle = BundleBuilder::create(random_memory_url().as_str(), None)
+        .await
+        .unwrap();
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
+    bundle.commit("v1").await.unwrap();
+
+    // Snapshot source file bytes (relative_path -> bytes) before export.
+    let data_dir = bundle.data_dir();
+    let base_url = data_dir.url().clone();
+    let files = data_dir.list_files().await.unwrap();
+    let mut source_bytes: std::collections::HashMap<String, Vec<u8>> =
+        std::collections::HashMap::new();
+    for file in &files {
+        let rel = file.url.as_str()[base_url.as_str().len()..]
+            .trim_start_matches('/')
+            .to_string();
+        let io_file = data_dir.file(&rel).unwrap();
+        let bytes = io_file.read_bytes().await.unwrap().unwrap();
+        source_bytes.insert(rel, bytes.to_vec());
+    }
+    assert!(!source_bytes.is_empty(), "bundle should have data files");
+
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
+
+    // Read the tar back and compare each non-manifest entry's bytes.
+    let tar_file = std::fs::File::open(&tar_path).unwrap();
+    let mut archive = tar::Archive::new(tar_file);
+    let mut checked = 0;
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let path = entry.path().unwrap().to_string_lossy().to_string();
+        if path == "_bundlebase_manifest.json" {
+            continue;
+        }
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).unwrap();
+        let expected = source_bytes
+            .get(&path)
+            .unwrap_or_else(|| panic!("tar entry '{}' has no matching source file", path));
+        assert_eq!(
+            &buf, expected,
+            "tar entry '{}' bytes ({}) must exactly match source ({})",
+            path,
+            buf.len(),
+            expected.len()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "should have checked at least one data file");
+
+    // And the bundle still re-opens from the archive.
+    let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
+        .await
+        .unwrap();
+    assert!(tar_bundle.num_rows().await.unwrap() > 0);
+}

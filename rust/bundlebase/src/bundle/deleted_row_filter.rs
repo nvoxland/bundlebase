@@ -47,6 +47,15 @@ impl DataSource for DeletedRowFilterDataSource {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        // Deleted-row ordinals are a single global sequence numbered from 0,
+        // so this filter is single-partition (see `output_partitioning`).
+        // Reject any other partition rather than silently miscounting offsets.
+        if partition != 0 {
+            return Err(datafusion::common::DataFusionError::Internal(format!(
+                "DeletedRowFilterDataSource is single-partition; got partition {}",
+                partition
+            )));
+        }
         let inner_stream = self.inner.open(partition, context)?;
         let schema = inner_stream.schema();
         Ok(Box::pin(DeletedRowFilterStream {
@@ -70,7 +79,11 @@ impl DataSource for DeletedRowFilterDataSource {
     }
 
     fn output_partitioning(&self) -> Partitioning {
-        self.inner.output_partitioning()
+        // Force single-partition execution: ordinal row numbering is only
+        // correct as one global sequence. If the inner source reports >1
+        // partition, delegating would let each partition restart its
+        // row_offset at 0 and delete the wrong ordinals.
+        Partitioning::UnknownPartitioning(1)
     }
 
     fn eq_properties(&self) -> EquivalenceProperties {
@@ -85,16 +98,17 @@ impl DataSource for DeletedRowFilterDataSource {
     }
 
     fn fetch(&self) -> Option<usize> {
-        self.inner.fetch()
+        // Don't advertise a fetch — the limit must be applied ABOVE this
+        // filter (see `with_fetch`).
+        None
     }
 
-    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
-        self.inner.with_fetch(limit).map(|inner| {
-            Arc::new(DeletedRowFilterDataSource {
-                inner,
-                deleted_rows: self.deleted_rows.clone(),
-            }) as Arc<dyn DataSource>
-        })
+    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
+        // Returning None means "I can't absorb the fetch", so DataFusion keeps
+        // a separate LimitExec above this filter. Pushing the limit BELOW the
+        // delete filter would let the inner source stop at `n` rows before
+        // deletions are applied, yielding fewer than `n` surviving rows.
+        None
     }
 
     fn try_swapping_with_projection(
@@ -166,5 +180,80 @@ impl Stream for DeletedRowFilterStream {
 impl RecordBatchStream for DeletedRowFilterStream {
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::test_support::{collect_source, MockMultiPartitionSource};
+    use arrow::array::Int64Array;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use datafusion::execution::TaskContext;
+
+    fn batch(vals: &[i64]) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
+        RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vals.to_vec()))]).unwrap()
+    }
+
+    fn vals(b: &RecordBatch) -> Vec<i64> {
+        let arr = b
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        (0..arr.len()).map(|i| arr.value(i)).collect()
+    }
+
+    #[tokio::test]
+    async fn test_forces_single_partition() {
+        // Inner reports 3 partitions; the filter must report exactly 1.
+        let inner = Arc::new(MockMultiPartitionSource::new(
+            vec![vec![batch(&[0, 1, 2])]],
+            3,
+        ));
+        let src = DeletedRowFilterDataSource::new(inner, Arc::new(vec![]));
+        match src.output_partitioning() {
+            Partitioning::UnknownPartitioning(n) => assert_eq!(n, 1),
+            other => panic!("expected single partition, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_rejects_nonzero_partition() {
+        let inner = Arc::new(MockMultiPartitionSource::new(
+            vec![vec![batch(&[0, 1, 2])]],
+            3,
+        ));
+        let src = DeletedRowFilterDataSource::new(inner, Arc::new(vec![]));
+        let ctx = Arc::new(TaskContext::default());
+        assert!(src.open(1, ctx).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_with_fetch_returns_none() {
+        // The limit must NOT be pushed below the delete filter, so with_fetch
+        // returns None and DataFusion keeps a LimitExec above us.
+        let inner = Arc::new(MockMultiPartitionSource::new(
+            vec![vec![batch(&[0, 1, 2])]],
+            1,
+        ));
+        let src = DeletedRowFilterDataSource::new(inner, Arc::new(vec![1]));
+        assert!(src.with_fetch(Some(2)).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_deletes_at_correct_ordinals_across_batches() {
+        // Two batches: rows 0,1,2 then 3,4,5. Delete ordinals 1 and 4.
+        let inner = Arc::new(MockMultiPartitionSource::new(
+            vec![vec![batch(&[10, 11, 12]), batch(&[13, 14, 15])]],
+            1,
+        ));
+        let src = Arc::new(DeletedRowFilterDataSource::new(inner, Arc::new(vec![1, 4])));
+        let out = collect_source(src).await;
+        let got: Vec<i64> = out.iter().flat_map(|b| vals(b)).collect();
+        // ordinal 1 -> value 11, ordinal 4 -> value 14 removed
+        assert_eq!(got, vec![10, 12, 13, 15]);
     }
 }

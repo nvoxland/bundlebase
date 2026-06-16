@@ -23,6 +23,8 @@ pub mod function_entry {
 pub mod deleted_row_filter;
 pub mod schema_rename_filter;
 mod sql;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod tombstone;
 pub mod update_overlay;
 pub mod update_overlay_filter;
@@ -620,7 +622,7 @@ impl Bundle {
             // Resolve schema sidecar files in parallel and populate each
             // AttachBlockOp's in-memory `schema` field. Done before the apply
             // loop because op.apply() requires `self.schema` to be populated.
-            resolve_attach_sidecars(&mut commit, data_dir.as_ref(), bundle.config()).await?;
+            resolve_attach_sidecars(&mut commit, data_dir.as_ref()).await?;
 
             debug!(
                 "Loading commit from {}: {} changes",
@@ -671,13 +673,10 @@ impl Bundle {
 async fn resolve_attach_sidecars(
     commit: &mut BundleCommit,
     data_dir: &dyn IOReadWriteDir,
-    config: Arc<BundleConfig>,
 ) -> Result<(), BundlebaseError> {
     use crate::bundle::operation::AnyOperation;
     use bundlebase_common::ColumnId;
     use std::collections::{HashMap, HashSet};
-
-    let _ = config; // currently unused — kept in signature for symmetry with read_yaml callers.
 
     // Collect unique sidecar paths used by attach ops in this commit.
     let mut schema_paths: HashSet<String> = HashSet::new();
@@ -1877,38 +1876,83 @@ impl BundleFacade for Bundle {
             )
             .map_err(|e| format!("Failed to write tar manifest: {}", e))?;
 
-        // Second pass: write each file's data
-        for (i, file) in files.iter().enumerate() {
-            let relative_path = &relative_paths[i];
+        // Second pass: stream each file's data into the tar WITHOUT buffering
+        // the whole file in memory. Each file's size comes from its IO
+        // metadata (set on the header up front), and the file's async byte
+        // stream is bridged to a synchronous `Read` via a bounded
+        // tokio-util adapter. The tar copy is performed on a blocking thread
+        // (`spawn_blocking`) so the synchronous, potentially-slow disk/gzip
+        // writes never stall a runtime worker; per-file async reads are driven
+        // from that blocking thread via the captured runtime handle.
+        let config = self.config();
+        let handle = tokio::runtime::Handle::current();
 
-            debug!("Adding file to tar: {}", relative_path);
+        // Pre-resolve metadata sizes (from list_files()) for the headers.
+        let file_targets: Vec<(Url, String, u64)> = files
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                (
+                    file.url.clone(),
+                    relative_paths[i].clone(),
+                    file.size.unwrap_or(0),
+                )
+            })
+            .collect();
 
-            // Read file contents via stream
-            let io_file = readable_file_from_url(&file.url, self.config()).await?;
-            let mut stream = io_file
-                .read_stream()
-                .await?
-                .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", file.url)))?;
+        builder = tokio::task::spawn_blocking(move || -> Result<_, BundlebaseError> {
+            for (url, relative_path, declared_size) in file_targets {
+                debug!("Adding file to tar: {}", relative_path);
 
-            // Collect stream into buffer (tar API requires &[u8])
-            let mut buffer = Vec::new();
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result?;
-                buffer.extend_from_slice(&chunk);
+                // Open the file's async byte stream from the blocking thread.
+                let stream = handle.block_on(async {
+                    let io_file = readable_file_from_url(&url, config.clone()).await?;
+                    io_file
+                        .read_stream()
+                        .await?
+                        .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", url)))
+                })?;
+
+                // Bridge the async byte stream -> AsyncRead -> sync Read.
+                // Errors are mapped into io::Error for the Read interface.
+                let io_stream = stream.map(|chunk| {
+                    chunk.map_err(|e| std::io::Error::other(e.to_string()))
+                });
+                let async_reader = tokio_util::io::StreamReader::new(io_stream);
+                let sync_reader =
+                    tokio_util::io::SyncIoBridge::new_with_handle(async_reader, handle.clone());
+                // Count bytes actually written so we can detect a mismatch
+                // against the declared header size (which would corrupt the
+                // archive) and fail instead of producing a bad tar.
+                let mut counting = CountingReader::new(sync_reader);
+
+                let mut header = Header::new_gnu();
+                header.set_size(declared_size);
+                header.set_mode(0o644);
+                header.set_mtime(mtime);
+                header.set_cksum();
+
+                builder
+                    .append_data(&mut header, relative_path.as_str(), &mut counting)
+                    .map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to append file '{}' to tar: {}",
+                            relative_path, e
+                        ))
+                    })?;
+
+                if counting.count != declared_size {
+                    return Err(BundlebaseError::from(format!(
+                        "File '{}' changed size during export: header declared {} bytes \
+                         but stream yielded {} bytes; aborting to avoid a corrupt archive",
+                        relative_path, declared_size, counting.count
+                    )));
+                }
             }
-
-            // Create tar header
-            let mut header = Header::new_gnu();
-            header.set_size(buffer.len() as u64);
-            header.set_mode(0o644);
-            header.set_mtime(mtime);
-            header.set_cksum();
-
-            // Append to tar
-            builder
-                .append_data(&mut header, relative_path.as_str(), &buffer[..])
-                .map_err(|e| format!("Failed to append file '{}' to tar: {}", relative_path, e))?;
-        }
+            Ok(builder)
+        })
+        .await
+        .map_err(|e| format!("tar export task panicked: {}", e))??;
 
         // Finish writing tar (writes footer)
         builder
@@ -2138,6 +2182,30 @@ impl Clone for DataFrameHolder {
         Self {
             dataframe: Arc::clone(&self.dataframe),
         }
+    }
+}
+
+/// Wraps a `Read` and counts the bytes read through it. Used by
+/// `Bundle::export_tar` to verify that the number of bytes streamed into a tar
+/// entry matches the size declared in the entry header (which is taken from
+/// file metadata before streaming). A mismatch means the file changed under
+/// us and the archive would be corrupt, so the caller errors out.
+struct CountingReader<R> {
+    inner: R,
+    count: u64,
+}
+
+impl<R> CountingReader<R> {
+    fn new(inner: R) -> Self {
+        Self { inner, count: 0 }
+    }
+}
+
+impl<R: std::io::Read> std::io::Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.count += n as u64;
+        Ok(n)
     }
 }
 

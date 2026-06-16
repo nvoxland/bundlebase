@@ -308,6 +308,42 @@ async fn test_delete_then_update() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
+/// Regression: `LIMIT n` over a block with deleted rows must return exactly
+/// `n` surviving rows (when at least `n` survive). The bug was that the limit
+/// was pushed BELOW the delete filter, so the reader stopped at `n` raw rows
+/// and the filter then removed some — yielding fewer than `n`.
+#[tokio::test]
+async fn test_limit_with_deletions_returns_full_limit() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+
+    let initial_count = builder.num_rows().await?;
+
+    // Delete a substantial fraction so a naive reader-limit would under-fill.
+    builder.delete("id <= 500").await?;
+    let after_delete = builder.num_rows().await?;
+    assert!(after_delete < initial_count);
+    assert!(
+        after_delete >= 50,
+        "need at least 50 survivors for the LIMIT test, got {}",
+        after_delete
+    );
+
+    // SELECT * LIMIT 50 must return exactly 50 surviving rows.
+    let batches = query_collect(builder.as_ref(), "SELECT * FROM bundle LIMIT 50").await;
+    let total: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(
+        total, 50,
+        "LIMIT 50 over a block with deletions should return exactly 50 surviving rows"
+    );
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_update_multiple_commits() -> Result<(), BundlebaseError> {
     init();

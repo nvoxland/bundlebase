@@ -163,6 +163,26 @@ impl TableFunctionImpl for SearchTableFunction {
         let data_dir = facade.data_dir();
         let config = facade.config();
         let packs = facade.packs();
+        let bundle_schema = facade.bundle_schema();
+        let operations = facade.operations();
+
+        // Precompute the schemas ONCE here, at construction, rather than
+        // lazily in the sync `schema()` getter. `TableFunctionImpl::call`
+        // runs synchronously on a tokio worker during query planning, so the
+        // schema computation (which drives an async DataFusion plan) is run on
+        // a dedicated runtime via `run_async_blocking` instead of
+        // `futures::executor::block_on`, which would otherwise drive those
+        // futures directly on — and stall — the runtime worker.
+        //
+        // Any schema-computation error is propagated out of `call()` so a bad
+        // operation surfaces as a planning error instead of being silently
+        // swallowed by a fallback to the wrong (physical) schema.
+        let physical_output_schema = physical_output_schema(&bundle_schema);
+        let output_schema =
+            run_async_blocking(compute_logical_output_schema(
+                physical_output_schema.clone(),
+                operations.clone(),
+            ))?;
 
         Ok(Arc::new(SearchResultTableProvider {
             index_name,
@@ -172,10 +192,94 @@ impl TableFunctionImpl for SearchTableFunction {
             data_dir,
             config,
             packs,
-            bundle_schema: facade.bundle_schema(),
-            operations: facade.operations(),
+            bundle_schema,
+            operations,
+            physical_output_schema,
+            output_schema,
         }))
     }
+}
+
+/// Returns the physical schema plus `_score` column.
+/// This is the schema of raw search result batches before operations are applied.
+fn physical_output_schema(bundle_schema: &bundle_schema::BundleSchema) -> SchemaRef {
+    let physical = bundle_schema.physical_schema();
+    let mut fields: Vec<Arc<Field>> = physical.fields().iter().cloned().collect();
+    fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
+    Arc::new(Schema::new(fields))
+}
+
+/// Compute the logical output schema by applying operations to an empty
+/// DataFrame. This reuses the authoritative `apply_dataframe` code path,
+/// avoiding duplication of rename/drop/cast/add logic. Errors are returned so
+/// callers can surface them instead of falling back to the physical schema.
+async fn compute_logical_output_schema(
+    physical_with_score: SchemaRef,
+    operations: Vec<AnyOperation>,
+) -> Result<SchemaRef, DataFusionError> {
+    let mut config = SessionConfig::new();
+    config.options_mut().sql_parser.enable_ident_normalization = false;
+    let ctx = SessionContext::new_with_config(config);
+    let empty_batch = RecordBatch::new_empty(physical_with_score.clone());
+    ctx.register_batch("bundle", empty_batch)
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+    let mut df = ctx.table("bundle").await?;
+
+    let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
+    let cast_active = resolve_cast_ops(&operations);
+    for (op, active) in operations.iter().zip(cast_active.iter()) {
+        if *active {
+            df = op
+                .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
+                .await
+                .map_err(DataFusionError::External)?;
+        }
+    }
+
+    // Final rename: internal names → user-visible names
+    df = bundle_schema
+        .rename_to_real_names(df)
+        .map_err(DataFusionError::External)?;
+
+    Ok(Arc::new(df.schema().as_arrow().clone()))
+}
+
+/// Run an async future to completion from synchronous code without driving it
+/// on the calling tokio worker.
+///
+/// `TableFunctionImpl::call` is a synchronous DataFusion callback that is
+/// invoked on a tokio runtime worker during query planning. Driving an async
+/// DataFusion plan there with `futures::executor::block_on` blocks that worker
+/// (and can deadlock when the plan awaits runtime I/O). Instead we run the
+/// future on a dedicated single-threaded runtime on a separate thread and
+/// block the (one) calling thread until it completes — the runtime worker pool
+/// keeps making progress on other tasks.
+fn run_async_blocking<F, T>(fut: F) -> Result<T, DataFusionError>
+where
+    F: std::future::Future<Output = Result<T, DataFusionError>> + Send + 'static,
+    T: Send + 'static,
+{
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| {
+                        DataFusionError::Execution(format!(
+                            "Failed to build runtime for schema computation: {}",
+                            e
+                        ))
+                    })?;
+                rt.block_on(fut)
+            })
+            .join()
+            .map_err(|_| {
+                DataFusionError::Execution(
+                    "Schema computation thread panicked".to_string(),
+                )
+            })?
+    })
 }
 
 /// Table provider that executes a text search and returns matching rows with scores
@@ -189,6 +293,13 @@ struct SearchResultTableProvider {
     packs: HashMap<ObjectId, Arc<Pack>>,
     bundle_schema: bundle_schema::BundleSchema,
     operations: Vec<AnyOperation>,
+    /// Raw physical schema (block columns + `_score`), before operations.
+    /// Precomputed at construction.
+    physical_output_schema: SchemaRef,
+    /// Logical (user-visible) output schema (operations applied + `_score`).
+    /// Precomputed at construction so the sync `schema()` getter never blocks
+    /// the runtime worker driving an async plan.
+    output_schema: SchemaRef,
 }
 
 impl std::fmt::Debug for SearchResultTableProvider {
@@ -201,55 +312,6 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
-    /// Returns the physical schema plus `_score` column.
-    /// This is the schema of raw search result batches before operations are applied.
-    fn physical_output_schema(&self) -> SchemaRef {
-        let physical = self.bundle_schema.physical_schema();
-        let mut fields: Vec<Arc<Field>> = physical.fields().iter().cloned().collect();
-        fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
-        Arc::new(Schema::new(fields))
-    }
-
-    /// Compute the logical output schema by applying operations to an empty DataFrame.
-    /// This reuses the authoritative `apply_dataframe` code path, avoiding duplication
-    /// of rename/drop/cast/add logic.
-    fn output_schema(&self) -> SchemaRef {
-        let physical_with_score = self.physical_output_schema();
-
-        let result = futures::executor::block_on(async {
-            let mut config = SessionConfig::new();
-            config.options_mut().sql_parser.enable_ident_normalization = false;
-            let ctx = SessionContext::new_with_config(config);
-            let empty_batch = RecordBatch::new_empty(physical_with_score.clone());
-            ctx.register_batch("bundle", empty_batch)
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            let mut df = ctx.table("bundle").await?;
-
-            let mut bundle_schema = bundle_schema::BundleSchema::initial(&self.operations);
-            let cast_active = resolve_cast_ops(&self.operations);
-            for (op, active) in self.operations.iter().zip(cast_active.iter()) {
-                if *active {
-                    df = op
-                        .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
-                        .await
-                        .map_err(|e| DataFusionError::External(e))?;
-                }
-            }
-
-            // Final rename: internal names → user-visible names
-            df = bundle_schema
-                .rename_to_real_names(df)
-                .map_err(|e| DataFusionError::External(e))?;
-
-            Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
-        });
-
-        result.unwrap_or_else(|e| {
-            log::warn!("Failed to compute output schema via operations, falling back to physical schema: {}", e);
-            physical_with_score
-        })
-    }
-
     /// Rewrite user-visible field names in a search query to internal names.
     /// The text index stores fields using stable internal names, so queries like
     /// "Company:group" need to be rewritten to "col_<hex>:group".
@@ -287,7 +349,7 @@ impl TableProvider for SearchResultTableProvider {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.output_schema()
+        self.output_schema.clone()
     }
 
     fn table_type(&self) -> TableType {
@@ -311,7 +373,7 @@ impl TableProvider for SearchResultTableProvider {
         _filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        let output_schema = self.output_schema();
+        let output_schema = self.output_schema.clone();
         let rewritten_query = self.rewrite_query_fields(&self.query);
 
         // Step 1: Identify which IndexedBlocks entry covers each currently-active
@@ -499,7 +561,7 @@ impl TableProvider for SearchResultTableProvider {
 
         let data_source = SearchDataSource {
             output_schema,
-            physical_output_schema: self.physical_output_schema(),
+            physical_output_schema: self.physical_output_schema.clone(),
             projected_schema,
             projection: projection.cloned(),
             score_map,

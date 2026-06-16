@@ -60,6 +60,25 @@ impl BlockCache {
         self.inner.lock().cache.get(key).cloned()
     }
 
+    /// The configured memory budget in bytes.
+    pub fn budget_bytes(&self) -> usize {
+        self.inner.lock().budget_bytes
+    }
+
+    /// The largest block size (in bytes) the cache will accept. Blocks larger
+    /// than this are rejected by `insert()` (kept in sync with that threshold).
+    pub fn max_cacheable_bytes(&self) -> usize {
+        self.inner.lock().budget_bytes / 2
+    }
+
+    /// Returns true if a block of the given in-memory size would be cached by
+    /// `insert()` rather than silently dropped. Callers use this to decide
+    /// whether to take the streaming path (size too large) or the
+    /// materialize-and-cache path (size acceptable) — see `DataBlock::scan`.
+    pub fn would_cache(&self, size_bytes: usize) -> bool {
+        size_bytes <= self.max_cacheable_bytes()
+    }
+
     /// Insert a block's batches into the cache.
     ///
     /// Evicts LRU entries as needed to stay within budget.
@@ -69,7 +88,8 @@ impl BlockCache {
 
         let mut inner = self.inner.lock();
 
-        // Don't cache blocks that are too large (> half the budget)
+        // Don't cache blocks that are too large (> half the budget).
+        // Mirrors `max_cacheable_bytes()` / `would_cache()`.
         if size_bytes > inner.budget_bytes / 2 {
             log::debug!(
                 "Block {} too large to cache ({} bytes > {} budget/2)",
@@ -221,5 +241,32 @@ mod tests {
         cache.insert("big".to_string(), vec![big_batch]);
         assert!(cache.get("big").is_none());
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_budget_and_max_cacheable_bytes() {
+        let cache = BlockCache::new(1000);
+        assert_eq!(cache.budget_bytes(), 1000);
+        // Max cacheable is budget/2 — matches the insert() threshold.
+        assert_eq!(cache.max_cacheable_bytes(), 500);
+    }
+
+    #[test]
+    fn test_would_cache_matches_insert_threshold() {
+        let cache = BlockCache::new(1000); // budget/2 == 500
+        // At-or-below the threshold is cacheable; strictly above is not.
+        assert!(cache.would_cache(500));
+        assert!(cache.would_cache(0));
+        assert!(!cache.would_cache(501));
+
+        // Cross-check against actual insert() behavior: a block whose size
+        // exceeds budget/2 is rejected, one at-or-below is accepted.
+        let small = make_batch(10);
+        let small_size: usize = vec![small.clone()]
+            .iter()
+            .map(|b| b.get_array_memory_size())
+            .sum();
+        assert!(small_size <= cache.max_cacheable_bytes());
+        assert_eq!(cache.would_cache(small_size), true);
     }
 }

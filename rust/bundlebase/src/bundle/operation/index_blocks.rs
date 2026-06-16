@@ -596,12 +596,12 @@ impl IndexBlocksOp {
     /// Infer the data type of a computed column by planning an empty query.
     ///
     /// Reuses the same pattern as `search_table_fn::infer_add_column_field()`.
-    fn infer_computed_column_type(
+    async fn infer_computed_column_type(
         column: &str,
         operations: &[AnyOperation],
         base_schema: &SchemaRef,
     ) -> Result<DataType, BundlebaseError> {
-        let result = futures::executor::block_on(async {
+        let result: Result<DataType, DataFusionError> = async {
             let mut config = SessionConfig::new();
             config.options_mut().sql_parser.enable_ident_normalization = false;
             let ctx = SessionContext::new_with_config(config);
@@ -615,7 +615,7 @@ impl IndexBlocksOp {
                 df = op
                     .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
                     .await
-                    .map_err(|e| DataFusionError::External(e))?;
+                    .map_err(DataFusionError::External)?;
             }
 
             let schema = df.schema();
@@ -629,8 +629,9 @@ impl IndexBlocksOp {
                         column
                     ))
                 })?;
-            Ok::<_, DataFusionError>(field.data_type().clone())
-        });
+            Ok(field.data_type().clone())
+        }
+        .await;
 
         result.map_err(|e| {
             BundlebaseError::from(format!(
@@ -735,7 +736,8 @@ impl IndexBlocksOp {
             .first()
             .map(|(b, _, _)| b.schema())
             .ok_or_else(|| BundlebaseError::from("No blocks to index"))?;
-        let data_type = Self::infer_computed_column_type(column, &operations, &base_schema)?;
+        let data_type =
+            Self::infer_computed_column_type(column, &operations, &base_schema).await?;
 
         let progress = ProgressScope::new(
             &format!("Indexing computed column '{}'", column),

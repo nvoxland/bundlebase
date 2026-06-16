@@ -121,6 +121,15 @@ impl DataSource for UpdateOverlayDataSource {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        // Overlay row numbers form a single global sequence numbered from 0,
+        // so this filter is single-partition (see `output_partitioning`).
+        // Reject any other partition rather than silently miscounting offsets.
+        if partition != 0 {
+            return Err(datafusion::common::DataFusionError::Internal(format!(
+                "UpdateOverlayDataSource is single-partition; got partition {}",
+                partition
+            )));
+        }
         let inner_stream = self.inner.open(partition, context)?;
         let schema = inner_stream.schema();
         Ok(Box::pin(UpdateOverlayStream {
@@ -144,7 +153,11 @@ impl DataSource for UpdateOverlayDataSource {
     }
 
     fn output_partitioning(&self) -> Partitioning {
-        self.inner.output_partitioning()
+        // Force single-partition execution: overlay ordinal row numbering is
+        // only correct as one global sequence. If the inner source reports >1
+        // partition, delegating would let each partition restart its
+        // row_offset at 0 and apply overlays at the wrong ordinals.
+        Partitioning::UnknownPartitioning(1)
     }
 
     fn eq_properties(&self) -> EquivalenceProperties {
@@ -159,17 +172,17 @@ impl DataSource for UpdateOverlayDataSource {
     }
 
     fn fetch(&self) -> Option<usize> {
-        self.inner.fetch()
+        // Don't advertise a fetch — the limit must be applied ABOVE this
+        // filter (see `with_fetch`).
+        None
     }
 
-    fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
-        self.inner.with_fetch(limit).map(|inner| {
-            Arc::new(UpdateOverlayDataSource {
-                inner,
-                overlay: self.overlay.clone(),
-                updated_row_count: self.updated_row_count,
-            }) as Arc<dyn DataSource>
-        })
+    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
+        // Returning None means "I can't absorb the fetch", so DataFusion keeps
+        // a separate LimitExec above this filter. The overlay can change row
+        // values but not counts, yet keeping the limit above is consistent and
+        // avoids surprising interactions when stacked with the delete filter.
+        None
     }
 
     fn try_swapping_with_projection(
@@ -324,5 +337,53 @@ impl Stream for UpdateOverlayStream {
 impl RecordBatchStream for UpdateOverlayStream {
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::test_support::MockMultiPartitionSource;
+    use arrow::array::Int64Array;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::execution::TaskContext;
+
+    fn empty_source(reported_partitions: usize) -> Arc<MockMultiPartitionSource> {
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![0i64]))]).unwrap();
+        Arc::new(MockMultiPartitionSource::new(
+            vec![vec![batch]],
+            reported_partitions,
+        ))
+    }
+
+    fn overlay_source(inner: Arc<dyn DataSource>) -> UpdateOverlayDataSource {
+        let schema: SchemaRef =
+            Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
+        // No overlays — exercising partition/fetch invariants only.
+        UpdateOverlayDataSource::new(inner, &[], &[], &schema)
+    }
+
+    #[tokio::test]
+    async fn test_forces_single_partition() {
+        let src = overlay_source(empty_source(4));
+        match src.output_partitioning() {
+            Partitioning::UnknownPartitioning(n) => assert_eq!(n, 1),
+            other => panic!("expected single partition, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_open_rejects_nonzero_partition() {
+        let src = overlay_source(empty_source(4));
+        let ctx = Arc::new(TaskContext::default());
+        assert!(src.open(2, ctx).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_with_fetch_returns_none() {
+        let src = overlay_source(empty_source(1));
+        assert!(src.with_fetch(Some(5)).is_none());
     }
 }
