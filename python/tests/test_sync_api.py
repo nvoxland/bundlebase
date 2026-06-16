@@ -731,3 +731,82 @@ class TestSyncBundleAPICompleteness:
         assert isinstance(tbl, pa.Table)
         assert tbl.num_rows == 5
         assert set(tbl.column_names) == {"id", "first_name"}
+
+
+class TestThreadSafety:
+    """The sync API must be safe to use concurrently from multiple threads.
+
+    A single shared asyncio.Runner cannot be driven from multiple threads
+    at once. Each thread must get its own runner.
+    """
+
+    def test_concurrent_threads(self):
+        import threading
+
+        errors = []
+        results = {}
+
+        def worker(idx):
+            try:
+                c = bb.create(random_bundle())
+                c.attach(datafile("userdata.parquet"))
+                n = c.num_rows()
+                df = c.query("SELECT * FROM bundle LIMIT 10").to_pandas()
+                results[idx] = (n, len(df))
+            except Exception as e:  # noqa: BLE001
+                errors.append((idx, repr(e)))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"threads raised: {errors}"
+        assert len(results) == 8
+        for n, df_len in results.values():
+            assert n == 1000
+            assert df_len == 10
+
+
+class TestApiSurface:
+    """Binding-level checks that the API surface matches what we document."""
+
+    def test_join_parameter_names_match_async_api(self):
+        import inspect
+        params = inspect.signature(bb.SyncBundleBuilder.join).parameters
+        assert "expression" in params, "sync join should use the async API's parameter names"
+        assert "join_type" in params, "sync join should use the async API's parameter names"
+
+    def test_upgrade_bundle_exported_from_async_api(self):
+        import bundlebase
+        assert callable(bundlebase.upgrade_bundle)
+        assert "upgrade_bundle" in bundlebase.__all__
+
+
+class TestThreadSafety:
+    """The sync wrapper must tolerate concurrent use from multiple threads
+    (each thread gets its own event-loop runner)."""
+
+    def test_concurrent_sync_use_across_threads(self):
+        import threading
+
+        errors = []
+        results = {}
+
+        def worker(i):
+            try:
+                c = bb.create(random_bundle())
+                c.attach(datafile("userdata.parquet"))
+                results[i] = c.num_rows()
+            except Exception as e:  # noqa: BLE001
+                errors.append((i, repr(e)))
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"threaded sync use raised: {errors}"
+        assert results == {i: 1000 for i in range(8)}

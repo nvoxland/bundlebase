@@ -55,7 +55,7 @@ pub fn open<'py>(
         Bundle::open(url.as_str(), config_inner)
             .await
             .map(|o| PyBundle::new(o))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+            .map_err(crate::builder::map_bundlebase_error)
     })
 }
 
@@ -73,7 +73,7 @@ pub fn upgrade_bundle<'py>(
         BundleBuilder::upgrade_bundle(path.as_str(), config_inner)
             .await
             .map(|_| bundlebase_common::format_version_string())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+            .map_err(crate::builder::map_bundlebase_error)
     })
 }
 

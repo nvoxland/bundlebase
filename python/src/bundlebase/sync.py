@@ -10,14 +10,14 @@ Example:
     >>> # Create and process data without async/await
     >>> c = bb.create()
     >>> c.attach("data.parquet")
-    >>> c.filter("salary > 50000")
+    >>> c.filter("SELECT * FROM bundle WHERE salary > 50000")
     >>> df = c.to_pandas()
 
 For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator, Tuple, Union
 
 from bundlebase._loop_manager import EventLoopManager
 from bundlebase.chain import _ORIGINAL_METHODS
@@ -455,7 +455,7 @@ class SyncBundle:
         coro = _call_original_method(self._async, "generate_report", id, output, no_branding)
         return _loop_manager.run_sync(coro)
 
-    def describe_data(self, columns) -> "SyncQueryResult":
+    def describe_data(self, columns: List[Union[str, Tuple[str, str]]]) -> "SyncQueryResult":
         """Describe data quality and statistics for specified columns.
 
         Returns per-column stats: min, max, avg, null counts, top 10 values,
@@ -472,7 +472,7 @@ class SyncBundle:
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
-    def test_connector(self, name: str, **kwargs) -> "SyncQueryResult":
+    def test_connector(self, name: str, **kwargs: str) -> "SyncQueryResult":
         """Test an already-imported connector by name.
 
         Calls discover() then data() to validate the integration without
@@ -489,7 +489,7 @@ class SyncBundle:
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
-    def test_temp_connector(self, from_: str, **kwargs) -> "SyncQueryResult":
+    def test_temp_connector(self, from_: str, **kwargs: str) -> "SyncQueryResult":
         """Test a connector inline without importing it first.
 
         Calls discover() then data() to validate the integration without
@@ -610,8 +610,8 @@ class SyncBundleBuilder(SyncBundle):
         Temp definitions override persistent ones at resolution time.
 
     Example:
-        >>> c = dc.create()
-        >>> c.attach("data.parquet").filter("active = true").drop_column("email")
+        >>> c = bb.create()
+        >>> c.attach("data.parquet").filter("SELECT * FROM bundle WHERE active = true").drop_column("email")
         >>> df = c.to_pandas()
     """
 
@@ -848,14 +848,24 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def join(
-        self, name: str, on: str, location: Optional[str] = None, how: str = "inner"
+        self,
+        name: str,
+        expression: str,
+        location: Optional[str] = None,
+        join_type: str = "inner",
     ) -> "SyncBundleBuilder":
         """Join with another data source.
 
         If location is None, the join point is created without any initial data.
         Data can be attached later using attach(location, pack=name) or create_source(pack=name).
+
+        Args:
+            name: Name for the joined pack
+            expression: SQL join expression (e.g., "customer_id = sale_customer")
+            location: Optional URL/path of the data to join
+            join_type: Join type - "inner", "left", "right", or "full" (default: "inner")
         """
-        coro = _call_original_method(self._async, "join", name, on, location, how)
+        coro = _call_original_method(self._async, "join", name, expression, location, join_type)
         self._async = _loop_manager.run_sync(coro)
         return self
 
@@ -875,7 +885,7 @@ class SyncBundleBuilder(SyncBundle):
     def create_source(
         self,
         connector: str,
-        args: Dict[str, str],
+        args: Optional[Dict[str, str]] = None,
         pack: str = "base",
         save_as: str = None,
         min_batch: str = None,
@@ -886,7 +896,7 @@ class SyncBundleBuilder(SyncBundle):
 
         Args:
             connector: Connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
-            args: Dictionary of connector-specific arguments
+            args: Optional dictionary of connector-specific arguments
             pack: Which pack to define the source for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
@@ -907,7 +917,7 @@ class SyncBundleBuilder(SyncBundle):
         Returns:
             Self for fluent chaining
         """
-        merged_args = dict(args)
+        merged_args = dict(args or {})
         if save_as is not None:
             merged_args["save_as"] = save_as
         if min_batch is not None:
@@ -964,7 +974,7 @@ class SyncBundleBuilder(SyncBundle):
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
-    def describe_data(self, columns) -> "SyncQueryResult":
+    def describe_data(self, columns: List[Union[str, Tuple[str, str]]]) -> "SyncQueryResult":
         """Describe data quality and statistics for specified columns.
 
         Returns per-column stats: min, max, avg, null counts, top 10 values,
@@ -981,7 +991,7 @@ class SyncBundleBuilder(SyncBundle):
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
-    def test_connector(self, name: str, **kwargs) -> "SyncQueryResult":
+    def test_connector(self, name: str, **kwargs: str) -> "SyncQueryResult":
         """Test an already-imported connector by name.
 
         Calls discover() then data() to validate the integration without
@@ -998,7 +1008,7 @@ class SyncBundleBuilder(SyncBundle):
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
-    def test_temp_connector(self, from_: str, **kwargs) -> "SyncQueryResult":
+    def test_temp_connector(self, from_: str, **kwargs: str) -> "SyncQueryResult":
         """Test a connector inline without importing it first.
 
         Calls discover() then data() to validate the integration without
@@ -1318,7 +1328,7 @@ class SyncBundleBuilder(SyncBundle):
 
         Args:
             columns: Column name (str) or list of column names (list[str])
-            index_type: Index type - "column" or "text"
+            index_type: Index type - "btree" or "text"
             args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"})
             name: Optional index name (for text indexes). Auto-generated if not provided.
         """

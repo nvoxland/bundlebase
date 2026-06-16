@@ -229,6 +229,23 @@ fn to_py_error_ctx<E: std::fmt::Display>(context: &str, err: E) -> PyErr {
     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}: {}", context, err))
 }
 
+/// Map a bundlebase error message to the most appropriate Python exception.
+///
+/// `BundlebaseError` is an untyped boxed error, so classification is by message
+/// content. Only clearly filesystem-missing cases are mapped to
+/// `FileNotFoundError` (a much better UX for a missing bundle/file than the
+/// generic `ValueError`); everything else stays `ValueError` to preserve the
+/// broad contract. Anchored on specific, unambiguous phrases to avoid
+/// misclassifying logical "not found" errors (e.g. "Column not found").
+pub(crate) fn map_bundlebase_error<E: std::fmt::Display>(err: E) -> PyErr {
+    let msg = err.to_string();
+    if msg.contains("No bundle found") || msg.contains("No such file or directory") {
+        PyErr::new::<pyo3::exceptions::PyFileNotFoundError, _>(msg)
+    } else {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(msg)
+    }
+}
+
 #[pymethods]
 impl PyBundleBuilder {
     #[getter]
@@ -716,7 +733,7 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `connector` - Connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
-    /// * `args` - Connector-specific arguments. For "remote_dir":
+    /// * `args` - Optional connector-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
     /// * `pack` - Which pack to create the source for:
@@ -725,16 +742,17 @@ impl PyBundleBuilder {
     /// * `fetch` - Run the implicit FETCH that normally follows source
     ///   definition. Set to ``False`` to ship an "empty" bundle whose
     ///   recipients fetch their own data (default: True).
-    #[pyo3(signature = (connector, args, pack="base", *, fetch=true))]
+    #[pyo3(signature = (connector, args=None, pack="base", *, fetch=true))]
     fn create_source<'py>(
         slf: PyRef<'_, Self>,
         connector: &str,
-        args: HashMap<String, String>,
+        args: Option<HashMap<String, String>>,
         pack: &str,
         fetch: bool,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
+        let args = args.unwrap_or_default();
         let connector = connector.to_string();
         let pack = if pack == "base" {
             None
@@ -947,8 +965,8 @@ impl PyBundleBuilder {
     /// data in batches without loading everything into memory.
     ///
     /// Recommended alternatives:
-    /// - `to_pandas()` / `to_polars()` - These stream internally and use constant memory
-    /// - `as_pyarrow_stream()` - For custom incremental processing
+    /// - `to_pandas()` / `to_polars()` - stream batches but accumulate the final result (~2x peak memory)
+    /// - `as_pyarrow_stream()` - bounded-memory incremental processing
     fn as_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

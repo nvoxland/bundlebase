@@ -7,7 +7,8 @@ Automatically detects environment and uses appropriate async execution strategy.
 import asyncio
 import atexit
 import sys
-from typing import Any, Coroutine, Optional, TypeVar
+import threading
+from typing import Any, Coroutine, List, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -17,10 +18,16 @@ class EventLoopManager:
 
     This class handles:
     - Detecting whether we're running in Jupyter/IPython
-    - Using persistent asyncio.Runner() for scripts
+    - Using a per-thread persistent asyncio.Runner() for scripts
     - Using nest_asyncio for Jupyter's nested event loops
     - Executing coroutines synchronously with appropriate strategy
     - Automatically cleaning up resources on application exit
+
+    Thread safety: a single ``asyncio.Runner`` is not safe to drive from
+    multiple threads concurrently, so each thread gets its own runner via
+    thread-local storage. Threads run independently (the Rust async work
+    releases the GIL), and every runner is tracked so ``cleanup()`` closes
+    them all on exit.
     """
 
     def __init__(self) -> None:
@@ -29,7 +36,12 @@ class EventLoopManager:
         Automatically registers cleanup on application exit to prevent
         resource leaks in long-running applications.
         """
-        self._runner: Optional[asyncio.Runner] = None
+        # Per-thread runner: asyncio.Runner.run() must not be called
+        # concurrently from multiple threads on the same instance.
+        self._local = threading.local()
+        # Track every created runner so cleanup() can close all of them.
+        self._runners: List[asyncio.Runner] = []
+        self._runners_lock = threading.Lock()
         self._in_jupyter = self._detect_jupyter()
         # Register cleanup to run on application exit
         atexit.register(self.cleanup)
@@ -109,16 +121,32 @@ class EventLoopManager:
         Returns:
             The result of the coroutine
         """
-        # Use persistent Runner for efficiency (avoids creating new loop each time)
-        if self._runner is None:
-            self._runner = asyncio.Runner(debug=False)
-        return self._runner.run(coro)
+        # Per-thread persistent Runner: reused across calls within a thread
+        # (avoids creating a new loop each time) but isolated between threads
+        # so concurrent run_sync() calls from different threads are safe.
+        runner = getattr(self._local, "runner", None)
+        if runner is None:
+            runner = asyncio.Runner(debug=False)
+            self._local.runner = runner
+            with self._runners_lock:
+                self._runners.append(runner)
+        return runner.run(coro)
 
     def cleanup(self) -> None:
         """Clean up resources.
 
-        Should be called on application exit to properly close the event loop.
+        Should be called on application exit to properly close every
+        thread's event loop runner.
         """
-        if self._runner is not None:
-            self._runner.close()
-            self._runner = None
+        with self._runners_lock:
+            runners, self._runners = self._runners, []
+        for runner in runners:
+            try:
+                runner.close()
+            except Exception:
+                # Best-effort cleanup on exit; a runner whose loop is mid-use
+                # in another thread may refuse to close — ignore.
+                pass
+        # Drop this thread's reference so a later call re-creates one.
+        if getattr(self._local, "runner", None) is not None:
+            self._local.runner = None

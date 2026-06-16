@@ -1159,7 +1159,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "OperationChain":
         """
         Create a data source for a pack.
 
@@ -1540,7 +1540,7 @@ class OperationChain:
         """Queue a drop_function operation."""
         ...
 
-    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "OperationChain":
         """Queue a create_source operation."""
         ...
 
@@ -1707,7 +1707,7 @@ class CreateChain:
         """Queue a drop_function operation."""
         ...
 
-    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "CreateChain":
         """Queue a create_source operation."""
         ...
 
@@ -1874,7 +1874,7 @@ class ExtendChain:
         """Queue a drop_function operation."""
         ...
 
-    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "ExtendChain":
         """Queue a create_source operation."""
         ...
 

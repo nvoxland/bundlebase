@@ -4,14 +4,17 @@ This module provides functions to convert Bundle data to various popular
 Python data structures (pandas, polars, numpy, dict). All functions are async
 and handle the conversion of internal PyArrow RecordBatches to the target format.
 
-**Streaming Support**: All conversion functions now use streaming internally to
-handle large datasets efficiently without loading everything into memory.
+**Memory behavior**: Conversions consume the query stream batch-by-batch, but
+to_pandas/to_polars/to_dict/to_numpy accumulate all batches to build the final
+structure (peak memory ~2x the dataset size). They suit results that fit in
+RAM; for bounded-memory processing of large datasets, iterate with
+stream_batches() instead.
 
 Example:
     >>> import bundlebase
     >>> c = await bundlebase.create()
     >>> c = await c.attach("data.parquet")
-    >>> df = await c.to_pandas()  # Instance method - uses streaming internally
+    >>> df = await c.to_pandas()  # Materializes the result (~2x peak memory)
     >>> # Or using the module-level function:
     >>> df = await bundlebase.conversion.to_pandas(c)
     >>>

@@ -316,3 +316,15 @@ async def test_native_source_data_exception():
 
     with pytest.raises(Exception, match="exploded"):
         await c.create_source("test.error_data", {})
+
+
+@pytest.mark.asyncio
+async def test_create_source_args_optional():
+    """args defaults to an empty dict; omitting it must not raise TypeError."""
+    c = await bundlebase.create(random_bundle())
+    try:
+        await c.create_source("remote_dir", fetch=False)
+    except TypeError as e:
+        pytest.fail(f"args should be optional: {e}")
+    except Exception:
+        pass  # connector-specific validation (e.g. missing url) is fine

@@ -21,6 +21,16 @@ _ORIGINAL_METHODS: Dict[str, Callable] = {}
 # Methods that should execute the chain first, then call the method on the result
 _CONVERSION_METHODS = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
 
+# Terminal methods do NOT return a builder (commit -> None, query -> QueryResult,
+# fetch/fetch_all -> list). Queuing them mid-chain and doing `bundle = await result`
+# would clobber the builder, so they are handled like conversions: execute the
+# queued chain first, then call the public method on the result and return ITS
+# value. Nothing can be chained after a terminal method.
+_TERMINAL_METHODS = {"commit", "query", "fetch", "fetch_all"}
+
+# Methods that finalize a chain by executing it and delegating to the result.
+_FINALIZING_METHODS = _CONVERSION_METHODS | _TERMINAL_METHODS
+
 
 def register_original_method(name: str, method: Callable) -> None:
     """Register the original (non-wrapped) method."""
@@ -113,16 +123,17 @@ class OperationChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion and streaming methods should execute the chain, not queue operations
-        if name in _CONVERSION_METHODS:
-            async def conversion_wrapper(*args, **kwargs):
+        # Conversion/streaming and terminal methods finalize the chain: execute
+        # the queued operations, then call the public method on the result.
+        if name in _FINALIZING_METHODS:
+            async def finalizing_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
-                # Then call the conversion method on the result
+                # Then call the method on the resulting bundle and return its value
                 method = getattr(bundle, name)
                 return await method(*args, **kwargs)
 
-            return conversion_wrapper
+            return finalizing_wrapper
 
         # Validate that the method is a known operation before queuing
         # This gives early feedback instead of failing at await time
@@ -207,16 +218,17 @@ class CreateChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion and streaming methods should execute the chain, not queue operations
-        if name in _CONVERSION_METHODS:
-            async def conversion_wrapper(*args, **kwargs):
+        # Conversion/streaming and terminal methods finalize the chain: execute
+        # the queued operations, then call the public method on the result.
+        if name in _FINALIZING_METHODS:
+            async def finalizing_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
-                # Then call the conversion method on the result
+                # Then call the method on the resulting bundle and return its value
                 method = getattr(bundle, name)
                 return await method(*args, **kwargs)
 
-            return conversion_wrapper
+            return finalizing_wrapper
 
         # Validate that the method is a known operation before queuing
         # This gives early feedback instead of failing at await time
@@ -312,16 +324,17 @@ class ExtendChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion and streaming methods should execute the chain, not queue operations
-        if name in _CONVERSION_METHODS:
-            async def conversion_wrapper(*args, **kwargs):
+        # Conversion/streaming and terminal methods finalize the chain: execute
+        # the queued operations, then call the public method on the result.
+        if name in _FINALIZING_METHODS:
+            async def finalizing_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
-                # Then call the conversion method on the result
+                # Then call the method on the resulting bundle and return its value
                 method = getattr(bundle, name)
                 return await method(*args, **kwargs)
 
-            return conversion_wrapper
+            return finalizing_wrapper
 
         # Validate that the method is a known operation before queuing
         # This gives early feedback instead of failing at await time

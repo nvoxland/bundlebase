@@ -14,6 +14,7 @@ from ._bundlebase import log_metrics as log_metrics
 from ._bundlebase import open as _open
 from ._bundlebase import random_memory_url as random_memory_url
 from ._bundlebase import test_datafile as test_datafile
+from ._bundlebase import upgrade_bundle as upgrade_bundle
 from .chain import OperationChain, register_original_method, CreateChain, ExtendChain
 from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches, QueryResult
 
@@ -370,6 +371,7 @@ __all__ = [
     "PyBundleStatus",
     "QueryResult",
     "test_datafile",
+    "upgrade_bundle",
     "random_memory_url",
     "OperationChain",
     "CreateChain",
