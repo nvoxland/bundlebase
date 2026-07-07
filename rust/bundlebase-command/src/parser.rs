@@ -144,6 +144,42 @@ mod tests {
     }
 
     #[test]
+    fn test_readonly_allowlist_excludes_code_execution() {
+        // bb-e0b: a read-only bundle must reject commands that load/execute
+        // external code or flip security config, so a read-only Flight/MCP client
+        // cannot reach RCE via `IMPORT TEMP FUNCTION ... ; SELECT f(...)`.
+        let dangerous = [
+            "IMPORT TEMP FUNCTION acme.f FROM 'ipc::/bin/sh'",
+            "IMPORT TEMP CONNECTOR acme.c FROM 'ipc::/bin/sh'",
+            "TEST CONNECTOR acme.weather",
+            "SET CONFIG allow_external_code = 'true' FOR 'session'",
+        ];
+        for sql in dangerous {
+            let cmd = parse_command(sql).unwrap_or_else(|e| panic!("{sql} should parse: {e}"));
+            assert!(
+                !cmd.is_facade_command(),
+                "{sql} must not be read-only-executable"
+            );
+            assert!(
+                cmd.into_facade_command().is_err(),
+                "{sql} must be rejected on a read-only bundle"
+            );
+        }
+    }
+
+    #[test]
+    fn test_readonly_allowlist_still_permits_introspection() {
+        // Regression guard: read-only introspection stays allowed.
+        for sql in ["SHOW STATUS", "SHOW SOURCES", "SHOW HISTORY"] {
+            let cmd = parse_command(sql).unwrap_or_else(|e| panic!("{sql} should parse: {e}"));
+            assert!(
+                cmd.is_facade_command() && cmd.into_facade_command().is_ok(),
+                "{sql} should remain read-only-executable"
+            );
+        }
+    }
+
+    #[test]
     fn test_show_always_updates_is_facade_and_does_not_panic() {
         // bb-8gq: SHOW ALWAYS UPDATES is a read-only facade command; converting it
         // previously hit unreachable!() and panicked. Must return Ok.
