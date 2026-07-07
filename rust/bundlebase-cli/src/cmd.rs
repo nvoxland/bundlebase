@@ -121,7 +121,13 @@ pub fn auto_commit_message(sql: &str) -> String {
     if normalized.len() <= 72 {
         normalized
     } else {
-        format!("{}...", &normalized[..69])
+        // Walk back to a UTF-8 char boundary so a multibyte character straddling
+        // byte 69 does not panic the slice.
+        let mut end = 69;
+        while end > 0 && !normalized.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &normalized[..end])
     }
 }
 
@@ -134,6 +140,22 @@ mod tests {
         INIT.call_once(|| {
             bundlebase_catalog::init();
         });
+    }
+
+    #[test]
+    fn test_auto_commit_message_non_ascii_boundary() {
+        // bb-8gq: a >72-byte statement with multibyte chars near byte 69 must not
+        // panic when truncating. Each 'あ' is 3 bytes.
+        let sql = format!("SET DESCRIPTION '{}'", "あ".repeat(40));
+        let msg = auto_commit_message(&sql);
+        assert!(msg.ends_with("..."));
+        // Result is valid UTF-8 (slicing at a boundary succeeded).
+        assert!(msg.len() <= 72);
+    }
+
+    #[test]
+    fn test_auto_commit_message_short_passthrough() {
+        assert_eq!(auto_commit_message("SELECT 1"), "SELECT 1");
     }
 
     #[tokio::test]
