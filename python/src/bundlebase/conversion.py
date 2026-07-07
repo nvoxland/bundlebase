@@ -332,10 +332,9 @@ async def to_pandas(bundle: "PyBundle | PyBundleBuilder") -> "pd.DataFrame":
             raise RuntimeError(f"Failed to convert batch to pandas: {e}") from e
 
     if not chunks:
-        raise ValueError(
-            "Bundle produced no data. "
-            "Check that data sources are configured with attach() and data is available."
-        )
+        # A legitimately empty result is not an error: mirror QueryResult.to_pandas
+        # and return an empty DataFrame rather than raising (bb-cko).
+        return pd.DataFrame()
 
     try:
         # Combine all chunks into a single DataFrame
@@ -381,10 +380,8 @@ async def to_polars(bundle: "PyBundle | PyBundleBuilder") -> "pl.DataFrame":
         batches.append(batch)
 
     if not batches:
-        raise ValueError(
-            "Bundle produced no data. "
-            "Check that data sources are configured with attach() and data is available."
-        )
+        # A legitimately empty result is not an error (bb-cko).
+        return pl.DataFrame()
 
     try:
         # Polars can efficiently construct from multiple batches

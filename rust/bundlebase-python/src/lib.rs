@@ -38,7 +38,9 @@ pub fn create<'py>(
         BundleBuilder::create(data_dir.as_str(), config_inner)
             .await
             .map(|o| PyBundleBuilder::new(o))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+            // Map to the same typed exceptions as open()/upgrade_bundle() (e.g.
+            // FileNotFoundError) instead of a bare ValueError (bb-cko).
+            .map_err(crate::builder::map_bundlebase_error)
     })
 }
 

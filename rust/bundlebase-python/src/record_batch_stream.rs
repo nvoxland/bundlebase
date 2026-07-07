@@ -1,10 +1,19 @@
 use arrow::datatypes::SchemaRef;
+use arrow::record_batch::RecordBatch;
 use datafusion::physical_plan::SendableRecordBatchStream;
 use futures::StreamExt;
 use pyo3::prelude::*;
 use std::sync::Arc;
 
 use super::schema::PySchema;
+
+/// The stream plus an optional one-batch look-ahead buffer used by `is_empty()`.
+struct StreamState {
+    stream: SendableRecordBatchStream,
+    /// A batch already pulled by `is_empty()` that `next_batch()`/`collect_all()`
+    /// must return before polling the stream again.
+    peeked: Option<RecordBatch>,
+}
 
 /// Python-exposed wrapper around DataFusion's RecordBatch stream.
 ///
@@ -31,8 +40,8 @@ use super::schema::PySchema;
 /// ```
 #[pyclass]
 pub struct PyRecordBatchStream {
-    /// The underlying stream wrapped in an Arc for cheap cloning
-    stream: Arc<tokio::sync::Mutex<SendableRecordBatchStream>>,
+    /// The underlying stream + look-ahead, wrapped in an Arc for cheap cloning
+    inner: Arc<tokio::sync::Mutex<StreamState>>,
     /// Cached schema for O(1) access
     schema: SchemaRef,
 }
@@ -41,7 +50,10 @@ impl PyRecordBatchStream {
     /// Create a new PyRecordBatchStream from a DataFusion stream
     pub fn new(stream: SendableRecordBatchStream, schema: SchemaRef) -> Self {
         PyRecordBatchStream {
-            stream: Arc::new(tokio::sync::Mutex::new(stream)),
+            inner: Arc::new(tokio::sync::Mutex::new(StreamState {
+                stream,
+                peeked: None,
+            })),
             schema,
         }
     }
@@ -66,10 +78,15 @@ impl PyRecordBatchStream {
     ///     process(batch)
     /// ```
     fn next_batch<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let stream = self.stream.clone();
+        let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut stream_guard = stream.lock().await;
-            match stream_guard.next().await {
+            let mut guard = inner.lock().await;
+            // Return the look-ahead batch (if is_empty() pulled one) before polling.
+            let next = match guard.peeked.take() {
+                Some(batch) => Some(Ok(batch)),
+                None => guard.stream.next().await,
+            };
+            match next {
                 Some(Ok(batch)) => {
                     // Convert the RecordBatch to PyArrow
                     use arrow::pyarrow::ToPyArrow;
@@ -97,12 +114,15 @@ impl PyRecordBatchStream {
     ///
     /// List of PyArrow RecordBatches
     fn collect_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let stream = self.stream.clone();
+        let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut stream_guard = stream.lock().await;
+            let mut stream_guard = inner.lock().await;
             let mut batches = Vec::new();
+            if let Some(batch) = stream_guard.peeked.take() {
+                batches.push(batch);
+            }
 
-            while let Some(result) = stream_guard.next().await {
+            while let Some(result) = stream_guard.stream.next().await {
                 let batch = result.map_err(|e: datafusion::error::DataFusionError| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
                         "Error reading batch: {}",
@@ -132,16 +152,30 @@ impl PyRecordBatchStream {
         PySchema::new(self.schema.clone())
     }
 
-    /// Check if the stream is empty (all batches have been consumed).
+    /// Check if the stream is exhausted.
     ///
-    /// Note: This is a best-effort check. The stream may become empty
-    /// between the check and the next call to `next_batch()`.
+    /// Pulls one batch into an internal look-ahead buffer if none is buffered
+    /// yet; that batch is returned by the next `next_batch()`/`collect_all()`
+    /// call, so peeking does not drop data. Returns `True` only once the
+    /// underlying stream has actually ended.
     fn is_empty<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            // let stream_guard = stream.lock().await;
-            // We can't actually check without consuming, so return false
-            // This is a limitation of the current API
-            Ok(false)
+            let mut guard = inner.lock().await;
+            if guard.peeked.is_some() {
+                return Ok(false);
+            }
+            match guard.stream.next().await {
+                None => Ok(true),
+                Some(Ok(batch)) => {
+                    guard.peeked = Some(batch);
+                    Ok(false)
+                }
+                Some(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Error reading batch: {}",
+                    e
+                ))),
+            }
         })
     }
 }
