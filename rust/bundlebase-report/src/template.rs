@@ -98,7 +98,9 @@ fn is_table_row(line: &str) -> bool {
 /// Check if a line is a markdown table separator (|---|---|).
 fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim();
-    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+    // A lone "|" starts and ends with '|' but has len 1, so `trimmed[1..len-1]`
+    // would be the reversed range 1..0 and panic. Require at least two bytes.
+    if trimmed.len() < 2 || !trimmed.starts_with('|') || !trimmed.ends_with('|') {
         return false;
     }
     // All cells should contain only dashes, colons, and spaces
@@ -111,6 +113,10 @@ fn is_table_separator(line: &str) -> bool {
 /// Parse cells from a markdown table row.
 fn parse_table_cells(line: &str) -> Vec<String> {
     let trimmed = line.trim();
+    // Guard against a lone "|" (len 1) which would make 1..len-1 a reversed range.
+    if trimmed.len() < 2 {
+        return Vec::new();
+    }
     // Strip leading and trailing pipes
     let inner = &trimmed[1..trimmed.len() - 1];
     inner
@@ -282,6 +288,16 @@ fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_table_helpers_lone_pipe_no_panic() {
+        // A lone "|" line previously panicked on trimmed[1..len-1] (range 1..0).
+        assert!(!is_table_separator("|"));
+        assert!(!is_table_separator("  |  "));
+        assert!(is_table_separator("|---|---|"));
+        assert_eq!(parse_table_cells("|"), Vec::<String>::new());
+        assert_eq!(parse_table_cells("| a | b |"), vec!["a".to_string(), "b".to_string()]);
+    }
 
     #[test]
     fn test_heading_conversion() {

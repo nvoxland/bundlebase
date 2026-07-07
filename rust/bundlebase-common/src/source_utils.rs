@@ -113,7 +113,7 @@ pub fn http_status_error(url: &Url, status: reqwest::StatusCode, detail: Option<
     };
     let detail_snippet = match detail {
         Some(d) if !d.trim().is_empty() => {
-            let truncated = if d.len() > 200 { &d[..200] } else { d };
+            let truncated = truncate_str(d, 200);
             format!(" Server response: {}", truncated.trim())
         }
         _ => String::new(),
@@ -126,6 +126,23 @@ pub fn http_status_error(url: &Url, status: reqwest::StatusCode, detail: Option<
         hint,
         detail_snippet,
     )
+}
+
+/// Truncate `s` to at most `max_bytes` without splitting a UTF-8 character.
+///
+/// Returns the whole string when it already fits. Slicing a `&str` at an
+/// arbitrary byte offset panics when the offset falls inside a multi-byte
+/// character (e.g. `&d[..200]` where byte 200 is mid-`é`); this walks back to
+/// the nearest char boundary instead.
+pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 /// Read version and content-type from an HTTP(S) URL via HEAD request.
@@ -775,6 +792,25 @@ pub fn json_value_to_string(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_truncate_str_char_boundary() {
+        // 'é' is two bytes (0xC3 0xA9); truncating mid-character must not panic.
+        let s = "aaaé"; // 5 bytes: a a a 0xC3 0xA9
+        assert_eq!(truncate_str(s, 4), "aaa"); // byte 4 splits 'é' -> walk back to 3
+        assert_eq!(truncate_str(s, 3), "aaa");
+        assert_eq!(truncate_str(s, 100), s);
+        assert_eq!(truncate_str("hello", 3), "hel");
+    }
+
+    #[test]
+    fn test_http_status_error_non_utf8_boundary_body_does_not_panic() {
+        let url = Url::parse("http://example.com/x").expect("url");
+        // >200-byte body with a multibyte 'é' straddling byte offset 200.
+        let body = format!("{}\u{e9}tail", "x".repeat(199));
+        let msg = http_status_error(&url, reqwest::StatusCode::BAD_REQUEST, Some(&body));
+        assert!(msg.contains("HTTP 400"));
+    }
 
     #[test]
     fn test_parse_patterns_single() {
