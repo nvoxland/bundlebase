@@ -140,6 +140,7 @@ pub enum FacadeCommand {
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
     ShowAlwaysDeletes(ShowAlwaysDeletesCommand),
+    ShowAlwaysUpdates(ShowAlwaysUpdatesCommand),
     ShowDetails(ShowDetailsCommand),
     ShowHistory(ShowHistoryCommand),
     ShowStatus(ShowStatusCommand),
@@ -224,6 +225,10 @@ impl FacadeCommand {
                 Ok(Box::new(result))
             }
             FacadeCommand::ShowAlwaysDeletes(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowAlwaysUpdates(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -326,6 +331,7 @@ impl FacadeCommand {
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
             FacadeCommand::ShowAlwaysDeletes(_) => ShowAlwaysDeletesCommand::output_schema(),
+            FacadeCommand::ShowAlwaysUpdates(_) => ShowAlwaysUpdatesCommand::output_schema(),
             FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_schema(),
             FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_schema(),
             FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_schema(),
@@ -365,6 +371,7 @@ impl FacadeCommand {
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
             FacadeCommand::ShowAlwaysDeletes(_) => ShowAlwaysDeletesCommand::output_shape(),
+            FacadeCommand::ShowAlwaysUpdates(_) => ShowAlwaysUpdatesCommand::output_shape(),
             FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_shape(),
             FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_shape(),
             FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_shape(),
@@ -409,6 +416,7 @@ impl BundleCommand {
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
             BundleCommand::ShowAlwaysDeletes(cmd) => Ok(FacadeCommand::ShowAlwaysDeletes(cmd)),
+            BundleCommand::ShowAlwaysUpdates(cmd) => Ok(FacadeCommand::ShowAlwaysUpdates(cmd)),
             BundleCommand::ShowDetails(cmd) => Ok(FacadeCommand::ShowDetails(cmd)),
             BundleCommand::ShowHistory(cmd) => Ok(FacadeCommand::ShowHistory(cmd)),
             BundleCommand::ShowStatus(cmd) => Ok(FacadeCommand::ShowStatus(cmd)),

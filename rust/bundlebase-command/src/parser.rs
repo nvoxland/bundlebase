@@ -88,15 +88,22 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
 
     // Handle special cases first
     match rule {
-        // FETCH can be either FetchCommand or FetchAllCommand - determined by content
+        // FETCH is either FetchCommand or FetchAllCommand. Grammar:
+        //   fetch_stmt = ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ ...
+        // FETCH ALL has no `identifier` child; FETCH <pack> does. Disambiguate on
+        // the parse structure, not substring text — a pack literally named
+        // "install" or "wallets" contains "all" and must not become FETCH ALL. bb-8gq.
         Rule::fetch_stmt => {
-            let raw = inner_stmt.as_str().to_uppercase();
-            if raw.contains("ALL") {
-                Ok(BundleCommand::FetchAll(FetchAllCommand::from_statement(
+            let has_pack_identifier = inner_stmt
+                .clone()
+                .into_inner()
+                .any(|p| p.as_rule() == Rule::identifier);
+            if has_pack_identifier {
+                Ok(BundleCommand::Fetch(FetchCommand::from_statement(
                     inner_stmt,
                 )?))
             } else {
-                Ok(BundleCommand::Fetch(FetchCommand::from_statement(
+                Ok(BundleCommand::FetchAll(FetchAllCommand::from_statement(
                     inner_stmt,
                 )?))
             }
@@ -120,6 +127,29 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Syntax error"));
+    }
+
+    #[test]
+    fn test_fetch_pack_named_like_all_is_not_fetch_all() {
+        // bb-8gq: a pack whose name contains "all" (e.g. "install") must parse as
+        // FETCH <pack>, not FETCH ALL. Regression guard for substring dispatch.
+        let cmd = parse_command("FETCH install ADD").expect("FETCH install ADD should parse");
+        assert!(
+            matches!(cmd, BundleCommand::Fetch(_)),
+            "pack named 'install' should be a single-pack Fetch, not FetchAll"
+        );
+
+        let all = parse_command("FETCH ALL ADD").expect("FETCH ALL ADD should parse");
+        assert!(matches!(all, BundleCommand::FetchAll(_)));
+    }
+
+    #[test]
+    fn test_show_always_updates_is_facade_and_does_not_panic() {
+        // bb-8gq: SHOW ALWAYS UPDATES is a read-only facade command; converting it
+        // previously hit unreachable!() and panicked. Must return Ok.
+        let cmd = parse_command("SHOW ALWAYS UPDATES").expect("SHOW ALWAYS UPDATES should parse");
+        assert!(cmd.is_facade_command());
+        assert!(cmd.into_facade_command().is_ok());
     }
 
     #[test]
