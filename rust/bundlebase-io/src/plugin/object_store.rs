@@ -158,7 +158,11 @@ pub(crate) fn parse_url(
         // Try building with config; the builder will use config.get() per key
         let url_str = url.as_str();
         let store = build_object_store(url, url_str, config)?;
-        let path = ObjectPath::from(url.path());
+        // Percent-decode: URLs are built with Url::from_file_path (which encodes
+        // spaces/unicode as %20 etc.), so a plain ObjectPath::from(url.path())
+        // would address the literal "my%20file" key. from_url_path decodes it.
+        let path = ObjectPath::from_url_path(url.path())
+            .map_err(|e| format!("Invalid path in URL '{}': {}", url, e))?;
         Ok((Arc::new(store), path))
     }
 }
@@ -809,6 +813,8 @@ mod tests {
     #[case("memory:///path//with///more/", "path/with/more")]
     #[case("file:///test", "test")]
     #[case("file:///test/sub/dir", "test/sub/dir")]
+    // Percent-encoded path must decode to a literal space, not "my%20file".
+    #[case("file:///data/my%20file.csv", "data/my file.csv")]
     #[case("s3://test", "")]
     #[case("s3://test/path/here", "path/here")]
     fn test_from_str(#[case] input: &str, #[case] expected_path: &str) {

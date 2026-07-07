@@ -694,6 +694,13 @@ impl BTreeIndex {
 
     /// Deserialize index from bytes
     pub fn deserialize(data: Bytes, column_name: String) -> Result<Self, BundlebaseError> {
+        // Guard the fixed 32-byte header up front: the bytes::Buf reads below
+        // panic on underflow, so a truncated/corrupt .idx (bad download, bit rot,
+        // adversarial bundle) must be rejected before any read.
+        if data.len() < 32 {
+            return Err("Corrupt btree index: file smaller than header".into());
+        }
+
         let mut cursor = Cursor::new(data.as_ref());
 
         // Verify magic
@@ -716,8 +723,14 @@ impl BTreeIndex {
         let total_rows = cursor.get_u64();
         cursor.advance(2); // Skip reserved
 
-        // Directory
-        let directory_size = block_count * 24;
+        // Directory. block_count is attacker-controlled, so bound the slice
+        // (and avoid an overflowing multiply) before indexing.
+        let directory_size = block_count
+            .checked_mul(24)
+            .ok_or("Corrupt btree index: directory size overflow")?;
+        if data.len() < 32 + directory_size {
+            return Err("Corrupt btree index: directory extends past end of file".into());
+        }
         let directory_data = &data.as_ref()[32..32 + directory_size];
         let mut directory = BlockDirectory::deserialize(directory_data, block_count)?;
 
@@ -732,6 +745,10 @@ impl BTreeIndex {
                 data.len()
             };
 
+            // file_offset values come from the (untrusted) directory.
+            if offset > next_offset || next_offset > data.len() {
+                return Err("Corrupt btree index: block offset out of bounds".into());
+            }
             let block_data = &data.as_ref()[offset..next_offset];
             let block = IndexBlock::deserialize(block_data, version)?;
 
@@ -951,6 +968,27 @@ mod tests {
         assert!(IndexedValue::Null < IndexedValue::Int64(0));
         assert!(IndexedValue::Int64(1) < IndexedValue::Int64(2));
         assert!(IndexedValue::Utf8("a".to_string()) < IndexedValue::Utf8("b".to_string()));
+    }
+
+    #[test]
+    fn test_deserialize_rejects_corrupt_data() {
+        // bb-dvo: a truncated or adversarial .idx must error, never panic on a
+        // Buf underflow / out-of-bounds slice, nor over-allocate from a bogus count.
+        assert!(BTreeIndex::deserialize(Bytes::from_static(b""), "c".to_string()).is_err());
+        assert!(BTreeIndex::deserialize(Bytes::from_static(b"short"), "c".to_string()).is_err());
+        // Valid magic but no room for the rest of the header.
+        assert!(BTreeIndex::deserialize(Bytes::from_static(b"BBBTRI01"), "c".to_string()).is_err());
+
+        // Full header claiming a giant block_count with no directory bytes present.
+        let mut v = Vec::new();
+        v.extend_from_slice(MAGIC);
+        v.push(VERSION); // version
+        v.push(1); // data_type tag
+        v.extend_from_slice(&u32::MAX.to_be_bytes()); // block_count = huge
+        v.extend_from_slice(&0u64.to_be_bytes()); // total_entries
+        v.extend_from_slice(&0u64.to_be_bytes()); // total_rows
+        v.extend_from_slice(&[0, 0]); // reserved
+        assert!(BTreeIndex::deserialize(Bytes::from(v), "c".to_string()).is_err());
     }
 
     #[test]
