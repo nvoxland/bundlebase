@@ -412,45 +412,114 @@ pub fn generate_internal_name(id: &ColumnId) -> String {
 }
 
 /// Word-boundary identifier replacement. Used by both column-name and
-/// function-name SQL translation: walks `sql`, replaces every match of a
-/// key in `name_map` with its value, but only when the match is a whole
-/// identifier (not embedded in a longer identifier). Also rewrites
-/// double-quoted forms `"name"` → `"replacement"`. Longer names go first
-/// so substring matches don't fire (e.g. `id` inside `identity`).
+/// function-name SQL translation: walks `sql` once and replaces every whole
+/// identifier that is a key in `name_map` with its value.
+///
+/// The walk is UTF-8 aware and literal-aware:
+///  - single-quoted string literals (with `''` escapes) are copied verbatim, so
+///    a column name appearing as a *word inside a literal* is never rewritten
+///    (e.g. a column `active` leaves `'active user'` untouched);
+///  - double-quoted delimited identifiers `"name"` are replaced when the inner
+///    text is a known name;
+///  - non-ASCII bytes are copied as whole characters rather than byte-by-byte,
+///    so text like `'José'` is preserved instead of mojibake'd.
+///
+/// Longer names are matched first so a shorter name that is a prefix of a
+/// longer identifier does not fire (e.g. `id` inside `identity`).
 pub fn translate_identifiers_in_sql(sql: &str, name_map: &HashMap<String, String>) -> String {
     let mut names: Vec<(&String, &String)> = name_map.iter().collect();
     names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
-    let mut result = sql.to_string();
-    for (user_name, internal_name) in names {
-        let quoted = format!("\"{}\"", user_name);
-        let quoted_replacement = format!("\"{}\"", internal_name);
-        result = result.replace(&quoted, &quoted_replacement);
+    let bytes = sql.as_bytes();
+    let mut result = String::with_capacity(sql.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
 
-        let mut new_result = String::with_capacity(result.len());
-        let name_bytes = user_name.as_bytes();
-        let result_bytes = result.as_bytes();
-        let mut i = 0;
-        while i < result_bytes.len() {
-            if i + name_bytes.len() <= result_bytes.len()
-                && &result_bytes[i..i + name_bytes.len()] == name_bytes
-            {
-                let left_ok = i == 0 || !is_ident_char(result_bytes[i - 1]);
-                let right_ok = i + name_bytes.len() == result_bytes.len()
-                    || !is_ident_char(result_bytes[i + name_bytes.len()]);
+        // Single-quoted string literal: copy verbatim; `''` is an escaped quote.
+        if b == b'\'' {
+            result.push('\'');
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\'' {
+                    if bytes.get(i + 1) == Some(&b'\'') {
+                        result.push_str("''");
+                        i += 2;
+                        continue;
+                    }
+                    result.push('\'');
+                    i += 1;
+                    break;
+                }
+                let clen = utf8_char_len(bytes[i]);
+                result.push_str(&sql[i..i + clen]);
+                i += clen;
+            }
+            continue;
+        }
 
-                if left_ok && right_ok {
-                    new_result.push_str(internal_name);
-                    i += name_bytes.len();
-                    continue;
+        // Double-quoted delimited identifier: replace the whole inner name.
+        if b == b'"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != b'"' {
+                j += 1;
+            }
+            if j < bytes.len() {
+                let inner = &sql[start..j];
+                let replacement = name_map.get(inner).map(String::as_str).unwrap_or(inner);
+                result.push('"');
+                result.push_str(replacement);
+                result.push('"');
+                i = j + 1;
+                continue;
+            }
+            // Unterminated quote: copy it and continue.
+            result.push('"');
+            i += 1;
+            continue;
+        }
+
+        // Bare identifier at a word boundary.
+        if i == 0 || !is_ident_char(bytes[i - 1]) {
+            let mut matched = false;
+            for (user_name, internal_name) in &names {
+                let nb = user_name.as_bytes();
+                if !nb.is_empty()
+                    && i + nb.len() <= bytes.len()
+                    && &bytes[i..i + nb.len()] == nb
+                    && (i + nb.len() == bytes.len() || !is_ident_char(bytes[i + nb.len()]))
+                {
+                    result.push_str(internal_name);
+                    i += nb.len();
+                    matched = true;
+                    break;
                 }
             }
-            new_result.push(result_bytes[i] as char);
-            i += 1;
+            if matched {
+                continue;
+            }
         }
-        result = new_result;
+
+        // Copy one whole UTF-8 character.
+        let clen = utf8_char_len(b);
+        result.push_str(&sql[i..i + clen]);
+        i += clen;
     }
     result
+}
+
+/// Number of bytes in the UTF-8 character that starts with `first_byte`.
+fn utf8_char_len(first_byte: u8) -> usize {
+    if first_byte < 0x80 {
+        1
+    } else if first_byte >> 5 == 0b110 {
+        2
+    } else if first_byte >> 4 == 0b1110 {
+        3
+    } else {
+        4
+    }
 }
 
 /// Parse a `col_<hex_id>` string back into a ColumnId.
@@ -845,5 +914,59 @@ mod tests {
         let result = schema.translate_sql(sql);
         let expected_quoted = format!("\"{}\"", generate_internal_name(&id_col));
         assert!(result.contains(&expected_quoted));
+    }
+
+    #[test]
+    fn test_translate_sql_preserves_string_literals() {
+        // bb-fqm: a column name that appears as a word *inside* a string literal
+        // must not be rewritten. Column `active`; the literal 'active user' stays.
+        let id_active = ColumnId::generate();
+        let mut schema = BundleSchema::new();
+        schema.insert(id_active, "active".to_string());
+
+        let sql = "DELETE FROM bundle WHERE label = 'active user' AND active = 1";
+        let result = schema.translate_sql(sql);
+        let internal = generate_internal_name(&id_active);
+        // The literal is untouched; the bare column reference is replaced.
+        assert!(
+            result.contains("'active user'"),
+            "string literal must be preserved: {result}"
+        );
+        assert_eq!(
+            result,
+            format!("DELETE FROM bundle WHERE label = 'active user' AND {internal} = 1")
+        );
+    }
+
+    #[test]
+    fn test_translate_sql_preserves_utf8_literals() {
+        // bb-fqm: multibyte characters in a literal must survive byte-for-byte
+        // (the old byte-as-char path produced Latin-1 mojibake).
+        let id_name = ColumnId::generate();
+        let mut schema = BundleSchema::new();
+        schema.insert(id_name, "name".to_string());
+
+        let sql = "SELECT name FROM bundle WHERE name = 'José'";
+        let result = schema.translate_sql(sql);
+        assert!(
+            result.contains("'José'"),
+            "unicode literal must be preserved: {result}"
+        );
+        assert!(!result.contains("name"));
+    }
+
+    #[test]
+    fn test_translate_sql_escaped_quote_in_literal() {
+        let id_active = ColumnId::generate();
+        let mut schema = BundleSchema::new();
+        schema.insert(id_active, "active".to_string());
+
+        let sql = "SELECT active FROM bundle WHERE note = 'it''s active'";
+        let result = schema.translate_sql(sql);
+        let internal = generate_internal_name(&id_active);
+        assert_eq!(
+            result,
+            format!("SELECT {internal} FROM bundle WHERE note = 'it''s active'")
+        );
     }
 }
