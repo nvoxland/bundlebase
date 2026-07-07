@@ -240,14 +240,6 @@ class SyncBundle:
         """
         return self._async.history()
 
-    def status(self) -> List[Any]:
-        """Get the list of changes added since bundle creation/extension.
-
-        Returns:
-            List of PyChange objects representing uncommitted operations
-        """
-        return self._async.status()
-
     # ======================== Async-to-Sync Conversions ========================
 
     def num_rows(self) -> int:
@@ -1180,10 +1172,24 @@ class SyncBundleBuilder(SyncBundle):
             extended = c.extend()
             extended.filter("active = true", [])
         """
-        # extend() is async in Rust, so we need to await it
-        coro = _call_original_method(self._async, "extend", data_dir)
-        async_extended = _loop_manager.run_sync(coro)
+        # extend() is async in Rust. Call the builder's own extend directly:
+        # the registered _ORIGINAL_METHODS["extend"] is PyBundle.extend, whose
+        # descriptor does not apply to a PyBundleBuilder (bb-cko).
+        async def _extend_async():
+            return await self._async.extend(data_dir)
+
+        async_extended = _loop_manager.run_sync(_extend_async())
         return SyncBundleBuilder(async_extended)
+
+    def status(self) -> Any:
+        """Get the uncommitted changes staged on this builder.
+
+        Returns:
+            PyBundleStatus with ``change_count``, ``total_operations``, and
+            ``changes`` (read-only opened bundles have no uncommitted status, so
+            this method lives on the builder only).
+        """
+        return self._async.status()
 
     def query(self, sql: str, params: Optional[List[Any]] = None, hard_limit: Optional[int] = None) -> SyncQueryResult:
         """Execute a SQL query and return streaming results.
@@ -1299,21 +1305,19 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def drop_function(
-        self, name: str, platform: str = None, input_types: list = None
+        self, name: str, platform: str = None
     ) -> "SyncBundleBuilder":
-        """Drop a function. Without a platform or input_types, removes the entire definition.
+        """Drop a function. Without a platform, removes the entire definition.
         With a platform, removes only the logic for that platform.
-        With input_types, removes only the overload matching that signature.
 
         Args:
             name: The dotted function name (e.g., "acme.double_val")
             platform: Optional platform filter (e.g., "linux/amd64"). None drops entire function.
-            input_types: Optional list of Arrow type names to drop a specific overload.
 
         Returns:
             SyncBundleBuilder for chaining
         """
-        coro = _call_original_method(self._async, "drop_function", name, platform, input_types)
+        coro = _call_original_method(self._async, "drop_function", name, platform)
         self._async = _loop_manager.run_sync(coro)
         return self
 
