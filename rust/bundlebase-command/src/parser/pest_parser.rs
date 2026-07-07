@@ -180,14 +180,38 @@ pub fn extract_string_content(quoted: &str) -> Result<String, BundlebaseError> {
 }
 
 /// Process escape sequences in a string.
+///
+/// Single left-to-right pass so each escape is consumed exactly once. Sequential
+/// `.replace()` calls were wrong: `\\` collapsed to `\` and then recombined with a
+/// following `n`/`r`/`t`/quote (e.g. `C:\\net` became `C:<newline>et`).
 pub fn process_escapes(s: &str) -> String {
-    s.replace("\\\\", "\\")
-        .replace("\\'", "'")
-        .replace("''", "'") // SQL-style escaped single quote
-        .replace("\\\"", "\"")
-        .replace("\\n", "\n")
-        .replace("\\r", "\r")
-        .replace("\\t", "\t")
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some('\\') => result.push('\\'),
+                Some('\'') => result.push('\''),
+                Some('"') => result.push('"'),
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                // Unknown escape: preserve the backslash and the following char.
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            },
+            // SQL-style doubled single quote.
+            '\'' if chars.peek() == Some(&'\'') => {
+                chars.next();
+                result.push('\'');
+            }
+            other => result.push(other),
+        }
+    }
+    result
 }
 
 /// Parse join type from string representation.
@@ -306,6 +330,22 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_process_escapes_backslash_does_not_recombine() {
+        // bb-8gq: an escaped backslash must not merge with a following escape char.
+        assert_eq!(process_escapes(r"C:\\net"), r"C:\net"); // \\ -> \, then literal 'n'
+        assert_eq!(process_escapes(r"\\n"), r"\n"); // escaped backslash + literal n
+        assert_eq!(process_escapes(r"a\\b"), r"a\b");
+        // Genuine escapes still work.
+        assert_eq!(process_escapes(r"line\nbreak"), "line\nbreak");
+        assert_eq!(process_escapes(r"tab\tend"), "tab\tend");
+        assert_eq!(process_escapes(r"quote\'s"), "quote's");
+        // SQL-style doubled single quote.
+        assert_eq!(process_escapes("it''s"), "it's");
+        // Trailing backslash is preserved, not dropped.
+        assert_eq!(process_escapes(r"end\"), r"end\");
+    }
 
     #[test]
     fn test_is_command_statement() {
