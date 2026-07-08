@@ -470,7 +470,8 @@ func toFloat64(val interface{}) (float64, error) {
 
 // parseLocation extracts a Location from a params["location"] value.
 func parseLocation(v interface{}) Location {
-	loc := Location{Format: "parquet"}
+	// must_copy defaults to true when absent, matching the Python/Rust/Java SDKs.
+	loc := Location{Format: "parquet", MustCopy: true}
 	m, ok := v.(map[string]interface{})
 	if !ok {
 		return loc
@@ -486,6 +487,13 @@ func parseLocation(v interface{}) Location {
 	}
 	if s, ok := m["version"].(string); ok {
 		loc.Version = s
+	}
+	// num_rows is preserved when the host sends it (the other SDKs keep it too).
+	if nr, ok := m["num_rows"]; ok && nr != nil {
+		if f, err := toFloat64(nr); err == nil {
+			n := int64(f)
+			loc.NumRows = &n
+		}
 	}
 	return loc
 }
