@@ -183,6 +183,20 @@ class TestScalarInvoke:
         assert table is not None
         assert table.column("result").to_pylist() == [2, 4, 6]
 
+    def test_manifest_returns_functions(self):
+        # bb-cko: the manifest RPC method must return the provider's functions,
+        # matching Go/Rust/Java (was "Method not found: manifest").
+        stdin = io.BytesIO(
+            _make_request("manifest", req_id=1) + _make_request("shutdown", req_id=2)
+        )
+        stdout = io.BytesIO()
+        _serve_function(DoubleFunction(), stdin, stdout)
+
+        resp, _ = _read_response(stdout.getvalue())
+        assert resp["id"] == 1
+        assert "error" not in resp, f"manifest returned an error: {resp.get('error')}"
+        assert resp["result"] == {"functions": DoubleFunction().functions()}
+
     def test_invoke_empty_input(self):
         """Invoking with zero-length Arrow frame returns zero-length output."""
         empty_frame = struct.pack(">I", 0)

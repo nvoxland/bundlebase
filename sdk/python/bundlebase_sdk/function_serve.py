@@ -134,6 +134,10 @@ def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None
                 _handle_merge(func, req_id, params, state_store, stdout)
             elif method == "evaluate":
                 _handle_evaluate(func, req_id, params, state_store, stdout)
+            elif method == "manifest":
+                # Parity with the Go/Rust/Java SDKs, which expose manifest
+                # discovery over the RPC loop as well as the CLI flag.
+                write_response(stdout, req_id, {"functions": func.functions()})
             elif method == "shutdown":
                 write_response(stdout, req_id, {"ok": True})
                 break
