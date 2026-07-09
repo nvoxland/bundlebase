@@ -83,7 +83,10 @@ pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
                 .map(auto_commit_message)
                 .unwrap_or_else(|| "Created bundle".to_string())
         });
-        let commit_sql = format!("COMMIT '{}'", message.replace('\'', "''"));
+        let commit_sql = format!(
+            "COMMIT {}",
+            bundlebase_command::parser::escape_string(&message)
+        );
         bundlebase_cli::repl::execute_single(state, &commit_sql, OutputFormat::Table).await?;
     }
 

@@ -83,7 +83,10 @@ pub async fn run(args: ExtendArgs) -> Result<(), BundlebaseError> {
     // Auto-commit if there are uncommitted changes
     if !state.status_changes().is_empty() {
         let message = args.message.unwrap_or_else(|| auto_commit_message(&sql));
-        let commit_sql = format!("COMMIT '{}'", message.replace('\'', "''"));
+        let commit_sql = format!(
+            "COMMIT {}",
+            bundlebase_command::parser::escape_string(&message)
+        );
         bundlebase_cli::repl::execute_single(state, &commit_sql, OutputFormat::Table).await?;
     }
 

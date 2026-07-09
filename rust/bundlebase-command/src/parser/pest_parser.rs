@@ -238,6 +238,8 @@ pub fn escape_string(s: &str) -> String {
     }
 
     let escaped = s
+        .replace('\\', "\\\\") // must be first: a trailing/embedded backslash
+        // would otherwise escape the closing quote or a following escape char
         .replace('\'', "''") // SQL-style: ' → ''
         .replace('\n', "\\n")
         .replace('\r', "\\r")

@@ -144,6 +144,26 @@ mod tests {
     }
 
     #[test]
+    fn test_commit_message_with_backslash_parses() {
+        // bb-8gq: auto-commit builds `COMMIT <escape_string(msg)>`. A message
+        // ending in a backslash (or mixing backslashes and quotes) must not
+        // escape the closing quote and break parsing.
+        for msg in [
+            "restore C:\\backup\\",
+            "path C:\\net\\data",
+            "weird ' and \\ together",
+            "trailing \\",
+        ] {
+            let sql = format!("COMMIT {}", escape_string(msg));
+            let cmd = parse_command(&sql).unwrap_or_else(|e| panic!("{sql} should parse: {e}"));
+            assert!(
+                matches!(cmd, BundleCommand::Commit(_)),
+                "expected Commit for {sql}"
+            );
+        }
+    }
+
+    #[test]
     fn test_readonly_allowlist_excludes_code_execution() {
         // bb-e0b: a read-only bundle must reject commands that load/execute
         // external code or flip security config, so a read-only Flight/MCP client
