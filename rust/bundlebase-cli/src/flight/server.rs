@@ -36,9 +36,9 @@ pub async fn start(
         if read_only { "read-only" } else { "read-write" }
     );
 
-    let authenticator = BundlebaseAuthenticator::default();
+    let authenticator = BundlebaseAuthenticator::from_env();
     if authenticator.is_using_defaults() {
-        warn!("Flight server starting with default credentials (admin/password). Set custom credentials for production use.");
+        warn!("Flight server starting with default credentials (admin/password). Set BUNDLEBASE_FLIGHT_USERNAME and BUNDLEBASE_FLIGHT_PASSWORD for production use.");
     }
 
     let flight_service =
