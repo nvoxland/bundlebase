@@ -47,6 +47,11 @@ pub struct ScalarFunction {
     signature: Signature,
     overloads: Vec<FunctionEntry>,
     subprocess_cache: SubprocessCache,
+    /// When set, calling this function returns this error instead of dispatching.
+    /// Used to gate external-code functions behind `system.allow_external_code`:
+    /// the function still registers (so queries that don't call it work), but
+    /// invoking it fails with a clear message.
+    gated: Option<String>,
 }
 
 impl PartialEq for ScalarFunction {
@@ -79,6 +84,7 @@ impl ScalarFunction {
             signature,
             overloads: vec![entry],
             subprocess_cache,
+            gated: None,
         })
     }
 
@@ -111,7 +117,16 @@ impl ScalarFunction {
             signature,
             overloads,
             subprocess_cache,
+            gated: None,
         })
+    }
+
+    /// Mark this function as gated: it registers normally but returns `reason`
+    /// when invoked. Used for external-code functions when
+    /// `system.allow_external_code` is disabled.
+    pub fn with_gated(mut self, reason: Option<String>) -> Self {
+        self.gated = reason;
+        self
     }
 
     /// Replace the DataFusion-visible name. Used by `FunctionRegistry` to
@@ -173,6 +188,9 @@ impl ScalarUDFImpl for ScalarFunction {
         &self,
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::common::Result<ColumnarValue> {
+        if let Some(reason) = &self.gated {
+            return Err(datafusion::common::DataFusionError::Execution(reason.clone()));
+        }
         if self.overloads.len() == 1 {
             return invoke_entry(
                 &self.name,

@@ -46,6 +46,9 @@ pub struct AggregateFunction {
     signature: Signature,
     overloads: Vec<FunctionEntry>,
     subprocess_cache: SubprocessCache,
+    /// When set, using this aggregate returns this error instead of running.
+    /// Gates external-code aggregates behind `system.allow_external_code`.
+    gated: Option<String>,
 }
 
 impl PartialEq for AggregateFunction {
@@ -78,6 +81,7 @@ impl AggregateFunction {
             signature,
             overloads: vec![entry],
             subprocess_cache,
+            gated: None,
         })
     }
 
@@ -107,12 +111,20 @@ impl AggregateFunction {
             signature,
             overloads,
             subprocess_cache,
+            gated: None,
         })
     }
 
     /// Replace the DataFusion-visible name. Mirrors `ScalarFunction::with_name`.
     pub fn with_name(mut self, name: String) -> Self {
         self.name = name;
+        self
+    }
+
+    /// Mark this aggregate as gated: it registers but errors with `reason` when
+    /// used. Mirrors `ScalarFunction::with_gated`.
+    pub fn with_gated(mut self, reason: Option<String>) -> Self {
+        self.gated = reason;
         self
     }
 }
@@ -176,6 +188,9 @@ impl AggregateUDFImpl for AggregateFunction {
         &self,
         acc_args: datafusion::logical_expr::function::AccumulatorArgs,
     ) -> DFResult<Box<dyn Accumulator>> {
+        if let Some(reason) = &self.gated {
+            return Err(datafusion::common::DataFusionError::Execution(reason.clone()));
+        }
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]
         } else {

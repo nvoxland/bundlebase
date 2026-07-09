@@ -127,6 +127,13 @@ impl UdfRuntime {
         }
     }
 
+    /// Whether this runtime executes external code that must be gated behind
+    /// `system.allow_external_code`. The in-process `python` runtime is not
+    /// considered external; ffi/ipc/docker/java load or spawn external code.
+    pub fn is_external(&self) -> bool {
+        !matches!(self, UdfRuntime::Python(_))
+    }
+
     /// Reconstruct the entrypoint portion of the FROM string.
     pub fn to_entrypoint_string(&self) -> String {
         self.inner().to_entrypoint_string()

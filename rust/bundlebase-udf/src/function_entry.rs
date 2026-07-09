@@ -11,7 +11,9 @@ use arrow::datatypes::DataType;
 use bundlebase_common::namespaced_name::NamespacedName;
 use bundlebase_common::object_id::ObjectId;
 use bundlebase_common::platform::Platform;
+use bundlebase_common::system_config::is_external_code_allowed;
 use bundlebase_common::BundlebaseError;
+use bundlebase_common::ConfigProvider;
 use bundlebase_io::IOReadWriteDir;
 use datafusion::logical_expr::ScalarUDF;
 use datafusion::prelude::SessionContext;
@@ -112,6 +114,9 @@ pub struct FunctionRegistry {
     data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
     ctx: Arc<SessionContext>,
     subprocess_cache: SubprocessCache,
+    /// Live bundle config, read at registration to gate external-code functions
+    /// behind `system.allow_external_code`.
+    config: Arc<dyn ConfigProvider>,
 }
 
 impl fmt::Debug for FunctionRegistry {
@@ -127,6 +132,7 @@ impl FunctionRegistry {
         data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
         ctx: Arc<SessionContext>,
         subprocess_cache: SubprocessCache,
+        config: Arc<dyn ConfigProvider>,
     ) -> Self {
         Self {
             entries: Vec::new(),
@@ -134,7 +140,40 @@ impl FunctionRegistry {
             data_dir,
             ctx,
             subprocess_cache,
+            config,
         }
+    }
+
+    /// If any overload uses an external runtime and `system.allow_external_code`
+    /// is not enabled, return a gate message. The function still registers, but
+    /// invoking it returns this error (queries that don't call it are fine).
+    /// The in-process python runtime is never gated.
+    fn compute_external_gate(&self, name: &str, overloads: &[FunctionEntry]) -> Option<String> {
+        let mut runtimes: Vec<&str> = overloads
+            .iter()
+            .filter(|e| e.from.is_external())
+            .map(|e| e.from.runtime_name())
+            .collect();
+        if runtimes.is_empty() {
+            return None;
+        }
+        if is_external_code_allowed(self.config.as_ref()).unwrap_or(false) {
+            return None;
+        }
+        runtimes.sort_unstable();
+        runtimes.dedup();
+        let runtimes = runtimes.join("/");
+        log::warn!(
+            "Function '{}' uses external runtime(s) [{}] and is gated because \
+             system.allow_external_code is not enabled; calling it will error until enabled",
+            name,
+            runtimes
+        );
+        Some(format!(
+            "External code execution is disabled. Set system.allow_external_code=true to call \
+             function '{}' ({} runtime).",
+            name, runtimes
+        ))
     }
 
     /// Stable internal ObjectId for a user-visible function name, if registered.
@@ -298,6 +337,7 @@ impl FunctionRegistry {
             .collect();
 
         let kind = validate_kind_consistency(&overloads)?;
+        let gate = self.compute_external_gate(name, &overloads);
 
         match kind {
             FunctionKind::Scalar => {
@@ -306,7 +346,8 @@ impl FunctionRegistry {
                     overloads,
                     Arc::clone(&self.subprocess_cache),
                 )?
-                .with_name(internal_name.clone());
+                .with_name(internal_name.clone())
+                .with_gated(gate);
                 self.ctx.register_udf(ScalarUDF::from(func));
             }
             FunctionKind::Aggregate => {
@@ -316,7 +357,8 @@ impl FunctionRegistry {
                     overloads,
                     Arc::clone(&self.subprocess_cache),
                 )?
-                .with_name(internal_name.clone());
+                .with_name(internal_name.clone())
+                .with_gated(gate);
                 self.ctx.register_udaf(AggregateUDF::from(agg));
             }
             FunctionKind::TableValued => {
@@ -639,6 +681,32 @@ mod tests {
         }
     }
 
+    /// Config that reports every key as "true" — used only to make the registry
+    /// see `system.allow_external_code=true` in gating tests.
+    struct AllowExternalConfigProvider;
+    impl bundlebase_common::ConfigProvider for AllowExternalConfigProvider {
+        fn get_in_scope(
+            &self,
+            _scope: &bundlebase_common::Scope,
+            _key: &bundlebase_common::ConfigKey,
+        ) -> Result<Option<String>, bundlebase_common::BundlebaseError> {
+            Ok(Some("true".to_string()))
+        }
+    }
+
+    fn entry_with_runtime(name: &str, from: &str) -> FunctionEntry {
+        FunctionEntry {
+            id: ObjectId::generate(),
+            name: parse_function_name(name).unwrap(),
+            input_types: vec![DataType::Int64],
+            return_type: DataType::Int64,
+            from: UdfRuntime::parse_from(from).unwrap(),
+            platform: Platform::any(),
+            temporary: false,
+            kind: FunctionKind::Scalar,
+        }
+    }
+
     fn test_registry() -> FunctionRegistry {
         use crate::bridge::ipc_bridge::new_subprocess_cache;
         use bundlebase_io::plugin::object_store::ObjectStoreDir;
@@ -647,9 +715,9 @@ mod tests {
         let url = Url::parse("memory:///test").expect("valid url");
         let config: Arc<dyn bundlebase_common::ConfigProvider> = Arc::new(EmptyConfigProvider);
 
-        let dir = ObjectStoreDir::from_url(&url, config).expect("valid dir");
+        let dir = ObjectStoreDir::from_url(&url, config.clone()).expect("valid dir");
         let data_dir = Arc::new(RwLock::new(Arc::new(dir) as Arc<dyn IOReadWriteDir>));
-        FunctionRegistry::new(data_dir, ctx, new_subprocess_cache())
+        FunctionRegistry::new(data_dir, ctx, new_subprocess_cache(), config)
     }
 
     // ==================== parse_function_name tests ====================
@@ -721,6 +789,54 @@ mod tests {
             temporary,
             kind: FunctionKind::Scalar,
         }
+    }
+
+    fn test_registry_allowing_external() -> FunctionRegistry {
+        use crate::bridge::ipc_bridge::new_subprocess_cache;
+        use bundlebase_io::plugin::object_store::ObjectStoreDir;
+        use url::Url;
+        let ctx = Arc::new(SessionContext::new());
+        let url = Url::parse("memory:///test").expect("valid url");
+        let empty: Arc<dyn bundlebase_common::ConfigProvider> = Arc::new(EmptyConfigProvider);
+        let dir = ObjectStoreDir::from_url(&url, empty).expect("valid dir");
+        let data_dir = Arc::new(RwLock::new(Arc::new(dir) as Arc<dyn IOReadWriteDir>));
+        FunctionRegistry::new(
+            data_dir,
+            ctx,
+            new_subprocess_cache(),
+            Arc::new(AllowExternalConfigProvider),
+        )
+    }
+
+    #[test]
+    fn test_external_function_gated_when_allow_external_code_disabled() {
+        // test_registry() uses EmptyConfigProvider -> allow_external_code=false.
+        let reg = test_registry();
+
+        // ffi/ipc/docker/java are external -> gated with a clear message.
+        let ipc = entry_with_runtime("acme.ext", "ipc::./f");
+        let gate = reg.compute_external_gate("acme.ext", std::slice::from_ref(&ipc));
+        assert!(gate.is_some(), "external function must be gated when disabled");
+        assert!(gate.unwrap().contains("allow_external_code"));
+
+        // In-process python is NOT external -> never gated.
+        let py = entry_with_runtime("acme.py", "python::mod:f");
+        assert!(
+            reg.compute_external_gate("acme.py", std::slice::from_ref(&py))
+                .is_none(),
+            "python function must not be gated"
+        );
+    }
+
+    #[test]
+    fn test_external_function_not_gated_when_allowed() {
+        let reg = test_registry_allowing_external();
+        let ipc = entry_with_runtime("acme.ext", "ipc::./f");
+        assert!(
+            reg.compute_external_gate("acme.ext", std::slice::from_ref(&ipc))
+                .is_none(),
+            "external function must not be gated when allow_external_code=true"
+        );
     }
 
     #[test]

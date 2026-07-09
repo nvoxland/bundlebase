@@ -384,7 +384,7 @@ impl Bundle {
         let config_provider: Arc<dyn ConfigProvider> =
             Arc::clone(&bundle_config) as Arc<dyn ConfigProvider>;
         let data_dir = Arc::new(RwLock::new(
-            writable_dir_from_url(&url, config_provider).await?,
+            writable_dir_from_url(&url, Arc::clone(&config_provider)).await?,
         ));
         let subprocess_cache = crate::function::ipc_bridge::new_subprocess_cache();
 
@@ -413,6 +413,7 @@ impl Bundle {
                 Arc::clone(&data_dir),
                 Arc::clone(&ctx),
                 Arc::clone(&subprocess_cache),
+                Arc::clone(&config_provider),
             ))),
             subprocess_cache,
             name,
