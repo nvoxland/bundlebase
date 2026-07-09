@@ -783,12 +783,51 @@ pub fn invoke_ipc_scalar(
                 )
             })?;
 
+    // The subprocess is untrusted: validate the shape rather than blindly
+    // returning batches[0].column(0) (which silently truncated a chunked
+    // response and never checked the row count against the input).
+    let expected_rows = args.first().map(|a| a.len());
+    assemble_scalar_result(function_name, &batches, expected_rows)
+}
+
+/// Validate and assemble the scalar result column from a UDF's output batches.
+///
+/// A conforming scalar function returns exactly one column with the same number
+/// of rows as the input. Batches are concatenated so a legitimately chunked
+/// response is handled, and the total row count is checked so a truncated or
+/// wrong-length response surfaces a clear trust-boundary error instead of a
+/// confusing downstream length mismatch.
+fn assemble_scalar_result(
+    function_name: &str,
+    batches: &[RecordBatch],
+    expected_rows: Option<usize>,
+) -> Result<ArrayRef, BundlebaseError> {
     if batches.is_empty() || batches[0].num_columns() == 0 {
         return Err(format!("IPC function '{}' returned no data columns", function_name).into());
     }
 
-    // Return the first (and only) column from the first batch
-    Ok(Arc::clone(batches[0].column(0)))
+    let columns: Vec<&dyn arrow::array::Array> =
+        batches.iter().map(|b| b.column(0).as_ref()).collect();
+    let result = arrow::compute::concat(&columns).map_err(|e| {
+        BundlebaseError::from(format!(
+            "IPC function '{}' returned incompatible result batches: {}",
+            function_name, e
+        ))
+    })?;
+
+    if let Some(expected) = expected_rows {
+        if result.len() != expected {
+            return Err(format!(
+                "IPC function '{}' returned {} rows but {} were expected",
+                function_name,
+                result.len(),
+                expected
+            )
+            .into());
+        }
+    }
+
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1060,34 @@ fn timeout_context_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_assemble_scalar_result_validates_and_concats() {
+        use arrow::array::Int64Array;
+
+        let batch = |vals: Vec<i64>| {
+            RecordBatch::try_from_iter(vec![(
+                "r",
+                Arc::new(Int64Array::from(vals)) as ArrayRef,
+            )])
+            .unwrap()
+        };
+
+        // Single batch with the expected row count.
+        let out = assemble_scalar_result("f", &[batch(vec![1, 2, 3])], Some(3)).unwrap();
+        assert_eq!(out.len(), 3);
+
+        // A chunked response is concatenated, not truncated to the first batch.
+        let out =
+            assemble_scalar_result("f", &[batch(vec![1, 2]), batch(vec![3])], Some(3)).unwrap();
+        assert_eq!(out.len(), 3);
+
+        // A wrong-length response is a clear error, not a silent misalignment.
+        assert!(assemble_scalar_result("f", &[batch(vec![1, 2])], Some(3)).is_err());
+
+        // No batches / no columns is an error.
+        assert!(assemble_scalar_result("f", &[], Some(0)).is_err());
+    }
 
     #[test]
     fn test_parse_call_bare() {
