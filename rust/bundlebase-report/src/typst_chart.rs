@@ -693,7 +693,7 @@ fn json_to_typst_value(val: &serde_json::Value) -> String {
         serde_json::Value::Null => "none".to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("\"{}\"", escape_typst(s)),
+        serde_json::Value::String(s) => format!("\"{}\"", escape_typst_string(s)),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(json_to_typst_value).collect();
             format!("({})", items.join(", "))
@@ -838,9 +838,31 @@ fn escape_typst(s: &str) -> String {
         .replace('>', "\\>")
 }
 
+/// Escape a string for use inside a Typst double-quoted string literal (as built
+/// by `json_to_typst_value`). Only backslash and double-quote are special here;
+/// the markup escapes above (`\#` etc.) are invalid inside a string literal and
+/// an unescaped `"` would break out of it, allowing crafted cell data to inject
+/// Typst code.
+fn escape_typst_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_json_string_literal_escapes_quotes() {
+        // bb-dvo: a value containing " must not break out of the string literal.
+        assert_eq!(
+            json_to_typst_value(&serde_json::json!("he\"llo")),
+            "\"he\\\"llo\""
+        );
+        assert_eq!(
+            json_to_typst_value(&serde_json::json!("a\\b")),
+            "\"a\\\\b\""
+        );
+    }
 
     fn sample_data() -> BoundedQueryResult {
         BoundedQueryResult {

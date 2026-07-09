@@ -154,9 +154,13 @@ fn get_opt_bool(opts: &serde_yaml_ng::Value, key: &str) -> Option<bool> {
     })
 }
 
-/// Escape special Typst characters in text content.
+/// Escape special Typst characters in markup content (used inside `[...]`
+/// content blocks). Brackets must be escaped too, otherwise a cell containing
+/// `]` closes the content block early and unbalances the whole `#table(...)`.
 fn escape_typst(s: &str) -> String {
     s.replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
         .replace('#', "\\#")
         .replace('$', "\\$")
         .replace('@', "\\@")
@@ -167,6 +171,14 @@ fn escape_typst(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_escape_typst_escapes_brackets() {
+        // bb-dvo: a cell containing ] must not close the content block early.
+        assert_eq!(escape_typst("a]b"), "a\\]b");
+        assert_eq!(escape_typst("[x]"), "\\[x\\]");
+        assert_eq!(escape_typst("a#b"), "a\\#b");
+    }
 
     fn sample_data() -> BoundedQueryResult {
         BoundedQueryResult {
