@@ -13,6 +13,18 @@ from typing import Any, Coroutine, List, Optional, TypeVar
 T = TypeVar("T")
 
 
+def _is_jupyter_kernel(ipython_shell: Any) -> bool:
+    """Return True only for a Jupyter/ipykernel shell (``ZMQInteractiveShell``).
+
+    Terminal IPython (``TerminalInteractiveShell``) and a plain interpreter
+    (``None``) return False, since they have no running event loop that would
+    require nest_asyncio.
+    """
+    if ipython_shell is None:
+        return False
+    return type(ipython_shell).__name__ == "ZMQInteractiveShell"
+
+
 class EventLoopManager:
     """Manages event loop lifecycle for synchronous operations.
 
@@ -47,15 +59,20 @@ class EventLoopManager:
         atexit.register(self.cleanup)
 
     def _detect_jupyter(self) -> bool:
-        """Detect if running in Jupyter/IPython.
+        """Detect if running inside a Jupyter kernel (which needs nest_asyncio).
+
+        Only a Jupyter/ipykernel shell (``ZMQInteractiveShell``) runs an event
+        loop that requires the nested-loop path. Terminal IPython
+        (``TerminalInteractiveShell``) has no running loop, so the plain
+        asyncio.Runner path works and nest_asyncio is not required.
 
         Returns:
-            True if running in IPython/Jupyter, False otherwise
+            True only if running inside a Jupyter kernel.
         """
         try:
             from IPython import get_ipython
 
-            return get_ipython() is not None
+            return _is_jupyter_kernel(get_ipython())
         except ImportError:
             return False
 
