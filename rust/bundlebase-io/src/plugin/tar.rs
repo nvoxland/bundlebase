@@ -22,7 +22,7 @@ use object_store::{
     CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
     ObjectStoreExt, PutOptions, PutPayload, PutResult, Result as ObjectStoreResult,
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::fs::File;
@@ -57,6 +57,9 @@ pub struct TarObjectStore {
     tar_path: Arc<PathBuf>,
     index: Arc<RwLock<TarIndex>>,
     indexed: Arc<AtomicBool>,
+    /// Serializes the read-existing -> rewrite -> rename sequence in
+    /// append_entry so two concurrent puts can't clobber each other's entries.
+    write_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +87,7 @@ impl TarObjectStore {
                 entries: HashMap::new(),
             })),
             indexed: Arc::new(AtomicBool::new(false)),
+            write_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -240,6 +244,10 @@ impl TarObjectStore {
     /// A more efficient approach would seek back to remove the tar footer, append
     /// the new entry, and write a new footer, but that's more complex.
     fn append_entry(&self, path: &ObjectPath, data: Bytes) -> ObjectStoreResult<()> {
+        // Serialize the whole read-modify-write so concurrent puts don't each
+        // read the same existing set and then race to rename, dropping entries.
+        let _write_guard = self.write_lock.lock();
+
         // If the tar file exists, read all existing entries first
         let existing_entries: Vec<(ObjectPath, Bytes)> = if self.tar_path.exists() {
             let file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
@@ -289,8 +297,15 @@ impl TarObjectStore {
             Vec::new()
         };
 
-        // Rewrite the entire tar file with all entries plus the new one
-        let file = File::create(&*self.tar_path).map_err(|e| object_store::Error::Generic {
+        // Rewrite the entire tar into a sibling temp file, then atomically
+        // rename it over the original. Previously this did File::create on the
+        // live archive, which truncates it in place, so a crash (or power loss)
+        // between truncate and finish destroyed every committed entry.
+        let mut tmp_os = self.tar_path.as_os_str().to_owned();
+        tmp_os.push(format!(".{}.tmp", std::process::id()));
+        let tmp_path = PathBuf::from(tmp_os);
+
+        let file = File::create(&tmp_path).map_err(|e| object_store::Error::Generic {
             store: "TarObjectStore",
             source: Box::new(e),
         })?;
@@ -337,10 +352,27 @@ impl TarObjectStore {
                 source: Box::new(e),
             })?;
 
-        // Finish writing (writes tar footer)
-        builder.finish().map_err(|e| object_store::Error::Generic {
+        // Finish writing (writes tar footer) and recover the file handle so we
+        // can fsync the bytes before publishing the new archive.
+        let file = builder
+            .into_inner()
+            .map_err(|e| object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            })?;
+        file.sync_all().map_err(|e| object_store::Error::Generic {
             store: "TarObjectStore",
             source: Box::new(e),
+        })?;
+        drop(file);
+
+        // Atomic publish: rename the fully-written temp over the original.
+        std::fs::rename(&tmp_path, self.tar_path.as_ref()).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            object_store::Error::Generic {
+                store: "TarObjectStore",
+                source: Box::new(e),
+            }
         })?;
 
         // Rebuild index to include all entries
@@ -1473,6 +1505,39 @@ mod tests {
         let result = store.get(&path).await.unwrap();
         let read_data = result.bytes().await.unwrap();
         assert_eq!(read_data, data);
+    }
+
+    #[tokio::test]
+    async fn test_tar_store_repeated_puts_preserve_entries_and_leave_no_temp() {
+        // bb-dvo: each put rewrites the archive; the rewrite must preserve all
+        // prior entries and publish atomically, leaving no leftover temp file
+        // (the old path truncated the live archive in place).
+        let temp_file = NamedTempFile::new().unwrap();
+        let tar_path = temp_file.path().to_path_buf();
+        let store = TarObjectStore::new(tar_path.clone()).unwrap();
+
+        for i in 0..5 {
+            let path = ObjectPath::from(format!("file{}.txt", i));
+            store
+                .put(&path, PutPayload::from_bytes(Bytes::from(format!("data{}", i))))
+                .await
+                .unwrap();
+        }
+
+        // Every entry survives the repeated rewrites.
+        for i in 0..5 {
+            let path = ObjectPath::from(format!("file{}.txt", i));
+            let got = store.get(&path).await.unwrap().bytes().await.unwrap();
+            assert_eq!(got, Bytes::from(format!("data{}", i)));
+        }
+
+        // The temp file used for the atomic rename must be renamed away.
+        let mut tmp_os = tar_path.as_os_str().to_owned();
+        tmp_os.push(format!(".{}.tmp", std::process::id()));
+        assert!(
+            !std::path::PathBuf::from(tmp_os).exists(),
+            "atomic-rename temp file should not be left behind"
+        );
     }
 
     #[tokio::test]
