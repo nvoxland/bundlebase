@@ -7,6 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::ImportConnectorOp;
 use bundlebase::BundleBuilder;
 use bundlebase::BundleFacade;
+use bundlebase_common::system_config::is_external_code_allowed;
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
 use bundlebase_connector::plugin::ffi::{
@@ -14,6 +15,30 @@ use bundlebase_connector::plugin::ffi::{
 };
 use bundlebase_udf::runtime::UdfRuntime;
 use std::collections::HashMap;
+
+/// How to verify a bundled FFI connector shared library.
+#[derive(Debug, PartialEq, Eq)]
+enum FfiVerification {
+    /// `dlopen` the library. This runs its initializers — i.e. executes the
+    /// connector's code — so it is only used when external code is allowed.
+    Dlopen,
+    /// Structural header check only (magic bytes / arch). Never executes code.
+    HeaderOnly,
+}
+
+/// Decide how to verify a bundled FFI connector library.
+///
+/// `dlopen` runs the library's initializers, so full verification is gated on
+/// `external_code_allowed`. For a non-host platform the binary can't be loaded
+/// anyway, and when external code is disabled we deliberately avoid executing
+/// it — both fall back to the non-executing header check.
+fn ffi_verification_mode(is_host: bool, external_code_allowed: bool) -> FfiVerification {
+    if is_host && external_code_allowed {
+        FfiVerification::Dlopen
+    } else {
+        FfiVerification::HeaderOnly
+    }
+}
 
 /// Command to define a named connector.
 ///
@@ -345,12 +370,18 @@ impl BundleBuilderCommand for ImportConnectorCommand {
                 let path = resolved.file_path().ok_or_else(|| -> BundlebaseError {
                     "FFI connector verification requires a shared library path".into()
                 })?;
-                if platform.matches_current() {
-                    // Host platform — full dlopen verification.
-                    verify_shared_lib_connector(path)?;
-                } else {
-                    // Foreign platform — header-only check.
-                    verify_shared_lib_header(path, &platform.os, &platform.arch)?;
+                let external_allowed = is_external_code_allowed(builder.config().as_ref())?;
+                match ffi_verification_mode(platform.matches_current(), external_allowed) {
+                    FfiVerification::Dlopen => {
+                        // Host platform with external code allowed — full dlopen
+                        // verification (runs the library's initializers).
+                        verify_shared_lib_connector(path)?;
+                    }
+                    FfiVerification::HeaderOnly => {
+                        // Foreign platform, or external code disabled: verify the
+                        // file's structure without loading/executing it.
+                        verify_shared_lib_header(path, &platform.os, &platform.arch)?;
+                    }
                 }
             } else {
                 // Non-FFI runtimes (ipc, java, etc.) don't have foreign-platform
@@ -596,6 +627,31 @@ mod parsing_tests {
     use crate::BundleCommand;
     use crate::CommandParsing;
     use bundlebase_common::Platform;
+
+    #[test]
+    fn test_ffi_verification_gated_by_allow_external_code() {
+        // The security-relevant case: on the host, dlopen (which executes the
+        // library) happens only when external code is allowed.
+        assert_eq!(
+            ffi_verification_mode(true, true),
+            FfiVerification::Dlopen,
+            "host + allowed should dlopen"
+        );
+        assert_eq!(
+            ffi_verification_mode(true, false),
+            FfiVerification::HeaderOnly,
+            "host + disabled must NOT dlopen — fall back to header check"
+        );
+        // Non-host binaries can't be loaded regardless, so never dlopen.
+        assert_eq!(
+            ffi_verification_mode(false, true),
+            FfiVerification::HeaderOnly
+        );
+        assert_eq!(
+            ffi_verification_mode(false, false),
+            FfiVerification::HeaderOnly
+        );
+    }
 
     fn unwrap_single(c: &ImportConnectorCommand) -> (&str, &Platform) {
         match &c.source {
