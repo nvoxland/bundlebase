@@ -12,8 +12,10 @@ pub struct ServerArgs {
     #[command(flatten)]
     pub bundle: BundleArgs,
 
-    /// Host address to bind to
-    #[arg(long, default_value = "0.0.0.0")]
+    /// Host address to bind to. Defaults to loopback (127.0.0.1) so the server
+    /// is not exposed on the network unless the operator opts in with
+    /// `--host 0.0.0.0` (behind their own network access controls).
+    #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
     /// Port to listen on (default: 50051)
@@ -71,4 +73,25 @@ pub async fn run(args: ServerArgs) -> Result<(), BundlebaseError> {
         .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
 
     bundlebase_cli::flight::start(&args.bundle.bundle, config, args.bundle.read_only, addr).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: ServerArgs,
+    }
+
+    #[test]
+    fn test_default_host_is_loopback() {
+        // Secure default (bb-e0b.3): with no --host, the Flight server must bind
+        // to loopback, not to every interface, so it isn't network-exposed
+        // unless the operator explicitly opts in.
+        let cli = TestCli::try_parse_from(["test", "--bundle", "mem://x"]).expect("args parse");
+        assert_eq!(cli.args.host, "127.0.0.1");
+    }
 }

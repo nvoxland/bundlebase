@@ -18,7 +18,7 @@ use tracing::{info, warn};
 /// * `bundle_path` - Path to the bundle (URL or filesystem path)
 /// * `config` - Optional bundle configuration
 /// * `read_only` - If true, open in read-only mode (only SELECT/EXPLAIN allowed)
-/// * `addr` - The address to bind to (e.g., "0.0.0.0:50051")
+/// * `addr` - The address to bind to (e.g., "127.0.0.1:50051")
 ///
 /// # Returns
 ///
