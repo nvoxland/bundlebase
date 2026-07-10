@@ -20,7 +20,9 @@ use bundlebase_common::connector::{
     ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
-use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_common::{
+    config_keys, config_scopes, BundlebaseError, ConfigKey, ConfigProvider, ConfigScope, Scope,
+};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use std::collections::{HashMap, HashSet};
@@ -33,6 +35,46 @@ const PAGE_SIZE: usize = 10_000;
 
 /// Dollar-quote tag for safe SQL value interpolation.
 const DOLLAR_TAG: &str = "$__bb$";
+
+config_scopes!(scopes, {
+    pub const POSTGRES_SCOPE: ConfigScope = ConfigScope::new("postgres");
+});
+
+// PASSWORD_CFG is the PostgreSQL password. Runtime-only and secure: it is never
+// written to the bundle manifest and is masked in `SHOW CONFIG`. Supply the
+// password this way (or via env/passed config) instead of embedding it in the
+// `url` arg, which would be persisted in — and travel with — the bundle.
+config_keys!(configs, {
+    pub const PASSWORD_CFG: ConfigKey = POSTGRES_SCOPE
+        .define("password")
+        .runtime_only()
+        .secure();
+});
+
+/// Config scope for a postgres source's secrets: `postgres/{host}[:{port}]/{dbname}`.
+///
+/// This lets a password be set globally (`postgres`), per-host
+/// (`postgres/db.example.com`), or per-database
+/// (`postgres/db.example.com:5432/analytics`), resolved most-specific-first.
+fn source_scope(url: &str) -> Result<Scope, BundlebaseError> {
+    let parsed =
+        Url::parse(url).map_err(|e| BundlebaseError::from(format!("Invalid postgres url: {e}")))?;
+    let mut name = POSTGRES_SCOPE.name.to_string();
+    if let Some(host) = parsed.host_str() {
+        name.push('/');
+        name.push_str(host);
+        if let Some(port) = parsed.port() {
+            name.push(':');
+            name.push_str(&port.to_string());
+        }
+    }
+    let db = parsed.path().trim_start_matches('/');
+    if !db.is_empty() {
+        name.push('/');
+        name.push_str(db);
+    }
+    Scope::from_name(name)
+}
 
 /// PostgreSQL connector.
 ///
@@ -71,6 +113,33 @@ impl PostgresConnector {
         });
 
         Ok(client)
+    }
+
+    /// Resolve the effective connection URL from the `url` arg and configured
+    /// secrets.
+    ///
+    /// The `url` arg is stored in the bundle manifest, so it must not carry a
+    /// password (enforced by [`validate_args`](Self::validate_args)). The
+    /// password is read from runtime-only secure config scoped to this source
+    /// and injected here, so it never touches persisted state.
+    fn resolve_connection_url(
+        args: &HashMap<String, String>,
+        config: &Arc<dyn ConfigProvider>,
+    ) -> Result<String, BundlebaseError> {
+        let url = shared_utils::require_arg(args, "url", "postgres")?;
+        let scope = source_scope(url)?;
+        match config.get_in_scope(&scope, &PASSWORD_CFG)? {
+            Some(password) if !password.is_empty() => {
+                let mut parsed = Url::parse(url).map_err(|e| {
+                    BundlebaseError::from(format!("Invalid postgres url: {e}"))
+                })?;
+                parsed.set_password(Some(&password)).map_err(|_| {
+                    BundlebaseError::from("Failed to apply postgres password to connection url")
+                })?;
+                Ok(parsed.to_string())
+            }
+            _ => Ok(url.to_string()),
+        }
     }
 
     /// Validate that a SQL identifier contains only safe characters.
@@ -574,6 +643,20 @@ impl Connector for PostgresConnector {
             return Err("url must be a PostgreSQL connection URL (postgres://...)".into());
         }
 
+        // The url arg is persisted in the bundle manifest, so it must not carry
+        // a password — that would leak the secret to anyone the bundle is shared
+        // with. Supply the password via runtime-only secure config instead.
+        let parsed = Url::parse(url).map_err(|e| {
+            BundlebaseError::from(format!("url must be a valid PostgreSQL connection URL: {e}"))
+        })?;
+        if parsed.password().is_some() {
+            return Err("Do not put the password in the url — it would be persisted in the \
+                 bundle and shared with it. Set the postgres password via config instead, e.g. \
+                 `SET CONFIG password = '<secret>' FOR 'postgres/<host>'`, and use a \
+                 password-less url like `postgres://user@host/db`."
+                .into());
+        }
+
         // Validate sort_column is a safe identifier
         if let Some(sort_column) = args.get("sort_column") {
             Self::validate_identifier(sort_column)?;
@@ -593,16 +676,16 @@ impl Connector for PostgresConnector {
         &self,
         args: &HashMap<String, String>,
         attached_locations: &HashSet<String>,
-        _config: &Arc<dyn ConfigProvider>,
+        config: &Arc<dyn ConfigProvider>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let url = shared_utils::require_arg(args, "url", "postgres")?;
         let query = shared_utils::require_arg(args, "query", "postgres")?;
         let sort_column = shared_utils::require_arg(args, "sort_column", "postgres")?;
         let batch_size = Self::get_batch_size(args)?;
 
         Self::validate_identifier(sort_column)?;
 
-        let client = Self::connect(url).await?;
+        let connect_url = Self::resolve_connection_url(args, config)?;
+        let client = Self::connect(&connect_url).await?;
 
         let existing = Self::parse_attached_boundaries(attached_locations, sort_column);
 
@@ -625,15 +708,15 @@ impl Connector for PostgresConnector {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        _config: &Arc<dyn ConfigProvider>,
+        config: &Arc<dyn ConfigProvider>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let url = shared_utils::require_arg(args, "url", "postgres")?;
         let query = shared_utils::require_arg(args, "query", "postgres")?;
         let sort_column = shared_utils::require_arg(args, "sort_column", "postgres")?;
 
         let parsed = Self::parse_location(&location.location)?;
 
-        let client = Arc::new(Self::connect(url).await?);
+        let connect_url = Self::resolve_connection_url(args, config)?;
+        let client = Arc::new(Self::connect(&connect_url).await?);
         let stream = Self::stream_range_as_batches(
             client,
             query.to_string(),
@@ -695,7 +778,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
-            "postgres://user:pass@localhost/db".to_string(),
+            "postgres://user@localhost/db".to_string(),
         );
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
@@ -712,7 +795,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
-            "postgresql://user:pass@localhost/db".to_string(),
+            "postgresql://user@localhost/db".to_string(),
         );
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
@@ -766,7 +849,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
-            "postgres://user:pass@localhost/db".to_string(),
+            "postgres://user@localhost/db".to_string(),
         );
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
@@ -777,6 +860,99 @@ mod tests {
             validate_connector_args(&args, &sig).and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
+    }
+
+    // --- credential handling tests (bb-e0b) ---
+
+    #[test]
+    fn test_validate_args_rejects_password_in_url() {
+        let func = PostgresConnector;
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "postgres://user:hunter2@localhost/db".to_string(),
+        );
+        args.insert("query".to_string(), "SELECT * FROM users".to_string());
+        args.insert("sort_column".to_string(), "id".to_string());
+
+        let result = func.validate_args(&args);
+        assert!(result.is_err(), "a password in the url must be rejected");
+        let err = result.err().expect("expected error").to_string();
+        assert!(
+            err.contains("password"),
+            "error should explain the password rule: {err}"
+        );
+        assert!(
+            !err.contains("hunter2"),
+            "error must not echo the secret value: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_args_allows_password_less_url_with_user() {
+        let func = PostgresConnector;
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "postgres://user@localhost:5432/db".to_string(),
+        );
+        args.insert("query".to_string(), "SELECT * FROM users".to_string());
+        args.insert("sort_column".to_string(), "id".to_string());
+        assert!(func.validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_source_scope_includes_host_port_and_db() {
+        let scope =
+            source_scope("postgres://user@db.example.com:5432/analytics").expect("scope parses");
+        assert_eq!(scope.as_str(), "postgres/db.example.com:5432/analytics");
+    }
+
+    #[test]
+    fn test_resolve_connection_url_injects_configured_password() {
+        let config: Arc<dyn ConfigProvider> = crate::test_utils::test_config_with_values(&[(
+            "postgres/localhost/db",
+            PASSWORD_CFG.key,
+            "s3cr3t",
+        )]);
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "postgres://user@localhost/db".to_string(),
+        );
+
+        let resolved =
+            PostgresConnector::resolve_connection_url(&args, &config).expect("resolve succeeds");
+        assert_eq!(resolved, "postgres://user:s3cr3t@localhost/db");
+    }
+
+    #[test]
+    fn test_resolve_connection_url_password_at_base_scope_applies() {
+        let config: Arc<dyn ConfigProvider> =
+            crate::test_utils::test_config_with_values(&[("postgres", PASSWORD_CFG.key, "basepw")]);
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "postgres://user@localhost/db".to_string(),
+        );
+
+        let resolved =
+            PostgresConnector::resolve_connection_url(&args, &config).expect("resolve succeeds");
+        assert_eq!(resolved, "postgres://user:basepw@localhost/db");
+    }
+
+    #[test]
+    fn test_resolve_connection_url_without_password_returns_url_unchanged() {
+        let config: Arc<dyn ConfigProvider> = crate::test_utils::test_config();
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "postgres://user@localhost/db".to_string(),
+        );
+
+        let resolved =
+            PostgresConnector::resolve_connection_url(&args, &config).expect("resolve succeeds");
+        assert_eq!(resolved, "postgres://user@localhost/db");
     }
 
     // --- validate_identifier tests ---
@@ -804,7 +980,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert(
             "url".to_string(),
-            "postgres://user:pass@localhost/db".to_string(),
+            "postgres://user@localhost/db".to_string(),
         );
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert(

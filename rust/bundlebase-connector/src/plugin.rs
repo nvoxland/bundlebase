@@ -8,7 +8,7 @@ mod ipc;
 pub mod kaggle;
 
 #[cfg(feature = "connector-postgres")]
-mod postgres;
+pub mod postgres;
 
 mod remote_dir;
 

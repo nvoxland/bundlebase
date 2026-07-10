@@ -70,4 +70,11 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
         registry.register_scopes(kaggle::scopes());
         registry.register_keys(kaggle::configs());
     }
+
+    #[cfg(feature = "connector-postgres")]
+    {
+        use bundlebase_connector::plugin::postgres;
+        registry.register_scopes(postgres::scopes());
+        registry.register_keys(postgres::configs());
+    }
 }

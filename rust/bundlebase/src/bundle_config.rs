@@ -1531,6 +1531,11 @@ mod tests {
         assert!(names.contains(&"sftp"));
         #[cfg(feature = "connector-kaggle")]
         assert!(names.contains(&"kaggle"));
+        #[cfg(feature = "connector-postgres")]
+        assert!(
+            names.contains(&"postgres"),
+            "postgres scope must be registered so its secure password key is masked"
+        );
     }
 
     #[test]
