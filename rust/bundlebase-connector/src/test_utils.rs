@@ -63,3 +63,12 @@ pub fn test_config_with_values(values: &[(&str, &str, &str)]) -> Arc<TestConfigP
     }
     config
 }
+
+/// Create a test config that permits internal/loopback source URLs.
+///
+/// Tests exercise connectors against local mock servers (loopback), which the
+/// SSRF guard blocks by default; this opts them in via
+/// `system.allow_internal_sources`.
+pub fn test_config_allow_internal() -> Arc<dyn ConfigProvider> {
+    test_config_with_values(&[("system", "allow_internal_sources", "true")])
+}

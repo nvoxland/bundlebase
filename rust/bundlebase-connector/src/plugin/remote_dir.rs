@@ -8,6 +8,7 @@ use bundlebase_common::connector::{
     ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils as shared_utils;
+use bundlebase_common::url_safety::check_source_url;
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::file::IOReadFile;
 use bundlebase_io::io_registry;
@@ -74,6 +75,12 @@ impl Connector for RemoteDirConnector {
         config: &Arc<dyn ConfigProvider>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let base_url = shared_utils::require_url(args, "remote_dir")?;
+        // Refuse internal/metadata targets before listing the directory, so an
+        // untrusted bundle can't SSRF the consumer on attach or refresh
+        // (bb-e0b.8). file:// stays allowed (local authoring); the fetch layer
+        // copies file contents in rather than leaving a bare reference. Opt out
+        // with system.allow_internal_sources.
+        check_source_url(&base_url, config.as_ref())?;
         let patterns = shared_utils::get_patterns(args)?;
         let must_copy = Self::must_copy(&base_url);
 
@@ -310,6 +317,31 @@ mod tests {
             .expect("expected error")
             .to_string()
             .contains("Invalid URL"));
+    }
+
+    #[tokio::test]
+    async fn test_discover_rejects_metadata_ip_by_default() {
+        // SSRF target must be refused before listing (bb-e0b.8). The guard fires
+        // before any network call, so no server is needed.
+        let func = RemoteDirConnector;
+        let config = crate::test_utils::test_config(); // internal NOT allowed
+        let mut args = HashMap::new();
+        args.insert(
+            "url".to_string(),
+            "http://169.254.169.254/latest/".to_string(),
+        );
+        let result = func.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err(), "metadata IP must be rejected by default");
+    }
+
+    #[test]
+    fn test_validate_args_still_allows_file_url() {
+        // Listing local files stays valid for authoring — validate_args only
+        // checks parseability; the SSRF guard runs in discover().
+        let func = RemoteDirConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "file:///test/".to_string());
+        assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]

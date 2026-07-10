@@ -15,6 +15,7 @@ use bundlebase_common::connector::{
     ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
+use bundlebase_common::url_safety::check_source_url;
 use bundlebase_common::{
     config_keys, config_scopes, BundlebaseError, ConfigKey, ConfigProvider, ConfigScope, Scope,
 };
@@ -279,9 +280,13 @@ impl Connector for HttpConnector {
         &self,
         args: &HashMap<String, String>,
         _attached_locations: &HashSet<String>,
-        _config: &Arc<dyn ConfigProvider>,
+        config: &Arc<dyn ConfigProvider>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let url = shared_utils::require_url(args, "http")?;
+        // Refuse internal/metadata targets before any network call, so an
+        // untrusted bundle can't SSRF the consumer's network on attach or
+        // refresh (bb-e0b.4). Opt out with system.allow_internal_sources.
+        check_source_url(&url, config.as_ref())?;
 
         // POST/PUT endpoints can't be meaningfully HEAD-probed, and the response
         // content-type depends on the body. Skip HEAD for non-GET requests.
@@ -560,6 +565,27 @@ mod tests {
         assert!(connector.validate_args(&args).is_err());
     }
 
+    #[tokio::test]
+    async fn test_discover_rejects_internal_targets_by_default() {
+        // The guard fires before any network call, so no mock server is needed.
+        let connector = HttpConnector;
+        let config = crate::test_utils::test_config(); // internal NOT allowed
+        for bad in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://127.0.0.1:9000/x",
+            "http://localhost/x",
+            "http://metadata.google.internal/x",
+        ] {
+            let mut args = HashMap::new();
+            args.insert("url".to_string(), bad.to_string());
+            let result = connector.discover(&args, &HashSet::new(), &config).await;
+            assert!(
+                result.is_err(),
+                "{bad} must be rejected as an SSRF target by default"
+            );
+        }
+    }
+
     #[test]
     fn test_validate_args_allows_non_credential_headers() {
         let connector = HttpConnector;
@@ -743,7 +769,7 @@ mod tests {
             "url".to_string(),
             format!("{}/data/lake_quality.csv", server.uri()),
         );
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -769,7 +795,7 @@ mod tests {
             format!("{}/download?type=data", server.uri()),
         );
         args.insert("format".to_string(), "json".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -794,7 +820,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
         args.insert("format".to_string(), "auto".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -819,7 +845,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -843,7 +869,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
         args.insert("format".to_string(), "parquet".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -867,7 +893,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -892,7 +918,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/data.parquet", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -917,7 +943,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -938,7 +964,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/data.json", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -959,7 +985,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data.csv", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -988,7 +1014,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data.csv", server.uri()));
         args.insert("head_supported".to_string(), "false".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -1009,7 +1035,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -1037,7 +1063,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/missing.csv", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -1073,7 +1099,7 @@ mod tests {
             "url".to_string(),
             format!("{}/private/data.csv", server.uri()),
         );
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -1109,7 +1135,7 @@ mod tests {
             "url".to_string(),
             format!("{}/api/search?bad=param", server.uri()),
         );
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -1148,7 +1174,7 @@ mod tests {
             "url".to_string(),
             format!("{}/api/search?organization=21MNPCA", server.uri()),
         );
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
@@ -1196,7 +1222,7 @@ mod tests {
         let connector = HttpConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/old", server.uri()));
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let locations = connector
             .discover(&args, &HashSet::new(), &config)
@@ -1216,7 +1242,7 @@ mod tests {
             version: "v1".to_string(),
             num_rows: None,
         };
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let url = connector
             .stable_url(&location, &HashMap::new(), &config)
@@ -1238,7 +1264,7 @@ mod tests {
         };
         let mut args = HashMap::new();
         args.insert("method".to_string(), "POST".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let url = connector
             .stable_url(&location, &args, &config)
@@ -1262,7 +1288,7 @@ mod tests {
             "headers".to_string(),
             "Authorization: Bearer token".to_string(),
         );
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let url = connector
             .stable_url(&location, &args, &config)
@@ -1285,7 +1311,7 @@ mod tests {
         args.insert("url".to_string(), format!("{}/api/query", server.uri()));
         args.insert("method".to_string(), "POST".to_string());
         args.insert("body".to_string(), "statecode=US%3A27".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         // Should succeed without attempting HEAD
         let locations = connector
@@ -1322,7 +1348,7 @@ mod tests {
         args.insert("url".to_string(), format!("{}/api/query", server.uri()));
         args.insert("method".to_string(), "POST".to_string());
         args.insert("body".to_string(), "param=value".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let data = connector.data(&location, &args, &config).await.unwrap();
         assert!(data.is_some(), "POST request should return SourceData");
@@ -1348,7 +1374,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), format!("{}/api/data", server.uri()));
         args.insert("headers".to_string(), "Accept: text/csv".to_string());
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         let data = connector.data(&location, &args, &config).await.unwrap();
         assert!(
@@ -1367,7 +1393,7 @@ mod tests {
             version: "v1".to_string(),
             num_rows: None,
         };
-        let config = crate::test_utils::test_config();
+        let config = crate::test_utils::test_config_allow_internal();
 
         // Plain GET with no custom headers should return None (use stable_url path)
         let data = connector
