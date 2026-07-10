@@ -36,11 +36,21 @@ use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 /// Stream type for FlightData responses.
 pub type DoGetStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;
+
+/// Redact a live session token for logging.
+///
+/// A session token grants full access, so it must never appear in logs where it
+/// could be harvested and replayed to hijack the session. This keeps a short,
+/// non-reconstructable prefix so related log lines can still be correlated.
+fn redact_token(token: &str) -> String {
+    let shown: String = token.chars().take(12).collect();
+    format!("{shown}…<redacted>")
+}
 
 /// Session data including state and prepared statements.
 struct Session {
@@ -175,7 +185,10 @@ impl BundlebaseFlightSqlService {
                 // Token was issued by this server but session was dropped.
                 // Re-create the session for the existing token.
                 if self.issued_tokens.read().contains(token) {
-                    info!("Session for token {} expired, re-creating", token);
+                    info!(
+                        "Session for token {} expired, re-creating",
+                        redact_token(token)
+                    );
                     let session = self.create_session().await?;
                     let state = Arc::clone(&session.bundle);
                     self.sessions.write().insert(token.to_string(), session);
@@ -350,7 +363,11 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         self.issued_tokens.write().insert(token.clone());
         self.sessions.write().insert(token.clone(), session);
 
-        info!("Created new session for user '{}': {}", username, token);
+        info!(
+            "Created new session for user '{}': {}",
+            username,
+            redact_token(&token)
+        );
 
         // Return success response with the token in both payload and header
         // Flight SQL JDBC driver expects the token in the payload
@@ -383,7 +400,9 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         let sql = query.query.clone();
         let handle = Uuid::new_v4().to_string();
 
-        info!("Creating prepared statement: {} -> {}", handle, sql);
+        // SQL can embed credentials (e.g. ATTACH/SET CONFIG), so log it only at
+        // debug, not at the default info level.
+        debug!("Creating prepared statement: {} -> {}", handle, sql);
 
         // Get token and session state for this request
         let token = self.get_token(&request)?;
@@ -510,7 +529,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             (sql, state)
         };
 
-        info!("Executing prepared statement: {} -> {}", handle, sql);
+        debug!("Executing prepared statement: {} -> {}", handle, sql);
 
         let record_stream = bundle
             .execute(&sql, vec![])
@@ -583,7 +602,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     ) -> Result<Response<FlightInfo>, Status> {
         let sql = cmd.query.clone();
 
-        info!("Getting flight info for statement: {}", sql);
+        debug!("Getting flight info for statement: {}", sql);
 
         // Get session state for this request
         let bundle = self.get_bundle(&request).await?;
@@ -625,7 +644,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         let sql = String::from_utf8(ticket.statement_handle.to_vec())
             .map_err(|_| Status::invalid_argument("Invalid statement handle encoding"))?;
 
-        info!("Executing direct statement: {}", sql);
+        debug!("Executing direct statement: {}", sql);
 
         // Get token and session state for this request
         let token = self.get_token(&request)?;
@@ -879,4 +898,38 @@ fn encode_schema(schema: &SchemaRef) -> Result<Bytes, Status> {
         .map_err(|e| Status::internal(format!("Failed to encode schema: {}", e)))?;
 
     Ok(Bytes::from(flight_info.schema))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redact_token_does_not_expose_full_token() {
+        // A real token is `token-<uuid>`; the uuid is the secret that grants
+        // session access. Redaction must not reveal enough to reconstruct it.
+        let token = format!("token-{}", Uuid::new_v4());
+        let redacted = redact_token(&token);
+        assert!(
+            !redacted.contains(&token),
+            "redacted form must not contain the full token: {redacted}"
+        );
+        // The uuid body (after the `token-` prefix) must not appear in full.
+        let uuid_body = token.strip_prefix("token-").expect("token- prefix");
+        assert!(
+            !redacted.contains(uuid_body),
+            "redacted form must not contain the full uuid: {redacted}"
+        );
+        assert!(
+            redacted.contains("redacted"),
+            "redacted form should signal that it is truncated: {redacted}"
+        );
+    }
+
+    #[test]
+    fn test_redact_token_is_char_boundary_safe() {
+        // Must not panic on multibyte input even though real tokens are ASCII.
+        let redacted = redact_token("tökén-你好世界-abcdefghijkl");
+        assert!(redacted.ends_with("…<redacted>"));
+    }
 }
