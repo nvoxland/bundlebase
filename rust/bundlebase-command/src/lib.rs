@@ -407,18 +407,14 @@ impl BundleCommand {
             BundleCommand::ExportSource(cmd) => Ok(FacadeCommand::ExportSource(cmd)),
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
             BundleCommand::DescribeFunction(cmd) => Ok(FacadeCommand::DescribeFunction(cmd)),
-            // IMPORT TEMP CONNECTOR / FUNCTION load and can execute external
-            // code, so they are NOT permitted on a read-only bundle — otherwise a
-            // read-only Flight/MCP client could `IMPORT TEMP FUNCTION f FROM
-            // 'ipc::/bin/sh'` then `SELECT f(...)` to run code (bb-e0b). They
-            // remain available on writable bundles via the normal command path.
+            BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
+            BundleCommand::ImportTempFunction(cmd) => Ok(FacadeCommand::ImportTempFunction(cmd)),
             BundleCommand::DropTempConnector(cmd) => Ok(FacadeCommand::DropTempConnector(cmd)),
             BundleCommand::DropTempFunction(cmd) => Ok(FacadeCommand::DropTempFunction(cmd)),
             BundleCommand::RenameTempConnector(cmd) => Ok(FacadeCommand::RenameTempConnector(cmd)),
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
-            // SET CONFIG can flip security-sensitive runtime config (e.g.
-            // system.allow_external_code), so a read-only client must not run it.
+            BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
             BundleCommand::ShowAlwaysDeletes(cmd) => Ok(FacadeCommand::ShowAlwaysDeletes(cmd)),
             BundleCommand::ShowAlwaysUpdates(cmd) => Ok(FacadeCommand::ShowAlwaysUpdates(cmd)),
             BundleCommand::ShowDetails(cmd) => Ok(FacadeCommand::ShowDetails(cmd)),
@@ -437,7 +433,7 @@ impl BundleCommand {
             BundleCommand::ShowCount(cmd) => Ok(FacadeCommand::ShowCount(cmd)),
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             BundleCommand::DescribeData(cmd) => Ok(FacadeCommand::DescribeData(cmd)),
-            // TEST CONNECTOR loads/executes connector code — not read-only-safe.
+            BundleCommand::TestConnector(cmd) => Ok(FacadeCommand::TestConnector(cmd)),
             BundleCommand::ProfileColumn(cmd) => Ok(FacadeCommand::ProfileColumn(cmd)),
             BundleCommand::ShowReports(cmd) => Ok(FacadeCommand::ShowReports(cmd)),
             BundleCommand::GenerateReport(cmd) => Ok(FacadeCommand::GenerateReport(cmd)),
@@ -490,19 +486,18 @@ impl BundleCommand {
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportEmpty(_) => "EXPORT EMPTY",
-                    BundleCommand::ImportTempConnector(_) => "IMPORT TEMP CONNECTOR",
-                    BundleCommand::ImportTempFunction(_) => "IMPORT TEMP FUNCTION",
-                    BundleCommand::TestConnector(_) => "TEST CONNECTOR",
-                    BundleCommand::SetConfig(_) => "SET CONFIG",
                     BundleCommand::ExportData(_)
                     | BundleCommand::ExportSource(_)
                     | BundleCommand::DescribeConnector(_)
                     | BundleCommand::DescribeFunction(_)
+                    | BundleCommand::ImportTempConnector(_)
+                    | BundleCommand::ImportTempFunction(_)
                     | BundleCommand::DropTempConnector(_)
                     | BundleCommand::DropTempFunction(_)
                     | BundleCommand::RenameTempConnector(_)
                     | BundleCommand::RenameTempFunction(_)
                     | BundleCommand::ExplainPlan(_)
+                    | BundleCommand::SetConfig(_)
                     | BundleCommand::ShowAlwaysDeletes(_)
                     | BundleCommand::ShowAlwaysUpdates(_)
                     | BundleCommand::ShowDetails(_)
@@ -523,6 +518,7 @@ impl BundleCommand {
                     | BundleCommand::GenerateReport(_)
                     | BundleCommand::Syntax(_)
                     | BundleCommand::DescribeData(_)
+                    | BundleCommand::TestConnector(_)
                     | BundleCommand::ProfileColumn(_) => {
                         unreachable!("Already handled above")
                     }
@@ -543,11 +539,14 @@ impl BundleCommand {
                 | BundleCommand::ExportSource(_)
                 | BundleCommand::DescribeConnector(_)
                 | BundleCommand::DescribeFunction(_)
+                | BundleCommand::ImportTempConnector(_)
+                | BundleCommand::ImportTempFunction(_)
                 | BundleCommand::DropTempConnector(_)
                 | BundleCommand::DropTempFunction(_)
                 | BundleCommand::RenameTempConnector(_)
                 | BundleCommand::RenameTempFunction(_)
                 | BundleCommand::ExplainPlan(_)
+                | BundleCommand::SetConfig(_)
                 | BundleCommand::ShowAlwaysDeletes(_)
                 | BundleCommand::ShowAlwaysUpdates(_)
                 | BundleCommand::ShowDetails(_)
@@ -566,6 +565,7 @@ impl BundleCommand {
                 | BundleCommand::ShowCount(_)
                 | BundleCommand::Syntax(_)
                 | BundleCommand::DescribeData(_)
+                | BundleCommand::TestConnector(_)
                 | BundleCommand::ProfileColumn(_)
         )
     }
