@@ -1,7 +1,7 @@
 //! Built-in connector implementations.
 
 pub mod ffi;
-mod http;
+pub mod http;
 mod ipc;
 
 #[cfg(feature = "connector-kaggle")]

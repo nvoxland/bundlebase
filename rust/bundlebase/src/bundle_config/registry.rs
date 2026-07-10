@@ -64,6 +64,12 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(plugin::sftp::sftp_scopes());
     registry.register_keys(plugin::sftp::sftp_keys());
 
+    {
+        use bundlebase_connector::plugin::http;
+        registry.register_scopes(http::scopes());
+        registry.register_keys(http::configs());
+    }
+
     #[cfg(feature = "connector-kaggle")]
     {
         use bundlebase_connector::plugin::kaggle;

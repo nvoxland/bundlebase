@@ -1529,6 +1529,10 @@ mod tests {
         assert!(names.contains(&"azure"));
         assert!(names.contains(&"ftp"));
         assert!(names.contains(&"sftp"));
+        assert!(
+            names.contains(&"http"),
+            "http scope must be registered so its secure auth key is masked"
+        );
         #[cfg(feature = "connector-kaggle")]
         assert!(names.contains(&"kaggle"));
         #[cfg(feature = "connector-postgres")]

@@ -5,19 +5,63 @@
 //! link to a data file (CSV, JSON, Parquet, etc.).
 //!
 //! Supports GET, POST, and PUT methods. Custom request headers can be passed
-//! via the `headers` argument (one `Name: Value` pair per line).
+//! via the `headers` argument (one `Name: Value` pair per line). Credentials
+//! must not go in `headers` (it is persisted in the bundle); supply an
+//! `Authorization` value via the secure `http` `auth` config key instead, which
+//! is injected at request time and never written to the manifest.
 
 use async_trait::async_trait;
 use bundlebase_common::connector::{
     ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
-use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_common::{
+    config_keys, config_scopes, BundlebaseError, ConfigKey, ConfigProvider, ConfigScope, Scope,
+};
 use bytes::Bytes;
 use futures::stream;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
+
+config_scopes!(scopes, {
+    pub const HTTP_SCOPE: ConfigScope = {
+        /// Map an http(s) URL to the `http/{host}` scope so `SET CONFIG ... FOR
+        /// '<url>'` and request-time resolution agree. The default url_to_name
+        /// only matches the exact `http://` scheme, which would miss https.
+        fn url_to_name(scope: &ConfigScope, input: &str) -> Option<String> {
+            let url = Url::parse(input).ok()?;
+            if url.scheme() != "http" && url.scheme() != "https" {
+                return None;
+            }
+            let host = url.host_str()?;
+            Some(format!("{}/{}", scope.name, host))
+        }
+        ConfigScope::new("http").with_url_to_name(url_to_name)
+    };
+});
+
+// AUTH_CFG holds the full value of the `Authorization` request header (e.g.
+// "Bearer abc123"). Runtime-only and secure: it is never written to the bundle
+// manifest and is masked in `SHOW CONFIG`, so credentials do not travel with a
+// shared bundle. Injected at request time by `perform_request`.
+config_keys!(configs, {
+    pub const AUTH_CFG: ConfigKey = HTTP_SCOPE.define("auth").runtime_only().secure();
+});
+
+/// Resolve the configured `Authorization` header value for `url`'s host, if any.
+///
+/// Looked up in the `http/{host}` scope (falling back to the broader `http`
+/// scope). Empty values are treated as absent.
+fn resolve_auth(
+    url: &Url,
+    config: &Arc<dyn ConfigProvider>,
+) -> Result<Option<String>, BundlebaseError> {
+    let scope = Scope::from_url(url.as_str(), &HTTP_SCOPE)?;
+    Ok(config
+        .get_in_scope(&scope, &AUTH_CFG)?
+        .filter(|v| !v.is_empty()))
+}
 
 /// Built-in "http" connector.
 ///
@@ -73,19 +117,25 @@ fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
 }
 
 /// Returns true if the connector needs to perform the request itself
-/// (POST/PUT, or any custom headers, or a body is present).
-fn needs_custom_request(args: &HashMap<String, String>) -> bool {
+/// (POST/PUT, or any custom headers, or a body is present, or an Authorization
+/// header must be injected from config).
+fn needs_custom_request(args: &HashMap<String, String>, has_auth: bool) -> bool {
     let method = args
         .get("method")
         .map(|s| s.to_uppercase())
         .unwrap_or_else(|| "GET".to_string());
-    method != "GET" || args.contains_key("body") || args.contains_key("headers")
+    method != "GET" || args.contains_key("body") || args.contains_key("headers") || has_auth
 }
 
 /// Perform the HTTP request using the configured method, body, and headers.
+///
+/// `auth`, when present, is injected as the `Authorization` header. It comes
+/// from secure config rather than the persisted `headers` arg so the credential
+/// never touches the bundle manifest.
 async fn perform_request(
     url: &Url,
     args: &HashMap<String, String>,
+    auth: Option<&str>,
 ) -> Result<Bytes, BundlebaseError> {
     let method = parse_method(args)?;
     let headers = parse_headers(args);
@@ -98,6 +148,9 @@ async fn perform_request(
     let mut request = client.request(req_method, url.as_str());
     for (name, value) in &headers {
         request = request.header(name.as_str(), value.as_str());
+    }
+    if let Some(auth) = auth {
+        request = request.header(reqwest::header::AUTHORIZATION, auth);
     }
     if !body.is_empty() {
         request = request.body(body);
@@ -175,7 +228,7 @@ impl Connector for HttpConnector {
                 },
                 ArgSpec {
                     name: "headers",
-                    description: "Additional request headers, one per line as 'Name: Value'. Example: 'Accept: text/csv\\nAuthorization: Bearer token'",
+                    description: "Additional non-credential request headers, one per line as 'Name: Value'. Example: 'Accept: text/csv'. An Authorization header is rejected here (it would be persisted in the bundle) — supply it via secure config: SET CONFIG auth = '<value>' FOR 'http/<host>'.",
                     required: false,
                     default: None,
                 },
@@ -206,6 +259,19 @@ impl Connector for HttpConnector {
             .into());
         }
         parse_method(args)?;
+
+        // The `headers` arg is persisted in the bundle manifest, so a credential
+        // placed there would leak to anyone the bundle is shared with. Require
+        // Authorization to be supplied via secure config instead.
+        if parse_headers(args)
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        {
+            return Err("Do not put an Authorization header in `headers` — it would be \
+                 persisted in the bundle and shared with it. Set it via secure config \
+                 instead, e.g. `SET CONFIG auth = '<value>' FOR 'http/<host>'`."
+                .into());
+        }
         Ok(())
     }
 
@@ -277,19 +343,20 @@ impl Connector for HttpConnector {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        _config: &Arc<dyn ConfigProvider>,
+        config: &Arc<dyn ConfigProvider>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        if !needs_custom_request(args) {
-            // Simple GET with no custom headers — delegate to stable_url() path
-            return Ok(None);
-        }
         let url = Url::parse(&location.location).map_err(|e| {
             BundlebaseError::from(format!(
                 "Invalid URL in discovered location '{}': {}",
                 location.location, e
             ))
         })?;
-        let bytes = perform_request(&url, args).await?;
+        let auth = resolve_auth(&url, config)?;
+        if !needs_custom_request(args, auth.is_some()) {
+            // Simple GET with no custom headers or auth — delegate to stable_url() path
+            return Ok(None);
+        }
+        let bytes = perform_request(&url, args, auth.as_deref()).await?;
         Ok(Some(SourceData::RawBytes(Box::pin(stream::once(
             async move { Ok::<Bytes, std::io::Error>(bytes) },
         )))))
@@ -299,18 +366,21 @@ impl Connector for HttpConnector {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        _config: &Arc<dyn ConfigProvider>,
+        config: &Arc<dyn ConfigProvider>,
     ) -> Result<Option<Url>, BundlebaseError> {
-        if needs_custom_request(args) {
-            // data() handles this request
-            return Ok(None);
-        }
         let url = Url::parse(&location.location).map_err(|e| {
             BundlebaseError::from(format!(
                 "Invalid URL in discovered location '{}': {}",
                 location.location, e
             ))
         })?;
+        // When auth must be injected, the io layer's direct fetch can't add it,
+        // so data() must perform the request instead of using a stable URL.
+        let has_auth = resolve_auth(&url, config)?.is_some();
+        if needs_custom_request(args, has_auth) {
+            // data() handles this request
+            return Ok(None);
+        }
         Ok(Some(url))
     }
 }
@@ -421,28 +491,112 @@ mod tests {
 
     #[test]
     fn test_needs_custom_request_default_get() {
-        assert!(!needs_custom_request(&HashMap::new()));
+        assert!(!needs_custom_request(&HashMap::new(), false));
     }
 
     #[test]
     fn test_needs_custom_request_post() {
         let mut args = HashMap::new();
         args.insert("method".to_string(), "POST".to_string());
-        assert!(needs_custom_request(&args));
+        assert!(needs_custom_request(&args, false));
     }
 
     #[test]
     fn test_needs_custom_request_get_with_headers() {
         let mut args = HashMap::new();
         args.insert("headers".to_string(), "Accept: text/csv".to_string());
-        assert!(needs_custom_request(&args));
+        assert!(needs_custom_request(&args, false));
     }
 
     #[test]
     fn test_needs_custom_request_get_with_body() {
         let mut args = HashMap::new();
         args.insert("body".to_string(), "some data".to_string());
-        assert!(needs_custom_request(&args));
+        assert!(needs_custom_request(&args, false));
+    }
+
+    #[test]
+    fn test_needs_custom_request_plain_get_with_auth() {
+        // A plain GET must still be performed by the connector (not delegated to
+        // the io layer) when auth has to be injected — otherwise the request
+        // would go out unauthenticated.
+        assert!(needs_custom_request(&HashMap::new(), true));
+    }
+
+    // --- credential handling tests (bb-e0b) ---
+
+    #[test]
+    fn test_validate_args_rejects_authorization_header() {
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "https://api.example.com/data".to_string());
+        args.insert(
+            "headers".to_string(),
+            "Accept: text/csv\nAuthorization: Bearer topsecret".to_string(),
+        );
+
+        let result = connector.validate_args(&args);
+        assert!(result.is_err(), "Authorization in headers must be rejected");
+        let err = result.err().expect("expected error").to_string();
+        assert!(
+            err.to_lowercase().contains("authorization"),
+            "error should name the offending header: {err}"
+        );
+        assert!(
+            !err.contains("topsecret"),
+            "error must not echo the credential: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_args_rejects_authorization_header_case_insensitive() {
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "https://api.example.com/data".to_string());
+        args.insert(
+            "headers".to_string(),
+            "authorization: Bearer x".to_string(),
+        );
+        assert!(connector.validate_args(&args).is_err());
+    }
+
+    #[test]
+    fn test_validate_args_allows_non_credential_headers() {
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "https://api.example.com/data".to_string());
+        args.insert(
+            "headers".to_string(),
+            "Accept: text/csv\nUser-Agent: bundlebase".to_string(),
+        );
+        assert!(connector.validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_resolve_auth_from_host_scope() {
+        let config: Arc<dyn ConfigProvider> = crate::test_utils::test_config_with_values(&[(
+            "http/api.example.com",
+            AUTH_CFG.key,
+            "Bearer tok123",
+        )]);
+        let url = Url::parse("https://api.example.com/data").expect("url");
+        let auth = resolve_auth(&url, &config).expect("resolve");
+        assert_eq!(auth.as_deref(), Some("Bearer tok123"));
+    }
+
+    #[test]
+    fn test_resolve_auth_absent_returns_none() {
+        let config: Arc<dyn ConfigProvider> = crate::test_utils::test_config();
+        let url = Url::parse("https://api.example.com/data").expect("url");
+        assert!(resolve_auth(&url, &config).expect("resolve").is_none());
+    }
+
+    #[test]
+    fn test_http_scope_url_to_name_handles_https() {
+        assert_eq!(
+            HTTP_SCOPE.url_to_name("https://api.example.com/path"),
+            Some("http/api.example.com".to_string())
+        );
     }
 
     #[test]
