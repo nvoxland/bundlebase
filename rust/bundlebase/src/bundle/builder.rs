@@ -1075,6 +1075,24 @@ impl BundleBuilder {
                         )?
                     };
 
+                    // Apply this block's update overlays to the batch VALUES so
+                    // the WHERE clause (and SET expressions reading columns)
+                    // see prior updates, not raw file data (bb-wmu). Positions
+                    // are untouched, so row_ids indexing stays valid.
+                    let overlays = block.update_overlays();
+                    let batch = if overlays.is_empty() {
+                        batch
+                    } else {
+                        let row_numbers: Vec<u32> =
+                            row_ids.iter().map(|r| r.row_number()).collect();
+                        crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
+                            &overlays,
+                            &batch,
+                            &block.column_ids(),
+                            &row_numbers,
+                        )?
+                    };
+
                     // Evaluate: SELECT _rowid, <set_exprs> FROM (data with _rowid) WHERE <condition>
                     let eval_sql = format!(
                         "SELECT CAST(_idx AS BIGINT) AS _idx, {} FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __update_batch) WHERE {}",
@@ -1268,6 +1286,24 @@ impl BundleBuilder {
                         arrow::record_batch::RecordBatch::try_new(
                             new_schema,
                             batch.columns().to_vec(),
+                        )?
+                    };
+
+                    // Apply this block's update overlays to the batch VALUES so
+                    // the WHERE clause is evaluated against updated data, not
+                    // raw file data (bb-wmu). Positions are untouched, so the
+                    // row_ids indexing below stays valid.
+                    let overlays = block.update_overlays();
+                    let batch = if overlays.is_empty() {
+                        batch
+                    } else {
+                        let row_numbers: Vec<u32> =
+                            row_ids.iter().map(|r| r.row_number()).collect();
+                        crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
+                            &overlays,
+                            &batch,
+                            &block.column_ids(),
+                            &row_numbers,
                         )?
                     };
 
@@ -2204,6 +2240,104 @@ mod tests {
         assert_eq!(
             delete_ops, 1,
             "retried commit must persist exactly one DeleteOp"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_select_row_ids_sees_update_overlays() {
+        // bb-wmu: DELETE tombstone selection must evaluate predicates against
+        // UPDATED values, not raw pre-overlay file data. A row updated OUT of
+        // the predicate range must not be selected (it would be wrongly
+        // tombstoned — silent row loss); a row updated INTO the range must be.
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let salary_col = builder.translate_sql("salary");
+        let low_pred = builder.translate_sql("salary < 50000");
+        let high_pred = builder.translate_sql("salary > 200000");
+
+        let raw_low = builder.select_row_ids(&low_pred).await.unwrap();
+        let raw_high = builder.select_row_ids(&high_pred).await.unwrap();
+        assert!(!raw_low.is_empty(), "fixture should have low salaries");
+        assert!(!raw_high.is_empty(), "fixture should have high salaries");
+
+        // Move the low-salary rows OUT of the predicate range (to a value that
+        // matches NEITHER predicate, so the second update below doesn't
+        // legitimately capture them)...
+        let moved_out = builder
+            .evaluate_update_cols(
+                std::slice::from_ref(&salary_col),
+                &["60000.0".to_string()],
+                &low_pred,
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved_out, raw_low.len());
+        builder.flush_pending_updates_to_blocks();
+
+        // ...and the high-salary rows INTO it.
+        let moved_in = builder
+            .evaluate_update_cols(
+                std::slice::from_ref(&salary_col),
+                &["100.0".to_string()],
+                &high_pred,
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved_in, raw_high.len());
+        builder.flush_pending_updates_to_blocks();
+
+        let selected = builder.select_row_ids(&low_pred).await.unwrap();
+        assert_eq!(
+            selected, raw_high,
+            "selection must reflect updated values: rows moved out must be \
+             absent, rows moved in must be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_update_cols_sees_update_overlays() {
+        // bb-wmu companion: a second UPDATE whose predicate matches via the
+        // FIRST update's values must find those rows.
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let salary_col = builder.translate_sql("salary");
+        let high_pred = builder.translate_sql("salary > 200000");
+        let raw_high = builder.select_row_ids(&high_pred).await.unwrap();
+        assert!(!raw_high.is_empty());
+
+        let first = builder
+            .evaluate_update_cols(
+                std::slice::from_ref(&salary_col),
+                &["12345.0".to_string()],
+                &high_pred,
+            )
+            .await
+            .unwrap();
+        assert_eq!(first, raw_high.len());
+        builder.flush_pending_updates_to_blocks();
+
+        // Second update targets the first update's value.
+        let second_pred = builder.translate_sql("salary = 12345.0");
+        let second = builder
+            .evaluate_update_cols(
+                std::slice::from_ref(&salary_col),
+                &["1.0".to_string()],
+                &second_pred,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            second,
+            raw_high.len(),
+            "second UPDATE must see the first update's values"
         );
     }
 

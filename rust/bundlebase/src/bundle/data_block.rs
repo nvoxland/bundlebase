@@ -370,6 +370,14 @@ impl DataBlock {
         deleted.dedup();
     }
 
+    /// Snapshot of this block's update overlays (scan-time update state).
+    ///
+    /// Used by predicate-evaluation paths that read raw file batches and must
+    /// apply updates to the values before evaluating a WHERE clause (bb-wmu).
+    pub fn update_overlays(&self) -> Vec<crate::bundle::update_overlay::UpdateOverlay> {
+        self.update_overlays.read().clone()
+    }
+
     /// Add an update overlay to this block.
     ///
     /// The block cache is NOT invalidated here — cached batches are the base

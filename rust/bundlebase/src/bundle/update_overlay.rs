@@ -89,6 +89,109 @@ impl UpdateOverlay {
         }
     }
 
+    /// Apply overlays to a batch whose row `i` is block-local row number
+    /// `row_numbers[i]`, replacing cell VALUES where an overlay has a SET
+    /// update. Row positions and count are unchanged — only values are
+    /// patched — so callers' row-index bookkeeping stays valid.
+    ///
+    /// Used by predicate-evaluation paths (`select_row_ids`,
+    /// `evaluate_update_cols`) that read raw file batches: without this, a
+    /// DELETE/UPDATE WHERE clause is evaluated against pre-update values and
+    /// selects the wrong rows (bb-wmu — silent row loss via wrong tombstones).
+    ///
+    /// `column_ids[j]` names the ColumnId of batch column `j` (block column
+    /// order). Overlay columns whose Arrow type doesn't match the base column
+    /// are skipped with a warning, consistent with scan-time application.
+    pub fn apply_to_batch(
+        overlays: &[Self],
+        batch: &arrow::record_batch::RecordBatch,
+        column_ids: &[ColumnId],
+        row_numbers: &[u32],
+    ) -> Result<arrow::record_batch::RecordBatch, BundlebaseError> {
+        if overlays.is_empty() || batch.num_rows() == 0 || batch.num_columns() == 0 {
+            return Ok(batch.clone());
+        }
+        if row_numbers.len() != batch.num_rows() {
+            return Err(format!(
+                "apply_to_batch: {} row numbers for {} batch rows",
+                row_numbers.len(),
+                batch.num_rows()
+            )
+            .into());
+        }
+
+        let merged = Self::merge(overlays);
+        if merged.row_numbers.is_empty() {
+            return Ok(batch.clone());
+        }
+
+        // Map each batch row to its position in the merged overlay (if any).
+        let overlay_pos: Vec<Option<usize>> = row_numbers
+            .iter()
+            .map(|rn| merged.row_numbers.binary_search(rn).ok())
+            .collect();
+        if overlay_pos.iter().all(|p| p.is_none()) {
+            return Ok(batch.clone());
+        }
+
+        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(batch.num_columns());
+        for (col_idx, base_col) in batch.columns().iter().enumerate() {
+            let overlay_col = column_ids
+                .get(col_idx)
+                .and_then(|cid| merged.columns.get(cid));
+            let Some((values, is_set)) = overlay_col else {
+                new_columns.push(base_col.clone());
+                continue;
+            };
+            if values.data_type() != base_col.data_type() {
+                log::warn!(
+                    "Overlay type mismatch for column {:?}: overlay={:?}, base={:?} — skipping update",
+                    column_ids.get(col_idx),
+                    values.data_type(),
+                    base_col.data_type()
+                );
+                new_columns.push(base_col.clone());
+                continue;
+            }
+            let any_set = overlay_pos
+                .iter()
+                .flatten()
+                .any(|&idx| is_set.value(idx));
+            if !any_set {
+                new_columns.push(base_col.clone());
+                continue;
+            }
+
+            // Copy runs from base (source 0), single rows from overlay (source 1).
+            let base_data = base_col.to_data();
+            let overlay_data = values.to_data();
+            let mut builder = arrow::array::MutableArrayData::new(
+                vec![&base_data, &overlay_data],
+                false,
+                batch.num_rows(),
+            );
+            let mut base_run_start = 0usize;
+            for (i, pos) in overlay_pos.iter().enumerate() {
+                if let Some(idx) = pos {
+                    if is_set.value(*idx) {
+                        if base_run_start < i {
+                            builder.extend(0, base_run_start, i);
+                        }
+                        builder.extend(1, *idx, *idx + 1);
+                        base_run_start = i + 1;
+                    }
+                }
+            }
+            if base_run_start < batch.num_rows() {
+                builder.extend(0, base_run_start, batch.num_rows());
+            }
+            new_columns.push(arrow::array::make_array(builder.freeze()));
+        }
+
+        arrow::record_batch::RecordBatch::try_new(batch.schema(), new_columns)
+            .map_err(|e| BundlebaseError::from(format!("apply_to_batch: {e}")))
+    }
+
     /// Merge multiple overlays into one. Later overlays override earlier ones per-cell.
     ///
     /// Uses MutableArrayData to copy directly from source overlay arrays,

@@ -235,3 +235,53 @@ async fn test_delete_excluded_through_index_lookup() -> Result<(), BundlebaseErr
 
     Ok(())
 }
+
+/// bb-wmu: a DELETE whose predicate no longer matches a row's UPDATED value
+/// must not tombstone that row.
+///
+/// Tombstone selection reads raw file data; if it ignores update overlays, a
+/// row updated OUT of the delete range is still tombstoned. The committed
+/// tombstone then removes it at scan — and the query-level `WHERE NOT` filter
+/// can drop rows but never restore them, so the row silently vanishes.
+#[tokio::test]
+async fn test_delete_after_update_does_not_lose_rows() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("attach").await?;
+
+    let total = builder.num_rows().await?;
+    let low = query_count(
+        builder.as_ref(),
+        "SELECT COUNT(*) AS cnt FROM bundle WHERE salary < 50000",
+    )
+    .await;
+    assert!(low > 0, "fixture should have low salaries");
+
+    // Move every low-salary row OUT of the delete range, then delete the range.
+    builder
+        .update("SET salary = 999999.0 WHERE salary < 50000")
+        .await?;
+    builder.delete("salary < 50000").await?;
+
+    // In-session, nothing should be gone.
+    assert_eq!(
+        builder.num_rows().await?,
+        total,
+        "no row's updated value matches the delete predicate"
+    );
+
+    builder.commit("update then delete").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let persisted = query_count(reopened.as_ref(), "SELECT COUNT(*) AS cnt FROM bundle").await;
+    assert_eq!(
+        persisted, total as i64,
+        "rows updated out of the delete range must survive commit+reopen \
+         (wrong tombstones = silent row loss)"
+    );
+
+    Ok(())
+}
