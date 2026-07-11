@@ -28,6 +28,52 @@ use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::Arc;
 
+/// Rewrite filter expressions from internal `col_<id>` column names to the
+/// reader's physical column names, matching positionally (the internal schema
+/// is the physical schema renamed position-for-position).
+///
+/// Columns not found in the internal schema are left unchanged — the reader's
+/// own filter analysis skips names it doesn't recognize.
+fn translate_filters_to_physical(
+    filters: &[Expr],
+    internal_schema: &SchemaRef,
+    physical_schema: &SchemaRef,
+) -> Vec<Expr> {
+    use datafusion::common::tree_node::{Transformed, TreeNode};
+
+    let name_map: std::collections::HashMap<&str, &str> = internal_schema
+        .fields()
+        .iter()
+        .zip(physical_schema.fields().iter())
+        .map(|(internal, physical)| (internal.name().as_str(), physical.name().as_str()))
+        .collect();
+
+    filters
+        .iter()
+        .map(|filter| {
+            let rewritten = filter.clone().transform(|expr| {
+                if let Expr::Column(col) = &expr {
+                    if let Some(physical) = name_map.get(col.name.as_str()) {
+                        return Ok(Transformed::yes(Expr::Column(
+                            datafusion::common::Column::new(
+                                col.relation.clone(),
+                                (*physical).to_string(),
+                            ),
+                        )));
+                    }
+                }
+                Ok(Transformed::no(expr))
+            });
+            match rewritten {
+                Ok(t) => t.data,
+                // A failed rewrite leaves the filter untranslated; the reader
+                // will simply not match it (no pruning from this filter).
+                Err(_) => filter.clone(),
+            }
+        })
+        .collect()
+}
+
 /// Candidate index for a query with its estimated selectivity
 struct IndexCandidate<'a> {
     filter: &'a IndexableFilter,
@@ -892,12 +938,36 @@ impl TableProvider for DataBlock {
             // Page-level filtering: read only pages whose per-page stats overlap the filters.
             // Only attempted on cache misses — a cached block is already memory-local and
             // scanning it is fast enough that the overhead of page filtering isn't worthwhile.
+            //
+            // Skipped when rows are deleted: tombstones are block-global row
+            // ordinals, and a page-filtered stream has already skipped rows, so
+            // applying tombstone ordinals to it drops the WRONG rows (bb-fqm.3).
+            // Blocks with deletes take the paths below, which keep the stream
+            // aligned with row numbers. (A page→row-number offset translation
+            // could restore page filtering here if profiling shows it matters.)
             let cache_key = self.cache_key();
             let cached = GLOBAL_BLOCK_CACHE.get(&cache_key);
-            if cached.is_none() {
+            if cached.is_none() && deleted.is_empty() {
+                // The reader matches filters against the file's PHYSICAL column
+                // names, but scan filters reference internal `col_<id>` names —
+                // translate positionally (the block schema is the physical
+                // schema renamed position-for-position) or no page ever prunes.
+                let physical_filters = match self
+                    .reader
+                    .read_schema()
+                    .await
+                    .map_err(datafusion::common::DataFusionError::External)?
+                {
+                    Some(physical_schema) => translate_filters_to_physical(
+                        filters,
+                        &self.schema.read(),
+                        &physical_schema,
+                    ),
+                    None => Vec::new(),
+                };
                 if let Some(page_source) = self
                     .reader
-                    .data_source_filtered_pages(projection, filters, limit)
+                    .data_source_filtered_pages(projection, &physical_filters, limit)
                     .await
                     .map_err(|e| datafusion::common::DataFusionError::External(e))?
                 {
@@ -911,16 +981,23 @@ impl TableProvider for DataBlock {
                         "page_filter",
                         &[KeyValue::new("block_id", self.id.to_string())],
                     );
-                    let deleted = self.deleted_rows.read().clone();
-                    let mut source = page_source;
-                    if !deleted.is_empty() {
-                        source = Arc::new(
-                            crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                                source,
-                                Arc::new(deleted),
-                            ),
-                        );
-                    }
+                    // The reader emits batches with physical column names —
+                    // rename to internal names so the plan above (which speaks
+                    // internal names) lines up.
+                    let projected_col_ids: Vec<ColumnId> = match projection {
+                        Some(proj) => proj
+                            .iter()
+                            .filter_map(|&i| self.column_ids.get(i).copied())
+                            .collect(),
+                        None => self.column_ids.clone(),
+                    };
+                    let source = Arc::new(
+                        crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
+                            page_source,
+                            projected_schema,
+                            projected_col_ids,
+                        ),
+                    );
                     return Ok(Arc::new(datafusion::catalog::memory::DataSourceExec::new(
                         source,
                     )));

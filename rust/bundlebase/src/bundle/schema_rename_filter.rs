@@ -66,8 +66,13 @@ impl DataSource for SchemaRenameDataSource {
         self
     }
 
-    fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SchemaRenameDataSource")
+    fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
+        // Show the wrapped source too — EXPLAIN output is otherwise opaque
+        // about which underlying read strategy (page-filtered, row-id seek,
+        // plain file scan) the plan actually uses.
+        write!(f, "SchemaRenameDataSource(")?;
+        self.inner.fmt_as(t, f)?;
+        write!(f, ")")
     }
 
     fn output_partitioning(&self) -> Partitioning {

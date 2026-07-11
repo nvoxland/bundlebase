@@ -236,6 +236,113 @@ async fn test_delete_excluded_through_index_lookup() -> Result<(), BundlebaseErr
     Ok(())
 }
 
+/// Write a ~13MB CSV (120_000 rows × ~110 bytes → 3 pages at the 5MB page
+/// size) into `dir`. Ids are fixed-width strings ("r000000".."r119999") so
+/// lexicographic ordering equals numeric ordering regardless of CSV type
+/// inference, and the numeric suffix equals the block-local row number.
+fn write_multipage_csv(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::io::Write;
+    let csv_path = dir.join("threepages.csv");
+    let file = std::fs::File::create(&csv_path).expect("create csv");
+    let mut w = std::io::BufWriter::new(file);
+    writeln!(w, "id,val").expect("write header");
+    let pad = "x".repeat(100);
+    for i in 0..120_000 {
+        writeln!(w, "r{i:06},{pad}").expect("write row");
+    }
+    w.flush().expect("flush csv");
+    csv_path
+}
+
+/// The page-filtered read must actually engage for a selective predicate on a
+/// multi-page CSV. It silently died when columns moved to internal names:
+/// scan filters say `col_<id>` while the reader's page stats are keyed by the
+/// file's physical names, so no page ever pruned and the path always bailed.
+#[tokio::test]
+async fn test_page_filter_engages_on_multipage_csv() -> Result<(), BundlebaseError> {
+    init();
+
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let csv_path = write_multipage_csv(tmp.path());
+
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let csv_url = format!("file://{}", csv_path.to_str().expect("utf8 path"));
+    builder.attach(&csv_url, None).await?;
+    builder.commit("attach three-page csv").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+
+    // Selective range in the LAST page: earlier pages must be pruned, so the
+    // plan should read via the page-filtered PageMapDataSource.
+    let sql = "SELECT id FROM bundle WHERE id >= 'r100000' AND id < 'r118000'";
+    let plan = physical_plan(&reopened, sql).await;
+    assert!(
+        plan.contains("PageMap"),
+        "expected the page-filtered read in the plan, got:\n{plan}"
+    );
+
+    // And the results coming off the page-filtered read are the right rows.
+    let live = query_count(
+        reopened.as_ref(),
+        "SELECT COUNT(*) AS cnt FROM bundle WHERE id >= 'r100000' AND id < 'r118000'",
+    )
+    .await;
+    assert_eq!(live, 18_000);
+
+    Ok(())
+}
+
+/// bb-fqm.3: a page-filtered read must not misapply delete tombstones.
+///
+/// Tombstones are block-global row ordinals. The page-filtered read skips
+/// pages, so applying tombstone ordinals to the shortened stream drops the
+/// WRONG rows: live rows from a later page vanish (and the query-level
+/// `WHERE NOT` filter above can re-drop rows but never restore them).
+///
+/// Construction: a 3-page CSV (>2× the 5MB page size) with sequential ids;
+/// delete rows 1000..9000 (page 0); query a range that lives entirely in the
+/// LAST page. The buggy path prunes pages 0-1, then drops stream ordinals
+/// 1000..9000 — which now land on live last-page rows inside the query range.
+#[tokio::test]
+async fn test_page_filtered_read_respects_tombstones() -> Result<(), BundlebaseError> {
+    init();
+
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let csv_path = write_multipage_csv(tmp.path());
+
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let csv_url = format!("file://{}", csv_path.to_str().expect("utf8 path"));
+    builder.attach(&csv_url, None).await?;
+    builder.commit("attach three-page csv").await?;
+
+    // Delete rows in the FIRST page. Ids are sequential from r000000, so the
+    // numeric suffix equals the block-local row number.
+    builder
+        .delete("id >= 'r001000' AND id < 'r009000'")
+        .await?;
+    builder.commit("delete first-page rows").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+
+    // Selective range living entirely in the LAST page (page 2 starts around
+    // row ~96-99K for this row width; [100K, 118K) is safely inside it). None
+    // of the deleted ids are in this range, so every row must be present.
+    let live = query_count(
+        reopened.as_ref(),
+        "SELECT COUNT(*) AS cnt FROM bundle WHERE id >= 'r100000' AND id < 'r118000'",
+    )
+    .await;
+    assert_eq!(
+        live, 18_000,
+        "live rows in a later page must survive a page-filtered read with \
+         tombstones present (wrong-ordinal deletes drop them)"
+    );
+
+    Ok(())
+}
+
 /// bb-wmu: a DELETE whose predicate no longer matches a row's UPDATED value
 /// must not tombstone that row.
 ///
