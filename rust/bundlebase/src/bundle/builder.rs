@@ -221,6 +221,24 @@ pub struct BundleBuilder {
     >,
     /// WHERE clauses from UPDATE commands, stored for historical reference in the operation log.
     pending_update_wheres: RwLock<Vec<String>>,
+    /// Cumulative snapshots of the pending delete/update accumulators, one per
+    /// completed change in `status` (bb-fqm.4). `undo()` restores the previous
+    /// snapshot so an undone DELETE/UPDATE's pending side-state doesn't ride
+    /// into the next commit's tombstone/overlay; a failed command restores the
+    /// last snapshot so its partial mutations don't linger.
+    pending_snapshots: RwLock<Vec<PendingSnapshot>>,
+}
+
+/// Point-in-time copy of the pending delete/update accumulators.
+#[derive(Clone, Default)]
+struct PendingSnapshot {
+    deletes: std::collections::HashSet<bundlebase_common::RowId>,
+    delete_wheres: Vec<String>,
+    updates: std::collections::HashMap<
+        bundlebase_common::RowId,
+        std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>,
+    >,
+    update_wheres: Vec<String>,
 }
 
 impl bundlebase_data::DataContext for BundleBuilder {
@@ -247,6 +265,7 @@ impl Clone for BundleBuilder {
             pending_delete_wheres: RwLock::new(self.pending_delete_wheres.read().clone()),
             pending_updates: RwLock::new(self.pending_updates.read().clone()),
             pending_update_wheres: RwLock::new(self.pending_update_wheres.read().clone()),
+            pending_snapshots: RwLock::new(self.pending_snapshots.read().clone()),
         }
     }
 }
@@ -316,6 +335,7 @@ impl BundleBuilder {
             pending_delete_wheres: RwLock::new(Vec::new()),
             pending_updates: RwLock::new(std::collections::HashMap::new()),
             pending_update_wheres: RwLock::new(Vec::new()),
+            pending_snapshots: RwLock::new(Vec::new()),
         });
 
         // Re-register schema providers and the search() UDTF with BundleBuilder as
@@ -371,6 +391,7 @@ impl BundleBuilder {
             pending_delete_wheres: RwLock::new(Vec::new()),
             pending_updates: RwLock::new(std::collections::HashMap::new()),
             pending_update_wheres: RwLock::new(Vec::new()),
+            pending_snapshots: RwLock::new(Vec::new()),
         });
 
         // Re-register schema providers and the search() UDTF with BundleBuilder as
@@ -738,6 +759,7 @@ impl BundleBuilder {
         self.pending_delete_wheres.write().clear();
         self.pending_updates.write().clear();
         self.pending_update_wheres.write().clear();
+        self.pending_snapshots.write().clear();
 
         info!("Committed version {}", self.bundle.version());
 
@@ -804,6 +826,7 @@ impl BundleBuilder {
         self.pending_delete_wheres.write().clear();
         self.pending_updates.write().clear();
         self.pending_update_wheres.write().clear();
+        self.pending_snapshots.write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -835,9 +858,20 @@ impl BundleBuilder {
             .ok_or("No uncommitted changes to undo")?;
         let description = undone.description.clone();
 
+        // Drop the undone change's pending-accumulator snapshot and restore
+        // the accumulators to the previous change's state — otherwise an
+        // undone DELETE/UPDATE's RowIds still ride into the next commit's
+        // tombstone/overlay and silently remove rows (bb-fqm.4).
+        self.pending_snapshots.write().pop();
+        self.restore_pending_from_last_snapshot();
+
         // Reload the bundle from the last committed state and reapply the
         // remaining uncommitted changes
         self.restore_uncommitted_state().await?;
+
+        // Re-flush any remaining pending updates: reload rebuilt the blocks
+        // without the in-session overlays.
+        self.flush_pending_updates_to_blocks();
 
         info!("UNDONE: {}", description);
 
@@ -871,6 +905,11 @@ impl BundleBuilder {
         cause: &BundlebaseError,
     ) -> Result<(), BundlebaseError> {
         let discarded = self.in_progress_change.write().take();
+        // The failed command's body may have accumulated pending deletes or
+        // updates (mark_deleted / evaluate_update_cols) before erroring —
+        // roll the accumulators back so the next commit doesn't persist
+        // side-state for a change that was never recorded (bb-fqm.4 family).
+        self.restore_pending_from_last_snapshot();
         if discarded.is_some_and(|c| !c.operations.is_empty()) {
             if let Err(restore_err) = self.restore_uncommitted_state().await {
                 return Err(format!(
@@ -1222,6 +1261,35 @@ impl BundleBuilder {
     /// Add RowIds to the pending delete set.
     ///
     /// These will be written to a tombstone file on commit.
+    /// Record a snapshot of the pending accumulators for the change that just
+    /// completed (aligned with `status.changes()`).
+    fn push_pending_snapshot(&self) {
+        let snapshot = PendingSnapshot {
+            deletes: self.pending_deletes.read().clone(),
+            delete_wheres: self.pending_delete_wheres.read().clone(),
+            updates: self.pending_updates.read().clone(),
+            update_wheres: self.pending_update_wheres.read().clone(),
+        };
+        self.pending_snapshots.write().push(snapshot);
+    }
+
+    /// Reset the pending accumulators to the state after the last completed
+    /// change (or empty when none remain). Used by `undo()` after popping a
+    /// change's snapshot, and after a failed command whose body may have
+    /// mutated the accumulators before erroring.
+    fn restore_pending_from_last_snapshot(&self) {
+        let snapshot = self
+            .pending_snapshots
+            .read()
+            .last()
+            .cloned()
+            .unwrap_or_default();
+        *self.pending_deletes.write() = snapshot.deletes;
+        *self.pending_delete_wheres.write() = snapshot.delete_wheres;
+        *self.pending_updates.write() = snapshot.updates;
+        *self.pending_update_wheres.write() = snapshot.update_wheres;
+    }
+
     pub fn mark_deleted(
         &self,
         row_ids: std::collections::HashSet<bundlebase_common::RowId>,
@@ -1419,6 +1487,7 @@ impl BundleBuilder {
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
+                        self.push_pending_snapshot();
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
                         self.bundle
                             .function_registry()
@@ -1494,6 +1563,7 @@ impl BundleBuilder {
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
+                        self.push_pending_snapshot();
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
                         self.bundle
                             .function_registry()

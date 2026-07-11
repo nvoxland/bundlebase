@@ -94,7 +94,28 @@ impl DataSource for DeletedRowFilterDataSource {
         &self,
         partition: Option<usize>,
     ) -> datafusion::common::Result<Statistics> {
-        self.inner.partition_statistics(partition)
+        // The inner statistics describe the RAW row set. Passing them through
+        // unadjusted lets DataFusion's AggregateStatistics rule rewrite
+        // COUNT(*) to the raw count — the deleted rows would be counted
+        // without this filter ever running. Every deleted ordinal corresponds
+        // to a row the inner source will emit, so an exact inner count stays
+        // exact after subtraction. Column-level stats (min/max/null counts)
+        // may no longer be tight once rows are removed — degrade to inexact.
+        use datafusion::common::stats::Precision;
+        let deleted = self.deleted_rows.len();
+        let mut stats = self.inner.partition_statistics(partition)?;
+        stats.num_rows = match stats.num_rows {
+            Precision::Exact(n) => Precision::Exact(n.saturating_sub(deleted)),
+            Precision::Inexact(n) => Precision::Inexact(n.saturating_sub(deleted)),
+            Precision::Absent => Precision::Absent,
+        };
+        stats.total_byte_size = stats.total_byte_size.to_inexact();
+        stats.column_statistics = stats
+            .column_statistics
+            .into_iter()
+            .map(|c| c.to_inexact())
+            .collect();
+        Ok(stats)
     }
 
     fn fetch(&self) -> Option<usize> {

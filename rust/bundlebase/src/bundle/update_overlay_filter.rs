@@ -168,7 +168,17 @@ impl DataSource for UpdateOverlayDataSource {
         &self,
         partition: Option<usize>,
     ) -> datafusion::common::Result<Statistics> {
-        self.inner.partition_statistics(partition)
+        // Overlays change cell VALUES (not row counts), so the inner
+        // min/max/null-count column statistics may no longer be tight —
+        // degrade them to inexact so the optimizer doesn't plan (or prune)
+        // against pre-update values. Row count passes through unchanged.
+        let mut stats = self.inner.partition_statistics(partition)?;
+        stats.column_statistics = stats
+            .column_statistics
+            .into_iter()
+            .map(|c| c.to_inexact())
+            .collect();
+        Ok(stats)
     }
 
     fn fetch(&self) -> Option<usize> {

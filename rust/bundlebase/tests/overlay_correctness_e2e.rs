@@ -186,12 +186,18 @@ async fn test_undo_delete_does_not_persist_the_delete() -> Result<(), Bundlebase
 
     builder.commit("second attach after undo").await?;
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
-    let persisted = query_count(reopened.as_ref(), "SELECT COUNT(*) AS cnt FROM bundle").await;
+    // Check both the streamed row set and COUNT(*): they exercise different
+    // paths (scan-level tombstone filtering vs statistics-based counting) and
+    // each has independently lied here before.
+    let batches = query_collect(reopened.as_ref(), "SELECT * FROM bundle").await;
+    let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(
-        persisted, expected as i64,
+        streamed, expected,
         "an undone DELETE must not be persisted at the next commit \
          (pending_deletes not reconciled by undo)"
     );
+    let persisted = query_count(reopened.as_ref(), "SELECT COUNT(*) AS cnt FROM bundle").await;
+    assert_eq!(persisted, expected as i64, "COUNT(*) must agree");
 
     Ok(())
 }
@@ -338,6 +344,58 @@ async fn test_page_filtered_read_respects_tombstones() -> Result<(), BundlebaseE
         live, 18_000,
         "live rows in a later page must survive a page-filtered read with \
          tombstones present (wrong-ordinal deletes drop them)"
+    );
+
+    Ok(())
+}
+
+/// COUNT(*) must reflect tombstoned rows.
+///
+/// DeletedRowFilterDataSource forwarded its inner source's EXACT statistics,
+/// so DataFusion's AggregateStatistics rule rewrote COUNT(*) to the raw row
+/// count without ever executing the delete filter. A tombstone-only delete
+/// (no query-level FilterOp above to mask it) exposes the lie: COUNT(*) says
+/// no rows are gone while SELECT * streams the reduced set.
+#[tokio::test]
+async fn test_count_star_reflects_tombstones() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("attach").await?;
+    let total = builder.num_rows().await?;
+
+    // Blocks-only delete: tombstone RowIds without the query-level FilterOp
+    // (the same composition the always-rules and the representation benchmarks
+    // use). The tombstone is persisted by the commit.
+    let wc = builder.translate_sql("salary > 200000");
+    let ids = builder.select_row_ids(&wc).await?;
+    let n_deleted = ids.len();
+    assert!(n_deleted > 0);
+    builder
+        .run_command("blocks-only delete".to_string(), async {
+            builder.mark_deleted(ids, &wc);
+            Ok(())
+        })
+        .await?;
+    builder.commit("tombstone-only delete").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let batches = query_collect(reopened.as_ref(), "SELECT * FROM bundle").await;
+    let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(
+        streamed,
+        total - n_deleted,
+        "SELECT * must exclude tombstoned rows"
+    );
+
+    let counted = query_count(reopened.as_ref(), "SELECT COUNT(*) AS cnt FROM bundle").await;
+    assert_eq!(
+        counted as usize, streamed,
+        "COUNT(*) must agree with the streamed row count on a tombstoned block \
+         (stats passthrough lets the optimizer count raw rows)"
     );
 
     Ok(())

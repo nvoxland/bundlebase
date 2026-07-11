@@ -424,6 +424,11 @@ impl DataBlock {
         self.update_overlays.read().clone()
     }
 
+    /// Snapshot of this block's deleted row numbers (scan-time delete state).
+    pub fn deleted_rows(&self) -> Vec<u32> {
+        self.deleted_rows.read().clone()
+    }
+
     /// Add an update overlay to this block.
     ///
     /// The block cache is NOT invalidated here — cached batches are the base
