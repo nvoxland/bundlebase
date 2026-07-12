@@ -513,6 +513,87 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
     CREATE SOURCE USING kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
+### postgres
+
+Pulls the results of a SQL query from a PostgreSQL database into the bundle. Results are copied in as Parquet, partitioned into files of `batch_size` rows ordered by `sort_column`. Re-running `fetch()` detects changed partitions via per-partition checksums and only re-copies what changed.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `url` | Yes | PostgreSQL connection URL **without a password** (e.g., `postgres://user@host:5432/dbname`) |
+| `query` | Yes | SQL query to execute |
+| `sort_column` | Yes | Column to sort and partition by (e.g., `id`, `created_at`) |
+| `batch_size` | No | Number of rows per output file (default: `1000000`) |
+
+!!! warning "Password handling"
+    The `url` argument is persisted in the bundle manifest, so it must not contain a password — `create_source` rejects URLs that do. Supply the password via runtime-only secure [configuration](configuration.md) instead. The config scope resolves most-specific-first: `postgres/{host}:{port}/{dbname}`, `postgres/{host}`, then `postgres`.
+
+    ```sql
+    SET CONFIG password = 'secret' FOR 'postgres/db.example.com'
+    ```
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.create_source("postgres", {
+        "url": "postgres://reporting@db.example.com:5432/analytics",
+        "query": "SELECT * FROM events WHERE created_at >= '2026-01-01'",
+        "sort_column": "id"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle = bundle.create_source("postgres", {
+        "url": "postgres://reporting@db.example.com:5432/analytics",
+        "query": "SELECT * FROM events WHERE created_at >= '2026-01-01'",
+        "sort_column": "id"
+    })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING postgres WITH (url = 'postgres://reporting@db.example.com:5432/analytics', query = 'SELECT * FROM events', sort_column = 'id')
+    ```
+
+### web_scrape
+
+Fetches an HTML page, scrapes it for links (`href` attributes), and attaches the data files they point to. Only `http://` and `https://` page URLs are accepted.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `url` | Yes | The webpage URL to fetch and parse for links |
+| `patterns` | No | Comma-separated glob patterns matched against link URLs (default: `**/*`) |
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.create_source("web_scrape", {
+        "url": "https://example.com/downloads/",
+        "patterns": "**/*.csv,**/*.parquet"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle = bundle.create_source("web_scrape", {
+        "url": "https://example.com/downloads/",
+        "patterns": "**/*.csv,**/*.parquet"
+    })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING web_scrape WITH (url = 'https://example.com/downloads/', patterns = '**/*.csv')
+    ```
+
 ### Custom Connectors
 
 Bundlebase supports custom connectors in two modes: **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#import-connector) or [`IMPORT TEMP CONNECTOR`](custom-connectors/index.md#import-temp-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).

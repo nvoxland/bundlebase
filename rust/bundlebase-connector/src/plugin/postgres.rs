@@ -4,7 +4,7 @@
 //! results into fixed-size chunks based on a sort column.
 //!
 //! Arguments:
-//! - `url` (required): PostgreSQL connection URL (postgres://user:pass@host:port/dbname)
+//! - `url` (required): PostgreSQL connection URL, no password (postgres://user@host:port/dbname)
 //! - `query` (required): SQL query to execute
 //! - `sort_column` (required): Column to ORDER BY and partition on
 //! - `batch_size` (optional): Rows per output file (default: 1000000)
@@ -609,7 +609,7 @@ impl Connector for PostgresConnector {
                 ArgSpec {
                     name: "url",
                     description:
-                        "PostgreSQL connection URL (postgres://user:pass@host:port/dbname)",
+                        "PostgreSQL connection URL without a password                          (postgres://user@host:port/dbname); set the password via                          config, e.g. SET CONFIG password = '...' FOR 'postgres/<host>'",
                     required: true,
                     default: None,
                 },

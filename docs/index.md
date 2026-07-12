@@ -1,7 +1,7 @@
 ---
 template: home.html
 title: Bundlebase -- Data Packaging
-description: Bundlebase packages data into versioned, self-describing containers. Attach CSV, Parquet, or JSON from S3, HTTP, or local files. Query with SQL via Python, CLI, or any BI tool. Share via a path. No database required.
+description: Bundlebase packages data into versioned, self-describing containers. Attach CSV, Parquet, or JSONL from S3, HTTP, or local files. Query with SQL via Python, CLI, or any BI tool. Share via a path. No database required.
 hide:
   - navigation
   - toc
@@ -132,7 +132,7 @@ No shared cleanup script. No "oops, I forgot the filter" incidents.
 ```mermaid
 %%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
 flowchart LR
-    A["CSV · Parquet · JSON\nHTTP · S3 · SFTP · Kaggle"] --> B["Bundle\nversioned · self-describing"]
+    A["CSV · Parquet · JSONL\nHTTP · S3 · SFTP · Kaggle"] --> B["Bundle\nversioned · self-describing"]
     B --> C1["Python -- bb.open()"]
     B --> C2["CLI -- bundlebase REPL"]
     B --> C3["SQL server -- Metabase · R · DBeaver"]
@@ -155,7 +155,7 @@ flowchart LR
 | **CLI** | Interactive REPL, scriptable commands -- no Python required |
 | **BI tools** | Metabase · DBeaver · R · Julia · Go -- anything with an Arrow Flight driver or native Arrow Flight support |
 | **Storage** | S3 · GCS · Azure Blob · local paths |
-| **Formats** | Parquet · CSV · JSON -- mixed sources union automatically |
+| **Formats** | Parquet · CSV · JSONL (newline-delimited JSON) -- mixed sources union automatically; other JSON shapes via [connectors](guide/sources.md#json-options) |
 | **Custom connectors** | Pull from any source (Salesforce, internal APIs, custom databases) by writing a connector in Python, Go, Java, or any IPC-compatible language |
 | **Custom SQL functions** | Register Python callables as scalar or aggregate UDFs and call them directly in SQL queries |
 | **SQL** | Full Apache DataFusion syntax -- `SELECT * FROM bundle WHERE ...` |

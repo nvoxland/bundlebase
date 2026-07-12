@@ -109,3 +109,16 @@ def test_commit_returns_none():
 def test_py_typed_marker_shipped():
     marker = Path(bundlebase.__file__).with_name("py.typed")
     assert marker.exists(), "py.typed missing — PEP 561 tools ignore the stubs"
+
+
+def test_runtime_public_surface_is_fully_stubbed():
+    """Every public runtime method must be declared in the stub — omissions
+    make type checkers reject valid user code (bb-bos.2 fallout: mkdocstrings
+    renders from the stub, so undeclared methods vanish from the API docs)."""
+    for cls_name in ("PyBundle", "PyBundleBuilder"):
+        stub = set(_stub_methods(_stub_classes()[cls_name]))
+        runtime = {
+            n for n in dir(getattr(bundlebase, cls_name)) if not n.startswith("_")
+        }
+        missing = sorted(runtime - stub)
+        assert missing == [], f"{cls_name} stub omits runtime methods: {missing}"

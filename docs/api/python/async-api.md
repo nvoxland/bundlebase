@@ -29,18 +29,29 @@ Read-only bundle class returned by `open()`.
       show_root_heading: true
       show_root_full_path: false
       members:
+        - query
         - extend
         - import_temp_connector
         - drop_temp_connector
         - schema
         - name
         - description
+        - id
+        - url
+        - version
         - num_rows
         - history
+        - operations
+        - view
+        - views
+        - verify_data
+        - describe_data
+        - export_tar
         - to_pandas
         - to_polars
         - to_numpy
         - to_dict
+        - as_pyarrow_stream
         - explain
 
 ### PyBundleBuilder
@@ -52,11 +63,14 @@ Mutable bundle class returned by `create()` and transformation methods.
       show_root_heading: true
       show_root_full_path: false
       members:
+        - query
         - attach
+        - detach_block
         - add_column
         - cast_column
         - drop_column
         - rename_column
+        - normalize_column_names
         - update
         - delete
         - always_delete
@@ -65,9 +79,13 @@ Mutable bundle class returned by `create()` and transformation methods.
         - drop_always_update
         - filter
         - join
+        - drop_join
+        - create_view
+        - drop_view
         - set_name
         - set_description
         - import_function
+        - drop_function
         - create_source
         - import_connector
         - import_temp_connector
@@ -77,16 +95,33 @@ Mutable bundle class returned by `create()` and transformation methods.
         - fetch_all
         - create_index
         - rebuild_index
+        - drop_index
         - reindex
+        - undo
+        - reset
         - commit
+        - extend
+        - export_tar
+        - export_empty
         - schema
         - name
         - description
+        - id
+        - url
+        - version
         - num_rows
+        - status
+        - history
+        - operations
+        - view
+        - views
+        - verify_data
+        - describe_data
         - to_pandas
         - to_polars
         - to_numpy
         - to_dict
+        - as_pyarrow_stream
         - explain
 
 ## Supporting Classes

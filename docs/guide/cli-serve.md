@@ -37,13 +37,21 @@ To serve a new bundle, create it first with `bundlebase create`.
 
 The server uses HTTP Basic authentication.
 
-| Setting | Default |
-|---|---|
-| Username | `admin` |
-| Password | `password` |
+| Setting | Default | Override |
+|---|---|---|
+| Username | `admin` | `BUNDLEBASE_FLIGHT_USERNAME` environment variable |
+| Password | `password` | `BUNDLEBASE_FLIGHT_PASSWORD` environment variable |
+
+```bash
+BUNDLEBASE_FLIGHT_USERNAME=analyst \
+BUNDLEBASE_FLIGHT_PASSWORD=$(cat /run/secrets/flight_password) \
+bundlebase serve --bundle ./my-bundle
+```
 
 !!! warning
-    The default credentials are intended for local development only. The server logs a warning at startup when default credentials are in use.
+    The default credentials are intended for local development only. Set both
+    environment variables for anything reachable beyond localhost. The server
+    logs a warning at startup when default credentials are in use.
 
 ## Session Management
 

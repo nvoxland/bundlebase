@@ -160,7 +160,7 @@ class PyBundle:
         analyze: bool = False,
         format: Optional[str] = None,
         sql: Optional[str] = None,
-    ) -> "RecordBatchStream":
+    ) -> "PyRecordBatchStream":
         """
         Get the query execution plan as a stream.
 
@@ -319,6 +319,81 @@ class PyBundle:
         Returns:
             Success message
         """
+        ...
+
+
+    @property
+    def id(self) -> str:
+        """Unique identifier of the bundle."""
+        ...
+
+    @property
+    def url(self) -> str:
+        """URL of the bundle's storage location."""
+        ...
+
+    async def as_pyarrow_stream(self) -> "PyRecordBatchStream":
+        """Stream the bundle's data as pyarrow RecordBatches."""
+        ...
+
+    async def ctx(self) -> "PySessionContext":
+        """DataFusion session context for direct SQL access."""
+        ...
+
+    def describe_data(self, columns: Any = None) -> Any:
+        """Profile column statistics; returns an awaitable QueryResult."""
+        ...
+
+    async def describe_function(self, name: str) -> Any:
+        """Describe a registered function."""
+        ...
+
+    async def drop_temp_function(self, name: str, platform: Optional[str] = None) -> str:
+        """Remove a session-only function."""
+        ...
+
+    async def export_tar(self, tar_path: str, *, gzip: bool = False) -> None:
+        """Export the bundle as a single .tar (or .tar.gz) archive."""
+        ...
+
+    def history(self) -> List[Any]:
+        """Commit history of the bundle."""
+        ...
+
+    def operations(self) -> List[Any]:
+        """Operations recorded in the bundle definition."""
+        ...
+
+    def test_connector(self, name: str, **kwargs: Any) -> Any:
+        """Test a configured connector; returns an awaitable QueryResult."""
+        ...
+
+    def test_temp_connector(self, from_: str, **kwargs: Any) -> Any:
+        """Test a connector definition without importing it."""
+        ...
+
+    async def view(self, identifier: str) -> "PyBundle":
+        """Open a named view of this bundle."""
+        ...
+
+    def views(self) -> Dict[str, str]:
+        """Mapping of view name to view definition."""
+        ...
+
+    async def import_temp_connector(self, name: str, from_: str, platform: str = "*/*") -> str:
+        """Load a connector for this session only (not persisted)."""
+        ...
+
+    async def drop_temp_connector(self, name: str, platform: Optional[str] = None) -> str:
+        """Remove a session-only connector."""
+        ...
+
+    async def set_config(self, scope: str, key: str, value: str) -> str:
+        """Set a configuration value."""
+        ...
+
+    async def verify_data(self) -> Any:
+        """Verify attached data matches recorded versions."""
         ...
 
 
@@ -713,7 +788,7 @@ class PyBundleBuilder:
         Attach data from a file location.
 
         Queues an attach operation that will be executed when the chain is awaited.
-        Supports CSV, JSON, Parquet files.
+        Supports CSV, TSV, JSONL (newline-delimited JSON), and Parquet files.
 
         Args:
             location: Data file location (e.g., "data.csv", "data.parquet")
@@ -1309,7 +1384,7 @@ class PyBundleBuilder:
         analyze: bool = False,
         format: Optional[str] = None,
         sql: Optional[str] = None,
-    ) -> "RecordBatchStream":
+    ) -> "PyRecordBatchStream":
         """
         Get the query execution plan as a stream.
 
@@ -1413,6 +1488,101 @@ class PyBundleBuilder:
             - to_polars() for Polars DataFrames
             - to_dict() for dictionaries of lists
         """
+        ...
+
+
+    @property
+    def id(self) -> str:
+        """Unique identifier of the bundle."""
+        ...
+
+    @property
+    def url(self) -> str:
+        """URL of the bundle's storage location."""
+        ...
+
+    async def as_pyarrow_stream(self) -> "PyRecordBatchStream":
+        """Stream the bundle's data as pyarrow RecordBatches."""
+        ...
+
+    async def ctx(self) -> "PySessionContext":
+        """DataFusion session context for direct SQL access."""
+        ...
+
+    def describe_data(self, columns: Any = None) -> Any:
+        """Profile column statistics; returns an awaitable QueryResult."""
+        ...
+
+    async def describe_function(self, name: str) -> Any:
+        """Describe a registered function."""
+        ...
+
+    async def drop_temp_function(self, name: str, platform: Optional[str] = None) -> str:
+        """Remove a session-only function."""
+        ...
+
+    async def export_tar(self, tar_path: str, *, gzip: bool = False) -> None:
+        """Export the bundle as a single .tar (or .tar.gz) archive."""
+        ...
+
+    def history(self) -> List[Any]:
+        """Commit history of the bundle."""
+        ...
+
+    def operations(self) -> List[Any]:
+        """Operations recorded in the bundle definition."""
+        ...
+
+    def test_connector(self, name: str, **kwargs: Any) -> Any:
+        """Test a configured connector; returns an awaitable QueryResult."""
+        ...
+
+    def test_temp_connector(self, from_: str, **kwargs: Any) -> Any:
+        """Test a connector definition without importing it."""
+        ...
+
+    async def view(self, identifier: str) -> "PyBundle":
+        """Open a named view of this bundle."""
+        ...
+
+    def views(self) -> Dict[str, str]:
+        """Mapping of view name to view definition."""
+        ...
+
+    def update(self, set_where: str) -> "OperationChain":
+        """Queue an UPDATE ``SET ... WHERE ...`` operation."""
+        ...
+
+    def delete(self, where_clause: str) -> "OperationChain":
+        """Queue a DELETE for rows matching the WHERE clause."""
+        ...
+
+    def always_delete(self, where_clause: str) -> "OperationChain":
+        """Queue a persistent delete rule re-applied to newly attached data."""
+        ...
+
+    def always_update(self, set_where: str) -> "OperationChain":
+        """Queue a persistent update rule re-applied to newly attached data."""
+        ...
+
+    def drop_always_delete(self, where_clause: Optional[str] = None) -> "OperationChain":
+        """Remove an always-delete rule."""
+        ...
+
+    def drop_always_update(self, rule_text: Optional[str] = None) -> "OperationChain":
+        """Remove an always-update rule."""
+        ...
+
+    async def extend(self, data_dir: Optional[str] = None) -> "PyBundleBuilder":
+        """Create a new builder layered on this bundle's committed state."""
+        ...
+
+    async def export_empty(self, path: str) -> None:
+        """Export the bundle definition without data files."""
+        ...
+
+    async def verify_data(self, update_versions: bool = False) -> Any:
+        """Verify attached data matches recorded versions."""
         ...
 
 
@@ -2003,6 +2173,14 @@ class PyRecordBatchStream:
 
     async def is_empty(self) -> bool:
         """True if the stream has no more batches."""
+        ...
+
+
+class PySessionContext:
+    """DataFusion session context returned by ``ctx()``."""
+
+    async def sql(self, query: str) -> List[Any]:
+        """Execute SQL against registered tables; returns pyarrow RecordBatches."""
         ...
 
 

@@ -64,7 +64,7 @@ Multiple files union together automatically, even across formats:
     ```python
     bundle.attach("data.parquet")
     bundle.attach("s3://bucket/more-data.csv")
-    bundle.attach("https://example.com/feed.json")
+    bundle.attach("https://example.com/feed.jsonl")
 
     # Multiple files union together
     bundle.attach("jan.parquet")

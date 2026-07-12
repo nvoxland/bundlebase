@@ -1,6 +1,6 @@
 ---
 title: Python Quick Start -- Bundlebase
-description: Get started with the Bundlebase Python API. Attach Parquet, CSV, or JSON from local files or S3, filter and transform, commit, and query with SQL.
+description: Get started with the Bundlebase Python API. Attach Parquet, CSV, or JSONL from local files or S3, filter and transform, commit, and query with SQL.
 ---
 
 # Python Quick Start
@@ -54,14 +54,14 @@ The path can be a local filepath or a remote URL (S3, Azure, GCS):
 
 ## Attach data
 
-Parquet, CSV, and JSON are all supported. Attaching multiple files unions them together, even across formats. Paths can be relative to the bundle or absolute URLs.
+Parquet, CSV, and JSONL (newline-delimited JSON) are all supported. Attaching multiple files unions them together, even across formats. A `.json` file is read as newline-delimited too -- for JSON arrays or nested API responses, use a [connector](../../guide/sources.md#json-options). Paths can be relative to the bundle or absolute URLs.
 
 === "Sync API"
 
     ```python
     c.attach("local_data.parquet")
     c.attach("s3://other_bucket/more_data.csv")
-    c.attach("https://example.com/additional.json")
+    c.attach("https://example.com/additional.jsonl")
     ```
 
 === "Async API"
@@ -69,7 +69,7 @@ Parquet, CSV, and JSON are all supported. Attaching multiple files unions them t
     ```python
     await c.attach("local_data.parquet")
     await c.attach("s3://other_bucket/more_data.csv")
-    await c.attach("https://example.com/additional.json")
+    await c.attach("https://example.com/additional.jsonl")
     ```
 
 !!! note

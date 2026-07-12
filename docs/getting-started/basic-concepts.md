@@ -9,7 +9,7 @@ description: "Core Bundlebase concepts: what a bundle is, read-only vs mutable, 
 
 A bundle is:
 
-- Data from one or more sources (CSV, Parquet, JSON, HTTP APIs, cloud storage, SFTP)
+- Data from one or more sources (CSV, Parquet, JSONL, HTTP APIs, cloud storage, SFTP)
 - The transformations applied to it -- filters, column drops, renames, joins -- recorded as operations
 - A versioned snapshot committed to a path that anyone can open
 
@@ -143,7 +143,7 @@ There are two ways to bring data into a bundle: **attach** and **source**.
     ```python
     bundle.attach("local.parquet")
     bundle.attach("s3://bucket/data.csv")
-    bundle.attach("https://example.com/feed.json")
+    bundle.attach("https://example.com/feed.jsonl")
     bundle.attach("january.parquet")
     bundle.attach("february.parquet")   # unioned with january
     ```

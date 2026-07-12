@@ -37,7 +37,7 @@ Commands that change bundle data content.
 
 ### ATTACH
 
-Adds a data file to the bundle. Supports CSV, TSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
+Adds a data file to the bundle. Supports CSV, TSV, Parquet, JSONL (newline-delimited JSON) files, and `bundle://` URLs to reference other bundles.
 
 ```sql
 ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)] [NO INDEX]
@@ -355,6 +355,54 @@ RENAME COLUMN <old_name> TO <new_name>
 ```
 
 See [Columns](../guide/columns.md) for details.
+
+### ADD COLUMN
+
+Adds a computed column defined by a SQL expression. The expression can reference existing columns.
+
+```sql
+ADD COLUMN <name> AS <expression>
+```
+
+See [Columns](../guide/columns.md#add-column) for details.
+
+### CAST COLUMN
+
+Changes a column's data type.
+
+```sql
+CAST COLUMN <name> TO <type> [VERIFY EXISTING | NO VERIFY EXISTING]
+```
+
+See [Columns](../guide/columns.md#cast-column) for details.
+
+### DROP CAST COLUMN
+
+Removes a previously applied cast, restoring the column's original type.
+
+```sql
+DROP CAST COLUMN <name>
+```
+
+See [Columns](../guide/columns.md#cast-column) for details.
+
+### NORMALIZE COLUMN NAMES
+
+Renames all columns to clean lowercase+underscore identifiers (spaces, dots, and dashes become underscores; duplicates get `_2`, `_3`, ... suffixes).
+
+```sql
+NORMALIZE COLUMN NAMES
+```
+
+See [Columns](../guide/columns.md#normalize-column-names) for details.
+
+### PROFILE COLUMN
+
+Analyzes a column's values, optionally checking whether they can be cast to a target type — useful before a `CAST COLUMN`.
+
+```sql
+PROFILE COLUMN <name> [FOR CAST TO <type>]
+```
 
 ### CREATE VIEW
 
@@ -1125,6 +1173,42 @@ EXPLAIN ANALYZE
 EXPLAIN VERBOSE FORMAT TREE
 EXPLAIN SELECT * FROM bundle WHERE id > 10
 EXPLAIN ANALYZE FORMAT TREE SELECT * FROM bundle WHERE salary > 50000
+```
+
+## Reports
+
+Commands for managing stored reports — Markdown templates with embedded SQL tables and charts. See [Reports](../guide/reports.md) for the template format.
+
+### CREATE REPORT
+
+Stores a report definition in the bundle.
+
+```sql
+CREATE REPORT <id> NAME '<name>' DESCRIPTION '<description>' CONTENT $$<markdown>$$
+```
+
+### DROP REPORT
+
+Removes a stored report.
+
+```sql
+DROP REPORT <id>
+```
+
+### GENERATE REPORT
+
+Renders a stored report, executing its embedded queries against the current bundle data.
+
+```sql
+GENERATE REPORT <id>
+```
+
+### SHOW REPORTS
+
+Lists the reports stored in the bundle.
+
+```sql
+SHOW REPORTS
 ```
 
 ## Metadata
