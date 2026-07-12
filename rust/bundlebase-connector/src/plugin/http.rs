@@ -301,8 +301,12 @@ impl Connector for HttpConnector {
                 .unwrap_or(true);
 
         // Read HEAD info (version + content-type) unless HEAD is disabled or method is non-GET.
+        // The probe carries the same Authorization and custom headers as the
+        // real request (bb-k9s).
         let head_info = if head_supported {
-            shared_utils::read_http_head_info(&url).await?
+            let auth = resolve_auth(&url, config)?;
+            let headers = parse_headers(args);
+            shared_utils::read_http_head_info(&url, auth.as_deref(), &headers).await?
         } else {
             shared_utils::HttpHeadInfo {
                 version: "unknown".to_string(),
@@ -778,6 +782,70 @@ mod tests {
 
         assert_eq!(locations.len(), 1);
         assert_eq!(locations[0].format, SourceFormat::Csv);
+    }
+
+    /// The discover HEAD probe must send the configured Authorization
+    /// header — otherwise authenticated endpoints 401 during discovery and
+    /// force head_supported=false (bb-k9s).
+    #[tokio::test]
+    async fn test_discover_head_probe_sends_auth() {
+        let server = wiremock::MockServer::start().await;
+        // Only an authenticated HEAD succeeds.
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .and(wiremock::matchers::header("authorization", "Bearer tok123"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let server_url = url::Url::parse(&server.uri()).expect("server url");
+        let host_scope = format!("http/{}", server_url.host_str().expect("host"));
+        let config = crate::test_utils::test_config_with_values(&[
+            ("system", "allow_internal_sources", "true"),
+            (&host_scope, AUTH_CFG.key, "Bearer tok123"),
+        ]);
+        let config: Arc<dyn ConfigProvider> = config;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("authenticated HEAD probe must succeed");
+        assert_eq!(locations.len(), 1);
+    }
+
+    /// Custom (non-credential) headers from the `headers` arg must also reach
+    /// the HEAD probe — e.g. servers that require an Accept header.
+    #[tokio::test]
+    async fn test_discover_head_probe_sends_custom_headers() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .and(wiremock::matchers::header("x-api-variant", "v2"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(406))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
+        args.insert("headers".to_string(), "X-Api-Variant: v2".to_string());
+        let config = crate::test_utils::test_config_allow_internal();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("HEAD probe with custom headers must succeed");
+        assert_eq!(locations.len(), 1);
     }
 
     #[tokio::test]

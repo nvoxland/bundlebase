@@ -150,9 +150,22 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
 /// Returns an error if the HEAD request fails or returns a non-success status.
 /// Some servers don't support HEAD properly — use `head_supported=false` on the
 /// http connector to skip this check entirely.
-pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseError> {
-    let response = reqwest::Client::new()
-        .head(url.as_str())
+pub async fn read_http_head_info(
+    url: &Url,
+    auth: Option<&str>,
+    headers: &[(String, String)],
+) -> Result<HttpHeadInfo, BundlebaseError> {
+    let mut request = reqwest::Client::new().head(url.as_str());
+    // Authenticated endpoints must get the same Authorization header as the
+    // actual download — otherwise discovery 401s and forces
+    // head_supported=false (bb-k9s).
+    if let Some(auth) = auth {
+        request = request.header(reqwest::header::AUTHORIZATION, auth);
+    }
+    for (name, value) in headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| {
