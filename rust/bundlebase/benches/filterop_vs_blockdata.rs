@@ -313,8 +313,13 @@ async fn verify_bundle(
             "filter-only arm leaked block ops into the manifest: {ops:?}"
         ),
         Repr::Current => {
+            // Post ADR-009, the production commands emit ONLY the block-level
+            // representation — `current` should now match `blocks_only`.
             if n_edits > 0 {
-                assert!(filters > 0, "current arm should have FilterOps");
+                assert_eq!(
+                    filters, 0,
+                    "current arm should no longer emit FilterOps (ADR-009): {ops:?}"
+                );
                 assert!(block_ops > 0, "current arm should have block ops");
             }
         }
