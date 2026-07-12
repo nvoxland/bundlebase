@@ -51,11 +51,13 @@ config_keys!(configs, {
         .secure();
 });
 
-/// Config scope for a postgres source's secrets: `postgres/{host}[:{port}]/{dbname}`.
+/// Config scope for a postgres source's secrets: `postgres/{host}[/{port}]/{dbname}`.
 ///
 /// This lets a password be set globally (`postgres`), per-host
 /// (`postgres/db.example.com`), or per-database
-/// (`postgres/db.example.com:5432/analytics`), resolved most-specific-first.
+/// (`postgres/db.example.com/5432/analytics`), resolved most-specific-first.
+/// The port is joined with `/` (not `:`) so the per-host tier matches on a
+/// `/` boundary even when the URL includes a port (bb-cf5).
 fn source_scope(url: &str) -> Result<Scope, BundlebaseError> {
     let parsed =
         Url::parse(url).map_err(|e| BundlebaseError::from(format!("Invalid postgres url: {e}")))?;
@@ -64,7 +66,10 @@ fn source_scope(url: &str) -> Result<Scope, BundlebaseError> {
         name.push('/');
         name.push_str(host);
         if let Some(port) = parsed.port() {
-            name.push(':');
+            // Separate the port with '/' (not ':') so config scopes match on
+            // '/' boundaries — otherwise the documented `FOR 'postgres/<host>'`
+            // tier never matches a URL that carries an explicit port (bb-cf5).
+            name.push('/');
             name.push_str(&port.to_string());
         }
     }
@@ -933,7 +938,30 @@ mod tests {
     fn test_source_scope_includes_host_port_and_db() {
         let scope =
             source_scope("postgres://user@db.example.com:5432/analytics").expect("scope parses");
-        assert_eq!(scope.as_str(), "postgres/db.example.com:5432/analytics");
+        assert_eq!(scope.as_str(), "postgres/db.example.com/5432/analytics");
+    }
+
+    #[test]
+    fn test_per_host_scope_matches_url_with_port() {
+        // bb-cf5: the documented `FOR 'postgres/<host>'` config tier must match
+        // (via the production `Scope::matches` boundary rule) the scope built
+        // from a URL that carries an explicit port. With a ':' port separator
+        // it never did, because matching is '/'-boundary-only.
+        let scope =
+            source_scope("postgres://user@db.example.com:5432/analytics").expect("scope parses");
+        let host_tier =
+            Scope::from_name("postgres/db.example.com".to_string()).expect("host scope");
+        assert!(
+            host_tier.matches(&scope),
+            "per-host config scope {:?} must match query scope {:?}",
+            host_tier.as_str(),
+            scope.as_str()
+        );
+        // The port and db tiers must still match too.
+        let port_tier =
+            Scope::from_name("postgres/db.example.com/5432".to_string()).expect("port scope");
+        assert!(port_tier.matches(&scope));
+        assert!(POSTGRES_SCOPE.matches(&scope), "base tier must match");
     }
 
     #[test]

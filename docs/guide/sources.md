@@ -544,7 +544,7 @@ Pulls the results of a SQL query from a PostgreSQL database into the bundle. Res
 | `batch_size` | No | Number of rows per output file (default: `1000000`) |
 
 !!! warning "Password handling"
-    The `url` argument is persisted in the bundle manifest, so it must not contain a password — `create_source` rejects URLs that do. Supply the password via runtime-only secure [configuration](configuration.md) instead. The config scope resolves most-specific-first: `postgres/{host}:{port}/{dbname}`, `postgres/{host}`, then `postgres`.
+    The `url` argument is persisted in the bundle manifest, so it must not contain a password — `create_source` rejects URLs that do. Supply the password via runtime-only secure [configuration](configuration.md) instead. The config scope resolves most-specific-first: `postgres/{host}/{port}/{dbname}`, `postgres/{host}`, then `postgres`.
 
     ```sql
     SET CONFIG password = 'secret' FOR 'postgres/db.example.com'
