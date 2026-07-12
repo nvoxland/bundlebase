@@ -179,7 +179,31 @@ pub fn invoke_lib_scalar(
     let out_data = unsafe { arrow::ffi::from_ffi(out_array, &out_schema) }
         .map_err(|e| BundlebaseError::from(format!("Failed to convert FFI output: {}", e)))?;
 
-    Ok(arrow::array::make_array(out_data))
+    let result = arrow::array::make_array(out_data);
+    let expected_rows = args.first().map(|a| a.len()).unwrap_or(result.len());
+    validate_scalar_result_rows(result, expected_rows, symbol, lib_path)
+}
+
+/// A scalar UDF must return exactly one value per input row — a wrong length
+/// would silently splice a truncated/misaligned column into the query
+/// (bb-dvo.4; the IPC path validates identically in `assemble_scalar_result`).
+fn validate_scalar_result_rows(
+    result: ArrayRef,
+    expected_rows: usize,
+    symbol: &str,
+    lib_path: &str,
+) -> Result<ArrayRef, BundlebaseError> {
+    if result.len() != expected_rows {
+        return Err(format!(
+            "Lib scalar function '{}' in '{}' returned {} rows for {} input rows",
+            symbol,
+            lib_path,
+            result.len(),
+            expected_rows
+        )
+        .into());
+    }
+    Ok(result)
 }
 
 /// Extract a null-terminated C string from a buffer.
@@ -462,6 +486,21 @@ pub fn load_lib_manifest(lib_path: &str) -> Result<Manifest, BundlebaseError> {
 
 #[cfg(test)]
 mod tests {
+    use arrow::array::{ArrayRef as VArrayRef, Int64Array};
+
+    #[test]
+    fn test_scalar_result_row_validation() {
+        let arr: VArrayRef = std::sync::Arc::new(Int64Array::from(vec![1i64, 2, 3]));
+        // Matching length passes through.
+        let ok = super::validate_scalar_result_rows(std::sync::Arc::clone(&arr), 3, "f", "lib.so");
+        assert!(ok.is_ok());
+        // Wrong length is an error naming the counts, never a silent splice.
+        let err = super::validate_scalar_result_rows(arr, 5, "f", "lib.so")
+            .expect_err("length mismatch must error");
+        let msg = err.to_string();
+        assert!(msg.contains("returned 3 rows for 5 input rows"), "{msg}");
+    }
+
     use super::*;
 
     // ==================== parse_lib_entrypoint tests ====================
