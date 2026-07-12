@@ -48,6 +48,12 @@ config_scopes!(scopes, {
 // shared bundle. Injected at request time by `perform_request`.
 config_keys!(configs, {
     pub const AUTH_CFG: ConfigKey = HTTP_SCOPE.define("auth").runtime_only().secure();
+// SECRET_HEADERS_CFG holds additional credential-bearing request headers
+// (e.g. Cookie, Proxy-Authorization, API-key headers) in the same one
+// 'Name: Value' pair per line format as the `headers` arg. Runtime-only and
+// secure so the values never touch the persisted manifest (bb-rbo).
+    pub const SECRET_HEADERS_CFG: ConfigKey =
+        HTTP_SCOPE.define("secret_headers").runtime_only().secure();
 });
 
 /// Resolve the configured `Authorization` header value for `url`'s host, if any.
@@ -95,13 +101,8 @@ fn parse_method(args: &HashMap<String, String>) -> Result<String, BundlebaseErro
     }
 }
 
-/// Parse the `headers` arg into a Vec of (name, value) pairs.
-///
-/// Format: one `Name: Value` pair per line. Lines that don't contain `:` are ignored.
-fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
-    let Some(raw) = args.get("headers") else {
-        return Vec::new();
-    };
+/// Parse `Name: Value` pairs, one per line. Lines that don't contain `:` are ignored.
+fn parse_header_lines(raw: &str) -> Vec<(String, String)> {
     raw.lines()
         .filter_map(|line| {
             let line = line.trim();
@@ -117,15 +118,37 @@ fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Parse the `headers` arg into a Vec of (name, value) pairs.
+fn parse_headers(args: &HashMap<String, String>) -> Vec<(String, String)> {
+    match args.get("headers") {
+        Some(raw) => parse_header_lines(raw),
+        None => Vec::new(),
+    }
+}
+
+/// Resolve configured secret headers for `url`'s host (same scoping as
+/// [`resolve_auth`]). Secrets like Cookie or API-key headers go here instead
+/// of the persisted `headers` arg (bb-rbo).
+fn resolve_secret_headers(
+    url: &Url,
+    config: &Arc<dyn ConfigProvider>,
+) -> Result<Vec<(String, String)>, BundlebaseError> {
+    let scope = Scope::from_url(url.as_str(), &HTTP_SCOPE)?;
+    Ok(config
+        .get_in_scope(&scope, &SECRET_HEADERS_CFG)?
+        .map(|raw| parse_header_lines(&raw))
+        .unwrap_or_default())
+}
+
 /// Returns true if the connector needs to perform the request itself
-/// (POST/PUT, or any custom headers, or a body is present, or an Authorization
-/// header must be injected from config).
-fn needs_custom_request(args: &HashMap<String, String>, has_auth: bool) -> bool {
+/// (POST/PUT, or any custom headers, or a body is present, or credentials
+/// (Authorization / secret headers) must be injected from config).
+fn needs_custom_request(args: &HashMap<String, String>, has_secrets: bool) -> bool {
     let method = args
         .get("method")
         .map(|s| s.to_uppercase())
         .unwrap_or_else(|| "GET".to_string());
-    method != "GET" || args.contains_key("body") || args.contains_key("headers") || has_auth
+    method != "GET" || args.contains_key("body") || args.contains_key("headers") || has_secrets
 }
 
 /// Perform the HTTP request using the configured method, body, and headers.
@@ -137,6 +160,7 @@ async fn perform_request(
     url: &Url,
     args: &HashMap<String, String>,
     auth: Option<&str>,
+    secret_headers: &[(String, String)],
 ) -> Result<Bytes, BundlebaseError> {
     let method = parse_method(args)?;
     let headers = parse_headers(args);
@@ -152,6 +176,9 @@ async fn perform_request(
     }
     if let Some(auth) = auth {
         request = request.header(reqwest::header::AUTHORIZATION, auth);
+    }
+    for (name, value) in secret_headers {
+        request = request.header(name.as_str(), value.as_str());
     }
     if !body.is_empty() {
         request = request.body(body);
@@ -229,7 +256,7 @@ impl Connector for HttpConnector {
                 },
                 ArgSpec {
                     name: "headers",
-                    description: "Additional non-credential request headers, one per line as 'Name: Value'. Example: 'Accept: text/csv'. An Authorization header is rejected here (it would be persisted in the bundle) — supply it via secure config: SET CONFIG auth = '<value>' FOR 'http/<host>'.",
+                    description: "Additional non-credential request headers, one per line as 'Name: Value'. Example: 'Accept: text/csv'. Credential headers (Authorization, Cookie, Proxy-Authorization) are rejected here (they would be persisted in the bundle) — supply them via secure config: SET CONFIG auth = '<value>' FOR 'http/<host>' or SET CONFIG secret_headers = '<Name>: <value>' FOR 'http/<host>'.",
                     required: false,
                     default: None,
                 },
@@ -263,15 +290,25 @@ impl Connector for HttpConnector {
 
         // The `headers` arg is persisted in the bundle manifest, so a credential
         // placed there would leak to anyone the bundle is shared with. Require
-        // Authorization to be supplied via secure config instead.
-        if parse_headers(args)
+        // credential headers to be supplied via secure config instead (bb-rbo).
+        const CREDENTIAL_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
+        if let Some((name, _)) = parse_headers(args)
             .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+            .find(|(name, _)| {
+                CREDENTIAL_HEADERS
+                    .iter()
+                    .any(|c| name.eq_ignore_ascii_case(c))
+            })
         {
-            return Err("Do not put an Authorization header in `headers` — it would be \
-                 persisted in the bundle and shared with it. Set it via secure config \
-                 instead, e.g. `SET CONFIG auth = '<value>' FOR 'http/<host>'`."
-                .into());
+            return Err(format!(
+                "Do not put a {} header in `headers` — it would be persisted in the \
+                 bundle and shared with it. Set it via secure config instead: \
+                 `SET CONFIG auth = '<value>' FOR 'http/<host>'` for Authorization, or \
+                 `SET CONFIG secret_headers = '{}: <value>' FOR 'http/<host>'` for other \
+                 credential headers.",
+                name, name
+            )
+            .into());
         }
         Ok(())
     }
@@ -305,7 +342,8 @@ impl Connector for HttpConnector {
         // real request (bb-k9s).
         let head_info = if head_supported {
             let auth = resolve_auth(&url, config)?;
-            let headers = parse_headers(args);
+            let mut headers = parse_headers(args);
+            headers.extend(resolve_secret_headers(&url, config)?);
             shared_utils::read_http_head_info(&url, auth.as_deref(), &headers).await?
         } else {
             shared_utils::HttpHeadInfo {
@@ -361,11 +399,12 @@ impl Connector for HttpConnector {
             ))
         })?;
         let auth = resolve_auth(&url, config)?;
-        if !needs_custom_request(args, auth.is_some()) {
-            // Simple GET with no custom headers or auth — delegate to stable_url() path
+        let secret_headers = resolve_secret_headers(&url, config)?;
+        if !needs_custom_request(args, auth.is_some() || !secret_headers.is_empty()) {
+            // Simple GET with no custom headers or credentials — delegate to stable_url() path
             return Ok(None);
         }
-        let bytes = perform_request(&url, args, auth.as_deref()).await?;
+        let bytes = perform_request(&url, args, auth.as_deref(), &secret_headers).await?;
         Ok(Some(SourceData::RawBytes(Box::pin(stream::once(
             async move { Ok::<Bytes, std::io::Error>(bytes) },
         )))))
@@ -383,10 +422,11 @@ impl Connector for HttpConnector {
                 location.location, e
             ))
         })?;
-        // When auth must be injected, the io layer's direct fetch can't add it,
-        // so data() must perform the request instead of using a stable URL.
-        let has_auth = resolve_auth(&url, config)?.is_some();
-        if needs_custom_request(args, has_auth) {
+        // When credentials must be injected, the io layer's direct fetch can't
+        // add them, so data() must perform the request instead of a stable URL.
+        let has_secrets =
+            resolve_auth(&url, config)?.is_some() || !resolve_secret_headers(&url, config)?.is_empty();
+        if needs_custom_request(args, has_secrets) {
             // data() handles this request
             return Ok(None);
         }
@@ -787,6 +827,85 @@ mod tests {
     /// The discover HEAD probe must send the configured Authorization
     /// header — otherwise authenticated endpoints 401 during discovery and
     /// force head_supported=false (bb-k9s).
+    /// Cookie / Proxy-Authorization in the persisted `headers` arg would leak
+    /// credentials with the bundle, exactly like Authorization (bb-rbo).
+    #[test]
+    fn test_validate_rejects_credential_headers() {
+        let connector = HttpConnector;
+        for header in ["Cookie: session=abc", "Proxy-Authorization: Basic x"] {
+            let mut args = HashMap::new();
+            args.insert("url".to_string(), "https://example.com/d.csv".to_string());
+            args.insert("headers".to_string(), header.to_string());
+            assert!(
+                connector.validate_args(&args).is_err(),
+                "credential header must be rejected: {header}"
+            );
+        }
+    }
+
+    /// Arbitrary secret headers supplied via secure config must be injected
+    /// into the request without ever touching the manifest (bb-rbo).
+    #[tokio::test]
+    async fn test_secret_headers_from_config_sent_on_request() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::header("cookie", "session=abc"))
+            .and(wiremock::matchers::header("x-api-key", "k123"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("a,b\n1,2\n"))
+            .mount(&server)
+            .await;
+
+        let server_url = url::Url::parse(&server.uri()).expect("server url");
+        let host_scope = format!("http/{}", server_url.host_str().expect("host"));
+        let config = crate::test_utils::test_config_with_values(&[
+            ("system", "allow_internal_sources", "true"),
+            (
+                &host_scope,
+                SECRET_HEADERS_CFG.key,
+                "Cookie: session=abc\nX-Api-Key: k123",
+            ),
+        ]);
+        let config: Arc<dyn ConfigProvider> = config;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
+
+        let location = DiscoveredLocation {
+            location: format!("{}/data.csv", server.uri()),
+            must_copy: false,
+            format: SourceFormat::Csv,
+            version: "v".to_string(),
+            num_rows: None,
+        };
+        // Secret headers force the connector-managed request path.
+        assert!(
+            connector
+                .stable_url(&location, &args, &config)
+                .await
+                .expect("stable_url")
+                .is_none(),
+            "secret headers must route through data(), not a bare URL"
+        );
+        let data = connector
+            .data(&location, &args, &config)
+            .await
+            .expect("request with secret headers must succeed")
+            .expect("data() must handle the request");
+        match data {
+            SourceData::RawBytes(stream) => {
+                use futures::StreamExt;
+                let mut stream = stream;
+                let mut all = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    all.extend_from_slice(&chunk.expect("chunk"));
+                }
+                assert_eq!(all, b"a,b\n1,2\n");
+            }
+            _ => panic!("expected RawBytes"),
+        }
+    }
+
     #[tokio::test]
     async fn test_discover_head_probe_sends_auth() {
         let server = wiremock::MockServer::start().await;

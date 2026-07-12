@@ -211,17 +211,16 @@ Accept: text/csv'
     })
     ```
 
-**Custom headers (GET with authentication):**
+**Custom headers:**
 
-Use `headers` to add authorization tokens or request specific response formats from GET endpoints:
+Use `headers` for non-credential request headers, e.g. to request a specific response format:
 
 === "SQL"
 
     ```sql
     CREATE SOURCE USING http WITH (
         url = 'https://api.example.com/export',
-        headers = 'Authorization: Bearer my-api-token
-Accept: text/csv'
+        headers = 'Accept: text/csv'
     )
     ```
 
@@ -230,7 +229,7 @@ Accept: text/csv'
     ```python
     bundle = await bundle.create_source("http", {
         "url": "https://api.example.com/export",
-        "headers": "Authorization: Bearer my-api-token\nAccept: text/csv"
+        "headers": "Accept: text/csv"
     })
     ```
 
@@ -239,9 +238,27 @@ Accept: text/csv'
     ```python
     bundle = bundle.create_source("http", {
         "url": "https://api.example.com/export",
-        "headers": "Authorization: Bearer my-api-token\nAccept: text/csv"
+        "headers": "Accept: text/csv"
     })
     ```
+
+**Authentication:**
+
+The `headers` argument is persisted in the bundle manifest, so credential
+headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are rejected there —
+they would leak to anyone the bundle is shared with. Supply them via
+runtime-only secure [configuration](configuration.md), scoped per host:
+
+```sql
+-- Authorization header
+SET CONFIG auth = 'Bearer my-api-token' FOR 'http/api.example.com'
+
+-- Other credential headers (Cookie, API keys, ...), one 'Name: Value' per line
+SET CONFIG secret_headers = 'X-Api-Key: k123' FOR 'http/api.example.com'
+```
+
+Both are sent with every request to that host — including the discovery HEAD
+probe — and never written to the bundle.
 
 !!! note
     POST and PUT requests skip the HEAD probe entirely, so `head_supported` has no effect for non-GET methods.
