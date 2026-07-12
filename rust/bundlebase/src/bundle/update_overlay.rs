@@ -302,13 +302,33 @@ const ROW_NUMBER_COL: &str = "_row_number";
 const MASK_COL: &str = "_updated_mask";
 const BLOCK_REF_KEY: &str = "block_ref";
 
-/// Write overlay data to parquet bytes, one row group per block.
+/// Maximum rows per overlay parquet row group. Each written group carries its
+/// own `block_ref` metadata entry, so a block whose updates exceed this many
+/// rows is split across several correctly-attributed groups.
+const OVERLAY_MAX_ROWS_PER_GROUP: usize = 1024 * 1024;
+
+/// Write overlay data to parquet bytes, one or more row groups per block.
 ///
 /// `pending` maps RowId → (ColumnId → ScalarValue) for all updates in the transaction.
 /// `column_types` maps ColumnId → Arrow DataType for schema construction.
 pub fn write_overlay_parquet(
     pending: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
     column_types: &HashMap<ColumnId, arrow::datatypes::DataType>,
+) -> Result<Bytes, BundlebaseError> {
+    write_overlay_parquet_with_max(pending, column_types, OVERLAY_MAX_ROWS_PER_GROUP)
+}
+
+/// `write_overlay_parquet` with an explicit row-group row limit (testable).
+///
+/// The reader pairs row groups with `block_ref` metadata entries positionally,
+/// so every row group written here MUST append exactly one `block_ref` entry.
+/// The writer is configured with the same limit and each write is at most
+/// `max_rows_per_group` rows followed by a flush, so it never splits a write
+/// into extra (unattributed) groups.
+fn write_overlay_parquet_with_max(
+    pending: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
+    column_types: &HashMap<ColumnId, arrow::datatypes::DataType>,
+    max_rows_per_group: usize,
 ) -> Result<Bytes, BundlebaseError> {
     use arrow::array::*;
     use arrow::datatypes::{DataType, Field, Schema};
@@ -360,7 +380,9 @@ pub fn write_overlay_parquet(
     // Write one row group per block
     let mut buffer = Vec::new();
     {
-        let props = parquet::file::properties::WriterProperties::builder().build();
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_max_row_group_row_count(Some(max_rows_per_group))
+            .build();
         let mut writer =
             ArrowWriter::try_new(&mut buffer, schema.clone(), Some(props)).map_err(|e| {
                 BundlebaseError::from(format!("Failed to create parquet writer: {}", e))
@@ -441,18 +463,29 @@ pub fn write_overlay_parquet(
                 BundlebaseError::from(format!("Failed to build overlay batch: {}", e))
             })?;
 
-            // Write row group with block_ref metadata
-            writer.append_key_value_metadata(parquet::file::metadata::KeyValue::new(
-                BLOCK_REF_KEY.to_string(),
-                block_ref.to_string(),
-            ));
-
-            writer.write(&batch).map_err(|e| {
-                BundlebaseError::from(format!("Failed to write overlay parquet: {}", e))
-            })?;
-            writer
-                .flush()
-                .map_err(|e| BundlebaseError::from(format!("Failed to flush row group: {}", e)))?;
+            // Write the block's rows in chunks of at most max_rows_per_group,
+            // flushing after each so every chunk becomes exactly one row group
+            // — and append one block_ref metadata entry PER GROUP, since the
+            // reader pairs groups with entries positionally (bb-fqm.6: a
+            // single oversized write would be split by the writer into extra
+            // groups with no matching entry, mis-attributing every overlay
+            // after the split).
+            let mut offset = 0usize;
+            while offset < num_rows {
+                let len = max_rows_per_group.min(num_rows - offset);
+                let chunk = batch.slice(offset, len);
+                writer.append_key_value_metadata(parquet::file::metadata::KeyValue::new(
+                    BLOCK_REF_KEY.to_string(),
+                    block_ref.to_string(),
+                ));
+                writer.write(&chunk).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to write overlay parquet: {}", e))
+                })?;
+                writer.flush().map_err(|e| {
+                    BundlebaseError::from(format!("Failed to flush row group: {}", e))
+                })?;
+                offset += len;
+            }
         }
 
         writer.close().map_err(|e| {
@@ -667,6 +700,58 @@ mod tests {
             ScalarValue::try_from_array(values, 0).expect("read value"),
             ScalarValue::Int64(Some(100))
         );
+    }
+
+    #[test]
+    fn test_roundtrip_blocks_larger_than_row_group_limit() {
+        // bb-fqm.6: a block with more updated rows than the parquet
+        // max-row-group limit gets split into multiple row groups. Every
+        // group must carry its own block_ref metadata or the positional
+        // pairing on read mis-attributes overlays to the wrong blocks.
+        let col_id = ColumnId::generate();
+        let mut pending = HashMap::new();
+        for block in 0..2u16 {
+            for row in 0..5u32 {
+                let mut cell = HashMap::new();
+                cell.insert(
+                    col_id,
+                    ScalarValue::Int64(Some((block as i64) * 1000 + row as i64)),
+                );
+                pending.insert(RowId::new(ObjectIdAlias::from(block), row), cell);
+            }
+        }
+        let mut column_types = HashMap::new();
+        column_types.insert(col_id, DataType::Int64);
+
+        // Limit of 2 rows per group → each 5-row block spans 3 groups.
+        let bytes =
+            write_overlay_parquet_with_max(&pending, &column_types, 2).expect("write failed");
+        let overlays = read_overlay_parquet(&bytes).expect("read failed");
+
+        // Merge the per-group overlays per block and verify every value landed
+        // on the block that owns it.
+        let mut seen: std::collections::BTreeMap<u16, Vec<(u32, i64)>> =
+            std::collections::BTreeMap::new();
+        for (block_ref, overlay) in &overlays {
+            let (values, is_set) = overlay.columns.get(&col_id).expect("column");
+            for i in 0..overlay.row_numbers.len() {
+                assert!(is_set.value(i));
+                let v = match ScalarValue::try_from_array(values, i).expect("value") {
+                    ScalarValue::Int64(Some(v)) => v,
+                    other => panic!("unexpected value {other:?}"),
+                };
+                seen.entry(*block_ref)
+                    .or_default()
+                    .push((overlay.row_numbers[i], v));
+            }
+        }
+        for (block, mut rows) in seen {
+            rows.sort_unstable();
+            let expected: Vec<(u32, i64)> = (0..5u32)
+                .map(|r| (r, (block as i64) * 1000 + r as i64))
+                .collect();
+            assert_eq!(rows, expected, "block {block} overlay rows mis-attributed");
+        }
     }
 
     #[test]
