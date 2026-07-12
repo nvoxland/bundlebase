@@ -420,28 +420,8 @@ impl Operation for AttachBlockOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // A referenced (absolute-URL) location is read on whatever machine
-        // opens the bundle, so the SSRF guard must run here too — a
-        // hand-crafted manifest bypasses the fetch/discover-time checks
-        // (bb-1xq). Gated on system.allow_internal_sources like those.
-        // file:// is exempt: attaching local files by absolute path is a
-        // first-class local workflow, and the fetch-time policy already
-        // forces connector references to copy local data into the bundle.
-        if let Ok(url) = url::Url::parse(&self.location) {
-            if url.scheme() != "file" {
-                if let bundlebase_common::url_safety::UrlSafety::Blocked(reason) =
-                    bundlebase_common::url_safety::classify_source_url(&url)
-                {
-                    let allowed = bundlebase_common::system_config::is_internal_sources_allowed(
-                        bundle.config().as_ref(),
-                    )
-                    .map_err(DataFusionError::External)?;
-                    if !allowed {
-                        return Err(DataFusionError::External(reason.into()));
-                    }
-                }
-            }
-        }
+        // SSRF guard for manifest-stored referenced locations (bb-1xq).
+        super::check_referenced_location(&self.location, bundle.config().as_ref())?;
 
         // Only validate version for files that are NOT copied from a source.
         // When a file is copied (source_info.is_some()), the stored version is the
