@@ -32,7 +32,13 @@ pub(crate) fn invoke_ipc_scalar_impl(
         })
         .collect::<DFResult<Vec<_>>>()?;
 
-    let result = ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, function_name, &arrays)
+    let result = ipc_bridge::invoke_ipc_scalar(
+        subprocess_cache,
+        entrypoint,
+        function_name,
+        &arrays,
+        args.number_rows,
+    )
         .map_err(|e| {
             datafusion::common::DataFusionError::Execution(format!(
                 "IPC function '{}' ({}) failed: {}",

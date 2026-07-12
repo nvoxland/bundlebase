@@ -114,6 +114,7 @@ pub fn invoke_lib_scalar(
     lib_path: &str,
     symbol: &str,
     args: &[ArrayRef],
+    expected_rows: usize,
 ) -> Result<ArrayRef, BundlebaseError> {
     let lib = load_library(lib_path)?;
 
@@ -180,7 +181,9 @@ pub fn invoke_lib_scalar(
         .map_err(|e| BundlebaseError::from(format!("Failed to convert FFI output: {}", e)))?;
 
     let result = arrow::array::make_array(out_data);
-    let expected_rows = args.first().map(|a| a.len()).unwrap_or(result.len());
+    // A scalar UDF returns one value per input row; validate against the
+    // batch row count (not args[0].len(), which is unavailable for zero-arg
+    // functions — bb-nt8).
     validate_scalar_result_rows(result, expected_rows, symbol, lib_path)
 }
 
@@ -692,7 +695,7 @@ mod tests {
     fn test_invoke_lib_scalar_double_val() {
         let path = test_lib_path();
         let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3, 4, 5]));
-        let result = invoke_lib_scalar(&path, "double_val", &[input]).unwrap();
+        let result = invoke_lib_scalar(&path, "double_val", &[input.clone()], input.len()).unwrap();
 
         let int_result = result
             .as_any()
@@ -710,7 +713,7 @@ mod tests {
             None,
             Some(30),
         ]));
-        let result = invoke_lib_scalar(&path, "double_val", &[input]).unwrap();
+        let result = invoke_lib_scalar(&path, "double_val", &[input.clone()], input.len()).unwrap();
 
         let int_result = result
             .as_any()
@@ -727,7 +730,7 @@ mod tests {
     fn test_invoke_lib_scalar_symbol_not_found() {
         let path = test_lib_path();
         let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1]));
-        let result = invoke_lib_scalar(&path, "nonexistent_func", &[input]);
+        let result = invoke_lib_scalar(&path, "nonexistent_func", &[input.clone()], input.len());
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

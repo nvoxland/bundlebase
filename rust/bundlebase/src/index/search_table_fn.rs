@@ -182,6 +182,7 @@ impl TableFunctionImpl for SearchTableFunction {
             run_async_blocking(compute_logical_output_schema(
                 physical_output_schema.clone(),
                 operations.clone(),
+                ctx.clone(),
             ))?;
 
         Ok(Arc::new(SearchResultTableProvider {
@@ -216,10 +217,27 @@ fn physical_output_schema(bundle_schema: &bundle_schema::BundleSchema) -> Schema
 async fn compute_logical_output_schema(
     physical_with_score: SchemaRef,
     operations: Vec<AnyOperation>,
+    source_ctx: Arc<SessionContext>,
 ) -> Result<SchemaRef, DataFusionError> {
     let mut config = SessionConfig::new();
     config.options_mut().sql_parser.enable_ident_normalization = false;
     let ctx = SessionContext::new_with_config(config);
+    // Copy the bundle's registered UDFs so an operation whose `apply_dataframe`
+    // plans SQL referencing a custom function (e.g. a filter/add_column using a
+    // registered UDF) can be planned on this throwaway context too — otherwise
+    // schema computation errors with "function not found" (bb-nt8).
+    {
+        let state = source_ctx.state();
+        for udf in state.scalar_functions().values() {
+            ctx.register_udf(udf.as_ref().clone());
+        }
+        for udaf in state.aggregate_functions().values() {
+            ctx.register_udaf(udaf.as_ref().clone());
+        }
+        for udwf in state.window_functions().values() {
+            ctx.register_udwf(udwf.as_ref().clone());
+        }
+    }
     let empty_batch = RecordBatch::new_empty(physical_with_score.clone());
     ctx.register_batch("bundle", empty_batch)
         .map_err(|e| DataFusionError::External(Box::new(e)))?;

@@ -123,7 +123,8 @@ impl UdfEntrypoint for FfiRuntime {
             })
             .collect::<DFResult<Vec<_>>>()?;
 
-        let result = invoke_lib_scalar(&self.path, symbol, &arrays).map_err(|e| {
+        let result =
+            invoke_lib_scalar(&self.path, symbol, &arrays, args.number_rows).map_err(|e| {
             datafusion::common::DataFusionError::Execution(format!(
                 "FFI function '{}' ({}:{}) failed: {}",
                 name, self.path, symbol, e

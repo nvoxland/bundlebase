@@ -1512,6 +1512,11 @@ impl BundleBuilder {
                     continue;
                 }
                 let block_ref = ObjectIdAlias::from(idx as u16);
+                // Rows already tombstoned in this block must not be re-selected:
+                // a repeated DELETE would otherwise re-report them and re-record
+                // redundant tombstones (bb-nt8).
+                let deleted: std::collections::HashSet<u32> =
+                    block.deleted_rows().into_iter().collect();
                 let mut stream = block
                     .reader()
                     .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
@@ -1615,7 +1620,10 @@ impl BundleBuilder {
                                 }
                             };
                             if val < row_ids.len() {
-                                matching_ids.insert(row_ids[val]);
+                                let row_id = row_ids[val];
+                                if !deleted.contains(&row_id.row_number()) {
+                                    matching_ids.insert(row_id);
+                                }
                             }
                         }
                     }
@@ -2605,6 +2613,31 @@ mod tests {
     /// block must hold a bounded number of overlays (one session overlay),
     /// not one per UPDATE — the old push-per-flush made overlay merge cost
     /// grow O(N²) in a multi-update session.
+    /// bb-nt8(1): `select_row_ids` must not re-select rows already tombstoned
+    /// in this session — otherwise a repeated DELETE re-reports the same count
+    /// and re-records redundant tombstones.
+    #[tokio::test]
+    async fn test_select_row_ids_skips_already_deleted() {
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let pred = builder.translate_sql("salary > 200000");
+        let first = builder.select_row_ids(&pred).await.unwrap();
+        assert!(!first.is_empty(), "fixture should have matching rows");
+
+        builder.mark_deleted(first.clone(), &pred);
+
+        let second = builder.select_row_ids(&pred).await.unwrap();
+        assert!(
+            second.is_empty(),
+            "already-tombstoned rows must not be re-selected (got {} rows)",
+            second.len()
+        );
+    }
+
     #[tokio::test]
     async fn test_repeated_flushes_do_not_accumulate_overlays() {
         use crate::test_utils::empty_bundle;

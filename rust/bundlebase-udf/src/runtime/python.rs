@@ -203,6 +203,7 @@ impl UdfEntrypoint for PythonRuntime {
                 &call_string,
                 &self.function,
                 &arrays,
+                args.number_rows,
             )
             .map_err(|e| {
                 datafusion::common::DataFusionError::Execution(format!(

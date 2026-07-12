@@ -293,6 +293,13 @@ impl DataReader for JsonlReader {
 
         // Stream the file counting logical rows — O(1) memory, no buffering.
         // Blank lines are skipped to match the parser's row numbering.
+        //
+        // This is a fast line count, not a parse: it deliberately does NOT
+        // validate that each line is a JSON object. A malformed (non-object)
+        // line is still counted here, so COUNT(*) can return a number for a
+        // file whose full scan would error (bb-dvo.1). Parsing every line to
+        // reconcile would defeat the streaming-COUNT fast path; for
+        // well-formed JSONL the count matches the scan exactly (bb-nt8).
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut stream = get_result.into_stream();
 

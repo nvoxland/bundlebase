@@ -270,6 +270,10 @@ impl SyncSubprocessHandle {
     /// blocked forever: a payload larger than the pipe buffer sent to a
     /// stalled child parks a DataFusion worker permanently (bb-dvo.10). Same
     /// watchdog pattern as `read_line_with_timeout`.
+    ///
+    /// The timeout is only enforced on unix (via `kill`). On non-unix targets
+    /// the watchdog can't terminate the child, so a stalled write still hangs
+    /// — it logs the limitation rather than silently no-op'ing (bb-nt8).
     fn write_all_with_timeout(&mut self, data: &[u8], what: &str) -> Result<(), BundlebaseError> {
         let timeout = self.timeout;
         let child_id = self.child.id();
@@ -305,7 +309,11 @@ impl SyncSubprocessHandle {
                 }
                 #[cfg(not(unix))]
                 {
-                    let _ = child_id;
+                    log::warn!(
+                        "IPC subprocess (pid {}) stalled but the timeout can't be enforced on \
+                         this platform (no kill support); the operation will remain blocked",
+                        child_id
+                    );
                 }
             }
         });
@@ -443,7 +451,11 @@ impl SyncSubprocessHandle {
                 }
                 #[cfg(not(unix))]
                 {
-                    let _ = child_id;
+                    log::warn!(
+                        "IPC subprocess (pid {}) stalled but the timeout can't be enforced on \
+                         this platform (no kill support); the operation will remain blocked",
+                        child_id
+                    );
                 }
             }
         });
@@ -799,6 +811,7 @@ pub fn invoke_ipc_scalar(
     entrypoint: &str,
     function_name: &str,
     args: &[ArrayRef],
+    expected_rows: usize,
 ) -> Result<ArrayRef, BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
     let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
@@ -861,9 +874,10 @@ pub fn invoke_ipc_scalar(
 
     // The subprocess is untrusted: validate the shape rather than blindly
     // returning batches[0].column(0) (which silently truncated a chunked
-    // response and never checked the row count against the input).
-    let expected_rows = args.first().map(|a| a.len());
-    assemble_scalar_result(function_name, &batches, expected_rows)
+    // response and never checked the row count against the input). Validate
+    // against the batch row count so zero-arg functions are checked too
+    // (bb-nt8).
+    assemble_scalar_result(function_name, &batches, Some(expected_rows))
 }
 
 /// Validate and assemble the scalar result column from a UDF's output batches.
