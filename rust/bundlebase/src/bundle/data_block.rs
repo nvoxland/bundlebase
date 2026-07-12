@@ -1231,7 +1231,14 @@ impl TableProvider for DataBlock {
                         .await
                         .map_err(datafusion::common::DataFusionError::External)?;
                 }
-                let mut source = self.streaming_scan_source(projection, limit).await?;
+                // Only push the limit into the reader when no rows are
+                // tombstoned — otherwise the reader stops at `lim` RAW rows
+                // and the delete filter above drops some of them, silently
+                // returning too few rows (same guard as the cache/page
+                // phases). Overlays replace values without dropping rows, so
+                // they don't affect the limit.
+                let push_limit = if deleted.is_empty() { limit } else { None };
+                let mut source = self.streaming_scan_source(projection, push_limit).await?;
                 // ORDER MATTERS: both wrappers apply block-global row ordinals
                 // to their input stream. The overlay must wrap the RAW stream
                 // (it replaces values, preserving positions); the delete filter
