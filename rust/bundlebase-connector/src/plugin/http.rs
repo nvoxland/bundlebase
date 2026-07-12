@@ -165,7 +165,13 @@ async fn perform_request(
     let headers = parse_headers(args);
     let body = args.get("body").cloned().unwrap_or_default();
 
-    let client = reqwest::Client::new();
+    // When credentials are injected, refuse to follow a cross-origin redirect
+    // so the credential can't leak to a third-party host (bb-chx).
+    let client = if auth.is_some() || !secret_headers.is_empty() {
+        shared_utils::same_origin_redirect_client()?
+    } else {
+        reqwest::Client::new()
+    };
     let req_method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|e| BundlebaseError::from(format!("Invalid HTTP method '{}': {}", method, e)))?;
 
@@ -334,12 +340,14 @@ impl Connector for HttpConnector {
 
         // Read HEAD info (version + content-type) unless HEAD is disabled or method is non-GET.
         // The probe carries the same Authorization and custom headers as the
-        // real request (bb-k9s).
+        // real request (bb-k9s). Secret headers stay separate so a cross-origin
+        // redirect can't leak them (bb-chx).
         let head_info = if head_supported {
             let auth = resolve_auth(&url, config)?;
-            let mut headers = parse_headers(args);
-            headers.extend(resolve_secret_headers(&url, config)?);
-            shared_utils::read_http_head_info(&url, auth.as_deref(), &headers).await?
+            let headers = parse_headers(args);
+            let secret_headers = resolve_secret_headers(&url, config)?;
+            shared_utils::read_http_head_info(&url, auth.as_deref(), &headers, &secret_headers)
+                .await?
         } else {
             shared_utils::HttpHeadInfo {
                 version: "unknown".to_string(),
@@ -1353,6 +1361,65 @@ mod tests {
             "400 errors should not suggest head_supported: {}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn test_secret_headers_not_leaked_across_cross_origin_redirect() {
+        // bb-chx: a secret header configured for the source host must not be
+        // forwarded to a different origin when that host redirects. reqwest
+        // only auto-strips Authorization/Cookie cross-origin, not custom
+        // headers like X-Api-Key, so a naive follow would leak the credential.
+        use wiremock::matchers::{header_exists, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let attacker = MockServer::start().await;
+        // The attacker origin accepts anything and would capture a leaked header.
+        Mock::given(method("HEAD"))
+            .respond_with(ResponseTemplate::new(200).insert_header("content-type", "text/csv"))
+            .mount(&attacker)
+            .await;
+
+        let source = MockServer::start().await;
+        // The source (which the secret is scoped to) redirects cross-origin.
+        Mock::given(method("HEAD"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("{}/leaked.csv", attacker.uri())),
+            )
+            .mount(&source)
+            .await;
+
+        let source_url = url::Url::parse(&source.uri()).expect("source url");
+        let host_scope = format!("http/{}", source_url.host_str().expect("host"));
+        let config = crate::test_utils::test_config_with_values(&[(
+            &host_scope,
+            SECRET_HEADERS_CFG.key,
+            "X-Api-Key: super-secret",
+        )]);
+        let config: Arc<dyn ConfigProvider> = config;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", source.uri()));
+
+        // Discovery HEAD-probes the source, which redirects to the attacker.
+        // The cross-origin redirect must be refused, so discover errors and
+        // the attacker never receives the request (and thus never the header).
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(
+            result.is_err(),
+            "cross-origin redirect carrying a credential must be refused"
+        );
+
+        let attacker_hits = attacker.received_requests().await.unwrap_or_default();
+        assert!(
+            attacker_hits.is_empty(),
+            "attacker origin must not be contacted (would have leaked the secret header): {} hits",
+            attacker_hits.len()
+        );
+
+        // Sanity: the matcher we'd use to detect a leak is real.
+        let _ = header_exists("x-api-key");
     }
 
     #[tokio::test]

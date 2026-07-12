@@ -88,7 +88,7 @@ impl Connector for WebScrapeConnector {
             );
 
             // Read version from HTTP headers
-            let version = shared_utils::read_http_head_info(&url, None, &[])
+            let version = shared_utils::read_http_head_info(&url, None, &[], &[])
                 .await
                 .map(|info| info.version)
                 .unwrap_or_else(|_| "unknown".to_string());

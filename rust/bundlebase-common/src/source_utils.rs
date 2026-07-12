@@ -145,24 +145,67 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// Build a reqwest client whose redirect policy refuses to follow a redirect
+/// to a different origin (scheme + host + port).
+///
+/// Requests that carry injected credentials (an `Authorization` header or
+/// arbitrary secret headers like `X-Api-Key`) must use this: reqwest only
+/// auto-strips its own known-sensitive headers (Authorization/Cookie) on a
+/// cross-origin redirect, not custom ones, so a `302` to a third-party host
+/// would otherwise leak the credential there (bb-chx). Same-origin redirects
+/// are still followed (bounded), and non-credentialed requests keep the
+/// default follow-anywhere behavior.
+pub fn same_origin_redirect_client() -> Result<reqwest::Client, BundlebaseError> {
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        let same_origin = attempt
+            .previous()
+            .first()
+            .map(|prev| prev.origin() == attempt.url().origin())
+            .unwrap_or(false);
+        if !same_origin {
+            // Cross-origin: stop (return the 3xx) so the credential is never
+            // sent to another origin.
+            attempt.stop()
+        } else if attempt.previous().len() >= 10 {
+            attempt.error("too many redirects")
+        } else {
+            attempt.follow()
+        }
+    });
+    reqwest::Client::builder()
+        .redirect(policy)
+        .build()
+        .map_err(|e| BundlebaseError::from(format!("Failed to build HTTP client: {e}")))
+}
+
 /// Read version and content-type from an HTTP(S) URL via HEAD request.
 ///
 /// Returns an error if the HEAD request fails or returns a non-success status.
 /// Some servers don't support HEAD properly — use `head_supported=false` on the
 /// http connector to skip this check entirely.
+///
+/// `secret_headers` are credential headers (e.g. from secure config) and are
+/// kept separate from plain `headers` so a cross-origin redirect can't leak
+/// them (bb-chx).
 pub async fn read_http_head_info(
     url: &Url,
     auth: Option<&str>,
     headers: &[(String, String)],
+    secret_headers: &[(String, String)],
 ) -> Result<HttpHeadInfo, BundlebaseError> {
-    let mut request = reqwest::Client::new().head(url.as_str());
+    let client = if auth.is_some() || !secret_headers.is_empty() {
+        same_origin_redirect_client()?
+    } else {
+        reqwest::Client::new()
+    };
+    let mut request = client.head(url.as_str());
     // Authenticated endpoints must get the same Authorization header as the
     // actual download — otherwise discovery 401s and forces
     // head_supported=false (bb-k9s).
     if let Some(auth) = auth {
         request = request.header(reqwest::header::AUTHORIZATION, auth);
     }
-    for (name, value) in headers {
+    for (name, value) in headers.iter().chain(secret_headers.iter()) {
         request = request.header(name.as_str(), value.as_str());
     }
     let response = request
