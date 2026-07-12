@@ -105,6 +105,16 @@ _original_methods = {
 
     # Custom function operations
     "import_function": _PyBundleBuilder.import_function,
+    "import_temp_function": _PyBundleBuilder.import_temp_function,
+    "rename_function": _PyBundleBuilder.rename_function,
+    "drop_function": _PyBundleBuilder.drop_function,
+
+    # Connector operations
+    "rename_connector": _PyBundleBuilder.rename_connector,
+
+    # Report operations
+    "create_report": _PyBundleBuilder.create_report,
+    "drop_report": _PyBundleBuilder.drop_report,
 
     # Index operations
     "create_index": _PyBundleBuilder.create_index,
@@ -165,7 +175,9 @@ mutation_methods = [
     "add_column", "cast_column", "drop_column", "rename_column", "filter", "join",
     "delete", "update", "always_delete", "drop_always_delete", "always_update", "drop_always_update",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "save_config", "set_config", "import_function",
+    "set_name", "set_description", "save_config", "set_config",
+    "import_function", "import_temp_function", "rename_function", "drop_function",
+    "rename_connector", "create_report", "drop_report",
     "create_index", "drop_index", "rebuild_index", "reindex",
     "reset", "undo"
 ]

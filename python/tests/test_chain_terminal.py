@@ -95,3 +95,35 @@ async def test_extend_chain_query():
         assert isinstance(result, bundlebase.QueryResult)
         df = await result.to_pandas()
         assert len(df) == 3
+
+
+# bb-n5m: these builder mutations must be registered so they're chainable.
+_CHAINABLE_MUTATIONS = [
+    "create_report",
+    "drop_report",
+    "drop_function",
+    "rename_function",
+    "rename_connector",
+    "import_temp_function",
+]
+
+
+def test_mutation_methods_are_chainable():
+    """Every builder mutation the stubs advertise on chains must resolve
+    through chain._ORIGINAL_METHODS, or chaining it raises AttributeError."""
+    from bundlebase.chain import _ORIGINAL_METHODS
+
+    missing = [m for m in _CHAINABLE_MUTATIONS if m not in _ORIGINAL_METHODS]
+    assert missing == [], f"not registered for chaining: {missing}"
+
+
+@pytest.mark.asyncio
+async def test_chain_create_report_executes():
+    """`c.attach(f).create_report(...)` must queue+run create_report, not raise
+    AttributeError when the chain validates the method."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet")).create_report(
+        "r1", "My Report", "a description", "# Heading"
+    )
+    # The chain resolved and executed; the builder came back.
+    assert c is not None

@@ -1666,6 +1666,41 @@ class OperationChain:
         """Queue a drop_index operation."""
         ...
 
+    def create_report(self, id: str, name: str, description: str, content: str) -> "OperationChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "OperationChain":
+        """Queue a drop_report operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "OperationChain":
+        """Queue a drop_function operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_function operation."""
+        ...
+
+    def rename_connector(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def import_temp_function(
+        self,
+        name: str,
+        from_: str,
+        platform: str = "*/*",
+    ) -> "OperationChain":
+        """Queue a import_temp_function operation."""
+        ...
+
+
     def set_name(self, name: str) -> "OperationChain":
         """Queue a set_name operation."""
         ...
@@ -1795,6 +1830,41 @@ class CreateChain:
         """Queue a drop_index operation."""
         ...
 
+    def create_report(self, id: str, name: str, description: str, content: str) -> "CreateChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "CreateChain":
+        """Queue a drop_report operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "CreateChain":
+        """Queue a drop_function operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_function operation."""
+        ...
+
+    def rename_connector(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def import_temp_function(
+        self,
+        name: str,
+        from_: str,
+        platform: str = "*/*",
+    ) -> "CreateChain":
+        """Queue a import_temp_function operation."""
+        ...
+
+
     def set_name(self, name: str) -> "CreateChain":
         """Queue a set_name operation."""
         ...
@@ -1923,6 +1993,41 @@ class ExtendChain:
     def drop_index(self, column: str) -> "ExtendChain":
         """Queue a drop_index operation."""
         ...
+
+    def create_report(self, id: str, name: str, description: str, content: str) -> "ExtendChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "ExtendChain":
+        """Queue a drop_report operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "ExtendChain":
+        """Queue a drop_function operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_function operation."""
+        ...
+
+    def rename_connector(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def import_temp_function(
+        self,
+        name: str,
+        from_: str,
+        platform: str = "*/*",
+    ) -> "ExtendChain":
+        """Queue a import_temp_function operation."""
+        ...
+
 
     def set_name(self, name: str) -> "ExtendChain":
         """Queue a set_name operation."""
