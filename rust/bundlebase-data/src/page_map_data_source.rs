@@ -325,6 +325,12 @@ impl PageMapDataSource {
             .iter()
             .map(|expr| {
                 let column = expr.expr.as_any().downcast_ref::<Column>()?;
+                // An aliased column must keep its Projection node — swapping
+                // drops the alias and collapses duplicate source columns
+                // (DataFusion's all_alias_free_columns rule).
+                if column.name() != expr.alias {
+                    return None;
+                }
                 current_projection.get(column.index()).copied()
             })
             .collect()

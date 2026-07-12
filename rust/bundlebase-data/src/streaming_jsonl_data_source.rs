@@ -82,13 +82,19 @@ impl StreamingJsonlDataSource {
 
     /// Map a planner projection (over our current output columns) back to
     /// indices into the original schema. Returns `None` if any expression is
-    /// not a plain column reference.
+    /// not an alias-free column reference — an alias (e.g. `SELECT a AS x`)
+    /// must keep its Projection node, otherwise the output loses the alias
+    /// and duplicate source columns collapse in the by-name builders
+    /// (matching DataFusion's `all_alias_free_columns` rule).
     fn remap_projection(&self, projection: &ProjectionExprs) -> Option<Vec<usize>> {
         let current_projection = self.current_projection_indices();
         projection
             .iter()
             .map(|expr| {
                 let column = expr.expr.as_any().downcast_ref::<Column>()?;
+                if column.name() != expr.alias {
+                    return None;
+                }
                 current_projection.get(column.index()).copied()
             })
             .collect()
@@ -113,64 +119,89 @@ struct ScanState {
     done: bool,
 }
 
+/// Append one line's values to the builders. Returns `Ok(false)` for
+/// blank/whitespace-only lines (not logical rows).
+fn process_line(
+    line: &[u8],
+    name_to_idx: &HashMap<&str, usize>,
+    builders: &mut [StringBuilder],
+) -> datafusion::common::Result<bool> {
+    let line = if line.last() == Some(&b'\r') {
+        &line[..line.len() - 1]
+    } else {
+        line
+    };
+    if line.is_empty() || line.iter().all(|b| b.is_ascii_whitespace()) {
+        // Whitespace-only lines are not logical rows (the layout's row
+        // numbering skips them too).
+        return Ok(false);
+    }
+    // A malformed line must be an error, not a silent skip: dropped lines
+    // desync logical row numbers from the byte-offset layout, and every
+    // downstream RowId (tombstones, overlays, indexes) would point at the
+    // wrong row (bb-dvo.1).
+    if !crate::jsonl_row::append_jsonl_row_to_builders(line, name_to_idx, builders) {
+        return Err(DataFusionError::External(
+            format!(
+                "Malformed JSONL line (not a JSON object): {}",
+                String::from_utf8_lossy(&line[..line.len().min(120)])
+            )
+            .into(),
+        ));
+    }
+    Ok(true)
+}
+
 impl ScanState {
-    /// Append one line's values to the builders. Returns `Ok(false)` for
-    /// blank/whitespace-only lines (not logical rows).
-    fn process_line(&mut self, line: &[u8]) -> datafusion::common::Result<bool> {
-        let line = if line.last() == Some(&b'\r') {
-            &line[..line.len() - 1]
-        } else {
-            line
-        };
-        if line.is_empty() || line.iter().all(|b| b.is_ascii_whitespace()) {
-            // Whitespace-only lines are not logical rows (the layout's row
-            // numbering skips them too).
-            return Ok(false);
-        }
+    /// Drain buffered complete lines, stopping at a full batch or the fetch
+    /// limit — a single large chunk (e.g. the memory store returns the whole
+    /// object at once) must still come out as bounded batches. Lines are
+    /// scanned in place with a cursor and the buffer compacted ONCE at the
+    /// end: per-line `Vec::drain` memmoves made this quadratic in chunk size.
+    fn drain_complete_lines(&mut self) -> datafusion::common::Result<()> {
         let name_to_idx: HashMap<&str, usize> = self
             .col_names
             .iter()
             .enumerate()
             .map(|(i, n)| (n.as_str(), i))
             .collect();
-        // A malformed line must be an error, not a silent skip: dropped lines
-        // desync logical row numbers from the byte-offset layout, and every
-        // downstream RowId (tombstones, overlays, indexes) would point at the
-        // wrong row (bb-dvo.1).
-        if !crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut self.builders)
-        {
-            return Err(DataFusionError::External(
-                format!(
-                    "Malformed JSONL line (not a JSON object): {}",
-                    String::from_utf8_lossy(&line[..line.len().min(120)])
-                )
-                .into(),
-            ));
-        }
-        Ok(true)
-    }
 
-    /// Drain buffered complete lines, stopping at a full batch or the fetch
-    /// limit — a single large chunk (e.g. the memory store returns the whole
-    /// object at once) must still come out as bounded batches.
-    fn drain_complete_lines(&mut self) -> datafusion::common::Result<()> {
-        while self.rows < BATCH_ROWS {
+        let mut consumed = 0usize;
+        let result = loop {
+            if self.rows >= BATCH_ROWS {
+                break Ok(());
+            }
             if matches!(self.remaining_fetch, Some(0)) {
                 self.done = true;
-                return Ok(());
+                break Ok(());
             }
-            let Some(nl) = self.pending.iter().position(|&b| b == b'\n') else {
-                return Ok(());
+            let Some(nl_rel) = memchr::memchr(b'\n', &self.pending[consumed..]) else {
+                break Ok(());
             };
-            let line: Vec<u8> = self.pending.drain(..=nl).collect();
-            if self.process_line(&line[..line.len() - 1])? {
-                self.rows += 1;
-                if let Some(remaining) = &mut self.remaining_fetch {
-                    *remaining -= 1;
+            let line_end = consumed + nl_rel;
+            match process_line(
+                &self.pending[consumed..line_end],
+                &name_to_idx,
+                &mut self.builders,
+            ) {
+                Ok(true) => {
+                    self.rows += 1;
+                    if let Some(remaining) = &mut self.remaining_fetch {
+                        *remaining -= 1;
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    consumed = line_end + 1;
+                    break Err(e);
                 }
             }
+            consumed = line_end + 1;
+        };
+        if consumed > 0 {
+            self.pending.drain(..consumed);
         }
-        Ok(())
+        result
     }
 
     /// Build a batch from the accumulated rows and reset the accumulators.
@@ -227,12 +258,12 @@ async fn next_batch(mut state: ScanState) -> Option<(datafusion::common::Result<
             }
         }
 
-        let next_chunk = state
-            .byte_stream
-            .as_mut()
-            .expect("byte_stream initialized above")
-            .next()
-            .await;
+        let Some(byte_stream) = state.byte_stream.as_mut() else {
+            // Unreachable: initialized above; treat defensively as EOF.
+            state.done = true;
+            continue;
+        };
+        let next_chunk = byte_stream.next().await;
         match next_chunk {
             Some(Ok(chunk)) => {
                 // Draining and batch emission happen at the top of the loop.
@@ -247,7 +278,13 @@ async fn next_batch(mut state: ScanState) -> Option<(datafusion::common::Result<
                 // EOF terminates any final unterminated line.
                 if !state.pending.is_empty() && !matches!(state.remaining_fetch, Some(0)) {
                     let line: Vec<u8> = std::mem::take(&mut state.pending);
-                    match state.process_line(&line) {
+                    let name_to_idx: HashMap<&str, usize> = state
+                        .col_names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, n)| (n.as_str(), i))
+                        .collect();
+                    match process_line(&line, &name_to_idx, &mut state.builders) {
                         Ok(true) => state.rows += 1,
                         Ok(false) => {}
                         Err(e) => return Some((Err(e), state)),
