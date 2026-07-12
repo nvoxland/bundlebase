@@ -96,3 +96,19 @@ def test_sync_opened_bundle_drop_temp_function_binding_exists():
         assert not isinstance(e, (TypeError, AttributeError)), (
             f"drop_temp_function never reached the Rust layer: {e!r}"
         )
+
+def test_sync_verify_data():
+    """bb-bos.1: verify_data() must exist in the sync API (docs promised it)."""
+    path = random_bundle()
+    c = bb.create(path)
+    c.attach(datafile("userdata.parquet"))
+    c.commit("initial")
+
+    # Builder variant supports update_versions.
+    results = c.verify_data(update_versions=False)
+    assert results is not None
+
+    # Opened read-only bundles can verify (no update_versions arg).
+    opened = bb.open(path)
+    results = opened.verify_data()
+    assert results is not None

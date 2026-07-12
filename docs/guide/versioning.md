@@ -68,19 +68,25 @@ Until `commit()` is called, any changes you have made remain in-memory and only 
 
 ## Status
 
-View uncommitted changes in the bundle.
+View uncommitted changes in the bundle. `status()` is available on builders
+(from `create()` or `extend()`) — a bundle opened read-only has no uncommitted
+changes and no `status()` method.
 
 === "Async API"
 
     ```python
-    status = bundle.status()
+    builder = await bundlebase.create("./my_bundle")
+    await builder.attach("data.parquet")
+    status = builder.status()
     print(f"Pending changes: {status.change_count}")
     ```
 
 === "Sync API"
 
     ```python
-    status = bundle.status()
+    builder = bundlebase.sync.create("./my_bundle")
+    builder.attach("data.parquet")
+    status = builder.status()
     print(f"Pending changes: {status.change_count}")
     ```
 
@@ -145,8 +151,18 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     results = await bundle.verify_data()
     print(results)
 
-    # Optionally update stored version metadata if hashes match
-    results = await bundle.verify_data(update_versions=True)
+    # On builders: optionally update stored version metadata if hashes match
+    results = await builder.verify_data(update_versions=True)
+    ```
+
+=== "Sync API"
+
+    ```python
+    results = bundle.verify_data()
+    print(results)
+
+    # On builders: optionally update stored version metadata if hashes match
+    results = builder.verify_data(update_versions=True)
     ```
 
 === "SQL"
@@ -158,7 +174,8 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     ```
 
 !!! note
-    `verify_data()` is not available in the sync API yet.
+    `update_versions=True` requires a builder (`create()`/`extend()`); bundles
+    opened read-only can verify but not update version metadata.
 
 ## Format Compatibility
 

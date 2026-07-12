@@ -578,6 +578,15 @@ class SyncBundle:
         )
         return _loop_manager.run_sync(coro)
 
+    def verify_data(self):
+        """Verify the integrity of all files in the bundle (SHA256 hashes).
+
+        Returns:
+            VerificationResults describing each file's status
+        """
+        coro = _call_original_method(self._async, "verify_data")
+        return _loop_manager.run_sync(coro)
+
 
 class SyncBundleBuilder(SyncBundle):
     """Synchronous wrapper for PyBundleBuilder (mutable).
@@ -1303,6 +1312,19 @@ class SyncBundleBuilder(SyncBundle):
         )
         self._async = _loop_manager.run_sync(coro)
         return self
+
+    def verify_data(self, update_versions: bool = False):
+        """Verify the integrity of all files in the bundle (SHA256 hashes).
+
+        Args:
+            update_versions: When True, refresh stored version metadata for
+                files whose hashes match.
+
+        Returns:
+            VerificationResults describing each file's status
+        """
+        coro = _call_original_method(self._async, "verify_data", update_versions)
+        return _loop_manager.run_sync(coro)
 
     def drop_function(
         self, name: str, platform: str = None
