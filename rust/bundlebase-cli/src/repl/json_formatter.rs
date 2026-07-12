@@ -154,11 +154,13 @@ pub async fn format_stream_json(
     }
 
     let schema = batches[0].schema();
+    // The single row may live after leading 0-row batches — indexing
+    // batches[0] row 0 panics on an empty array.
+    let first_data_batch = batches.iter().find(|b| b.num_rows() > 0);
 
     match shape_hint {
         Some(OutputShape::SingleValue) => {
-            if total_rows == 1 && schema.fields().len() == 1 {
-                let batch = &batches[0];
+            if let (1, 1, Some(batch)) = (total_rows, schema.fields().len(), first_data_batch) {
                 let value = array_value_to_json(batch.column(0), 0);
                 Ok(serde_json::to_string_pretty(&value).map_err(|e| {
                     BundlebaseError::from(format!("JSON serialization error: {}", e))
@@ -169,8 +171,7 @@ pub async fn format_stream_json(
             }
         }
         Some(OutputShape::Dictionary) => {
-            if total_rows == 1 {
-                let batch = &batches[0];
+            if let (1, Some(batch)) = (total_rows, first_data_batch) {
                 let mut obj = serde_json::Map::new();
                 for (i, field) in schema.fields().iter().enumerate() {
                     obj.insert(
@@ -376,6 +377,51 @@ mod tests {
             .expect("static batch"))
         }));
         Box::pin(RecordBatchStreamAdapter::new(schema, stream))
+    }
+
+    /// A leading 0-row batch must not panic the SingleValue/Dictionary
+    /// paths — the single row can live in a later batch (review P2).
+    #[tokio::test]
+    async fn test_single_value_in_second_batch() {
+        fn stream_with_leading_empty() -> SendableRecordBatchStream {
+            let schema = Arc::new(Schema::new(vec![Field::new(
+                "count",
+                DataType::Int64,
+                false,
+            )]));
+            let empty = RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(Int64Array::from(Vec::<i64>::new()))],
+            )
+            .expect("static batch");
+            let one = RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(Int64Array::from(vec![42]))],
+            )
+            .expect("static batch");
+            Box::pin(RecordBatchStreamAdapter::new(
+                schema,
+                futures::stream::iter(vec![Ok(empty), Ok(one)]),
+            ))
+        }
+
+        let text = format_stream_json(
+            stream_with_leading_empty(),
+            Some(OutputShape::SingleValue),
+            None,
+        )
+        .await
+        .expect("format");
+        assert_eq!(text, "42");
+
+        let text = format_stream_json(
+            stream_with_leading_empty(),
+            Some(OutputShape::Dictionary),
+            None,
+        )
+        .await
+        .expect("format");
+        assert!(text.contains("42"), "dictionary must render the row: {text}");
     }
 
     /// write_stream_json must produce byte-identical output to

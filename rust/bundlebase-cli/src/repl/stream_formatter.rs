@@ -83,13 +83,15 @@ fn format_collected(
     // Get schema from first batch
     let schema = batches[0].schema();
     let num_cols = schema.fields().len();
+    // The single row may live after leading 0-row batches — indexing
+    // batches[0] row 0 panics on an empty array.
+    let first_data_batch = batches.iter().find(|b| b.num_rows() > 0);
 
     // Determine formatting based on shape hint
     match shape_hint {
         Some(OutputShape::SingleValue) => {
             // Single value: extract and return just the value
-            if total_rows == 1 && num_cols == 1 {
-                let batch = &batches[0];
+            if let (1, 1, Some(batch)) = (total_rows, num_cols, first_data_batch) {
                 let value = format_array_value(batch.column(0), 0);
                 Ok(value)
             } else {
@@ -99,8 +101,7 @@ fn format_collected(
         }
         Some(OutputShape::Dictionary) => {
             // Dictionary: format as "key: value" pairs
-            if total_rows == 1 {
-                let batch = &batches[0];
+            if let (1, Some(batch)) = (total_rows, first_data_batch) {
                 let mut result = String::new();
                 for (i, field) in schema.fields().iter().enumerate() {
                     let value = format_array_value(batch.column(i), 0);

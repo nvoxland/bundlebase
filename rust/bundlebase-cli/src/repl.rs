@@ -153,26 +153,21 @@ pub async fn execute_single(
             Ok(Some((stream, shape))) => {
                 // Stream results directly to stdout — this unlimited path
                 // must not build the whole result set as one string
-                // (bb-xn0.3).
+                // (bb-xn0.3). Note: streaming means a mid-query error can
+                // leave partial output on stdout before the non-zero exit;
+                // consumers should check the exit code, not just the pipe.
                 let mut stdout = std::io::stdout();
-                let wrote = match format {
+                match format {
                     OutputFormat::Json => {
                         json_formatter::write_stream_json(stream, Some(shape), &mut stdout)
-                            .await
-                            .map(|_| true)?
+                            .await?
                     }
-                    OutputFormat::Table => stream_formatter::write_stream(
-                        stream,
-                        Some(shape),
-                        &mut stdout,
-                    )
-                    .await
-                    .map(|_| true)?,
-                };
-                if wrote {
-                    use std::io::Write;
-                    stdout.write_all(b"\n").ok();
+                    OutputFormat::Table => {
+                        stream_formatter::write_stream(stream, Some(shape), &mut stdout).await?
+                    }
                 }
+                use std::io::Write;
+                stdout.write_all(b"\n").ok();
             }
             Ok(None) => {
                 // No output (Clear command, etc.)
