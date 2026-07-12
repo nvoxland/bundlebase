@@ -616,6 +616,15 @@ fn compute_offsets(
     let mut result = HashMap::new();
 
     for (name, size) in entries {
+        // Paths longer than the 100-byte ustar name field are written by
+        // `tar::Builder::append_data` as a GNU `././@LongLink` pseudo-entry —
+        // an extra 512-byte header plus the name (NUL-terminated) padded to a
+        // block — BEFORE the real entry header. Skip it or every offset after
+        // a long-named entry is shifted (bb-dvo.9).
+        let name_len = name.as_bytes().len() as u64;
+        if name_len > 100 {
+            offset += 512 + pad512(name_len + 1);
+        }
         let data_offset = offset + 512; // skip this entry's header
         result.insert(
             ObjectPath::from(name.as_str()),
@@ -1438,6 +1447,71 @@ impl IOFactory for TarIOFactory {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn test_readonly_tar_offsets_with_gnu_long_names() {
+        // bb-dvo.9: append_data emits a GNU @LongLink pseudo-entry (extra
+        // 512-byte header + padded name data) for paths >100 bytes.
+        // compute_offsets assumed one header per entry, so every entry AFTER
+        // a long-named one was read at the wrong byte offset.
+        use object_store::local::LocalFileSystem;
+        use tar::{Builder, Header};
+
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("bundle.tar");
+
+        let long_name = format!("deep/{}/file.bin", "x".repeat(120));
+        assert!(long_name.len() > 100);
+        let entries: Vec<(String, Vec<u8>)> = vec![
+            ("short.bin".to_string(), b"SHORT_DATA".to_vec()),
+            (long_name.clone(), b"LONG_NAME_DATA".to_vec()),
+            ("after.bin".to_string(), b"AFTER_DATA_MUST_SURVIVE".to_vec()),
+        ];
+
+        // Manifest-first archive, exactly like export_tar writes it.
+        let manifest_json = serde_json::to_vec(
+            &entries
+                .iter()
+                .map(|(n, d)| serde_json::json!({"name": n, "size": d.len()}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let file = File::create(&tar_path).unwrap();
+        let mut builder = Builder::new(file);
+        let mut header = Header::new_gnu();
+        header.set_size(manifest_json.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_json[..])
+            .unwrap();
+        for (name, data) in &entries {
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, &data[..]).unwrap();
+        }
+        builder.finish().unwrap();
+
+        let inner = Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
+        let store = ReadOnlyTarObjectStore::new(inner, ObjectPath::from("bundle.tar"));
+
+        for (name, data) in &entries {
+            let got = store
+                .get(&ObjectPath::from(name.as_str()))
+                .await
+                .unwrap_or_else(|e| panic!("get {name} failed: {e}"))
+                .bytes()
+                .await
+                .unwrap();
+            assert_eq!(
+                got.as_ref(),
+                data.as_slice(),
+                "entry '{name}' read wrong bytes (offsets shifted by the long-name pseudo-entry)"
+            );
+        }
+    }
+
     use super::*;
     use crate::test_utils::test_config;
     use tempfile::NamedTempFile;

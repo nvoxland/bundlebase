@@ -154,11 +154,21 @@ impl SyncSubprocessHandle {
 
         log::debug!("Spawning IPC function subprocess: {:?}", command);
 
-        let mut child = Command::new(&command[0])
-            .args(&command[1..])
+        let mut cmd = Command::new(&command[0]);
+        cmd.args(&command[1..])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        // Put the subprocess in its own process group so the watchdog's kill
+        // reaches any grandchildren too — a child that spawned workers and
+        // died would otherwise leave them holding the pipe ends, keeping our
+        // blocked reads/writes blocked forever (bb-dvo.10).
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        let mut child = cmd
             .spawn()
             .map_err(|e| {
                 format!(
@@ -208,12 +218,7 @@ impl SyncSubprocessHandle {
             .map_err(|e| format!("Failed to serialize handshake request: {}", e))?;
         line.push('\n');
 
-        self.stdin
-            .write_all(line.as_bytes())
-            .map_err(|e| format!("Failed to write handshake request: {}", e))?;
-        self.stdin
-            .flush()
-            .map_err(|e| format!("Failed to flush handshake request: {}", e))?;
+        self.write_all_with_timeout(line.as_bytes(), "handshake request")?;
 
         let mut response_line = String::new();
         let bytes_read = self
@@ -259,6 +264,71 @@ impl SyncSubprocessHandle {
         Ok(())
     }
 
+    /// Write bytes to stdin (and flush) with a timeout.
+    ///
+    /// The read paths have always had a kill-on-timeout watchdog, but writes
+    /// blocked forever: a payload larger than the pipe buffer sent to a
+    /// stalled child parks a DataFusion worker permanently (bb-dvo.10). Same
+    /// watchdog pattern as `read_line_with_timeout`.
+    fn write_all_with_timeout(&mut self, data: &[u8], what: &str) -> Result<(), BundlebaseError> {
+        let timeout = self.timeout;
+        let child_id = self.child.id();
+
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_clone = Arc::clone(&done);
+
+        let watchdog = std::thread::spawn(move || {
+            let check_interval = Duration::from_millis(100);
+            let start = std::time::Instant::now();
+            while start.elapsed() < timeout {
+                std::thread::sleep(check_interval);
+                if done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+            }
+            if !done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                log::warn!(
+                    "IPC subprocess (pid {}) stalled on stdin write for {} seconds, sending kill signal",
+                    child_id,
+                    timeout.as_secs()
+                );
+                // Kill the whole process group (negative pid): grandchildren
+                // inherit the pipe ends, and killing only the immediate child
+                // leaves them holding the pipes open — the blocked I/O never
+                // unblocks. Fall back to the child itself if it never made it
+                // into its own group.
+                #[cfg(unix)]
+                unsafe {
+                    if libc::kill(-(child_id as i32), libc::SIGKILL) != 0 {
+                        libc::kill(child_id as i32, libc::SIGKILL);
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child_id;
+                }
+            }
+        });
+
+        let result = self.stdin.write_all(data).and_then(|_| self.stdin.flush());
+
+        done.store(true, std::sync::atomic::Ordering::Release);
+        drop(watchdog);
+
+        result.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                BundlebaseError::from(format!(
+                    "IPC subprocess stalled while writing {} (killed after {}s timeout): {}",
+                    what,
+                    timeout.as_secs(),
+                    e
+                ))
+            } else {
+                BundlebaseError::from(format!("Failed to write {} to IPC subprocess: {}", what, e))
+            }
+        })
+    }
+
     /// Read a line from stdout with a timeout.
     ///
     /// Spawns a watchdog thread that kills the subprocess if the read does not
@@ -290,9 +360,16 @@ impl SyncSubprocessHandle {
                 );
                 // Safety: send SIGKILL to the subprocess. This is safe because we
                 // only target our own child process identified by its PID.
+                // Kill the whole process group (negative pid): grandchildren
+                // inherit the pipe ends, and killing only the immediate child
+                // leaves them holding the pipes open — the blocked I/O never
+                // unblocks. Fall back to the child itself if it never made it
+                // into its own group.
                 #[cfg(unix)]
                 unsafe {
-                    libc::kill(child_id as i32, libc::SIGKILL);
+                    if libc::kill(-(child_id as i32), libc::SIGKILL) != 0 {
+                        libc::kill(child_id as i32, libc::SIGKILL);
+                    }
                 }
                 #[cfg(not(unix))]
                 {
@@ -353,9 +430,16 @@ impl SyncSubprocessHandle {
                     child_id,
                     timeout.as_secs()
                 );
+                // Kill the whole process group (negative pid): grandchildren
+                // inherit the pipe ends, and killing only the immediate child
+                // leaves them holding the pipes open — the blocked I/O never
+                // unblocks. Fall back to the child itself if it never made it
+                // into its own group.
                 #[cfg(unix)]
                 unsafe {
-                    libc::kill(child_id as i32, libc::SIGKILL);
+                    if libc::kill(-(child_id as i32), libc::SIGKILL) != 0 {
+                        libc::kill(child_id as i32, libc::SIGKILL);
+                    }
                 }
                 #[cfg(not(unix))]
                 {
@@ -402,12 +486,7 @@ impl SyncSubprocessHandle {
             .map_err(|e| format!("Failed to serialize JSON-RPC request: {}", e))?;
         line.push('\n');
 
-        self.stdin
-            .write_all(line.as_bytes())
-            .map_err(|e| format!("Failed to write to IPC function process stdin: {}", e))?;
-        self.stdin
-            .flush()
-            .map_err(|e| format!("Failed to flush IPC function process stdin: {}", e))?;
+        self.write_all_with_timeout(line.as_bytes(), "JSON-RPC request")?;
 
         let mut response_line = String::new();
         let bytes_read = self
@@ -465,16 +544,13 @@ impl SyncSubprocessHandle {
                 .map_err(|e| format!("Failed to finish Arrow IPC stream: {}", e))?;
         }
 
-        let len = buf.len() as u32;
-        self.stdin
-            .write_all(&len.to_be_bytes())
-            .map_err(|e| format!("Failed to write Arrow IPC length prefix: {}", e))?;
-        self.stdin
-            .write_all(&buf)
-            .map_err(|e| format!("Failed to write Arrow IPC data: {}", e))?;
-        self.stdin
-            .flush()
-            .map_err(|e| format!("Failed to flush Arrow IPC data: {}", e))?;
+        // Single timed write: length prefix + payload. Writes never had the
+        // kill-on-timeout watchdog the reads have, so a payload larger than
+        // the pipe buffer sent to a stalled child hung forever (bb-dvo.10).
+        let mut framed = Vec::with_capacity(4 + buf.len());
+        framed.extend_from_slice(&(buf.len() as u32).to_be_bytes());
+        framed.extend_from_slice(&buf);
+        self.write_all_with_timeout(&framed, "Arrow IPC data")?;
 
         Ok(())
     }
@@ -1059,6 +1135,48 @@ fn timeout_context_error(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_stdin_write_times_out_on_stalled_child() {
+        // bb-dvo.10: a write larger than the pipe buffer to a child that
+        // never reads must be killed by the watchdog, not park the thread
+        // forever. The stub answers the handshake, then sleeps.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stub = dir.path().join("stall.sh");
+        std::fs::write(
+            &stub,
+            "read line\nprintf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocol_version\":\"1\"}}\\n'\nsleep 300\n",
+        )
+        .expect("write stub");
+        let entrypoint = format!("sh {}", stub.to_str().expect("utf8"));
+
+        let cache = new_subprocess_cache();
+        let handle = get_or_spawn_subprocess(&cache, &entrypoint, Duration::from_secs(2))
+            .expect("spawn stub");
+        let mut guard = acquire_lock(&handle);
+
+        // ~8MB payload — far beyond any pipe buffer.
+        let big: arrow::array::ArrayRef =
+            Arc::new(arrow::array::Int64Array::from(vec![7i64; 1_000_000]));
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("a", arrow::datatypes::DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(schema, vec![big]).expect("batch");
+
+        let start = std::time::Instant::now();
+        let result = guard.write_arrow_ipc(&batch);
+        let elapsed = start.elapsed();
+
+        let err = result.expect_err("write to a stalled child must error");
+        assert!(
+            err.to_string().contains("stalled while writing"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "write should be killed by the watchdog promptly, took {elapsed:?}"
+        );
+    }
+
     use super::*;
 
     #[test]
