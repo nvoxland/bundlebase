@@ -2606,3 +2606,68 @@ async fn test_search_output_schema_reflects_rename() -> Result<(), BundlebaseErr
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_int64_point_query_uses_index() -> Result<(), BundlebaseError> {
+    // bb-cld: an exact predicate on an indexed Int64 column must engage the
+    // BTree index fast-path (the plan shows the index read wrapped in
+    // SchemaRenameDataSource). Discovered by the filterop_vs_blockdata
+    // benchmark: parquet point queries ran as plain scans.
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    bundle.create_index(&["id"], IndexType::BTree, None).await?;
+    bundle.commit("index on id").await?;
+
+    let sql = "SELECT first_name FROM bundle WHERE id = 500";
+    let plan = get_physical_plan(&bundle, Some(sql)).await?;
+    assert!(
+        plan.contains("SchemaRenameDataSource"),
+        "expected the BTree index fast-path for an Int64 exact predicate, got:\n{plan}"
+    );
+
+    // And the row comes back.
+    let stream = bundle.query(sql, vec![], None).await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let rows: usize = rs.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(rows, 1);
+
+    // The fast-path must survive reopen (index definitions reload from the
+    // manifest) and SELECT * projections.
+    let reopened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let plan = get_physical_plan(&reopened, Some("SELECT * FROM bundle WHERE id = 500")).await?;
+    assert!(
+        plan.contains("SchemaRenameDataSource"),
+        "expected the index fast-path on the REOPENED bundle, got:\n{plan}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rebuild_index_without_index_errors() -> Result<(), BundlebaseError> {
+    // bb-cld: REBUILD INDEX on a column with no index used to silently no-op
+    // and report success — callers believed their queries were indexed.
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+
+    let err = match bundle.rebuild_index("id").await {
+        Ok(_) => panic!("rebuilding a nonexistent index must error"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("No index exists"),
+        "unexpected error: {err}"
+    );
+
+    // With an index present it succeeds.
+    bundle.create_index(&["id"], IndexType::BTree, None).await?;
+    bundle.rebuild_index("id").await?;
+    Ok(())
+}

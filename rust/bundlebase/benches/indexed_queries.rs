@@ -26,7 +26,9 @@ async fn create_bundle_with_btree_index(
     column: &str,
 ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
     let bundle = create_benchmark_bundle(rows, format).await?;
-    bundle.rebuild_index(column).await?;
+    bundle
+        .create_index(&[column], bundlebase_index::IndexType::BTree, None)
+        .await?;
     Ok(bundle)
 }
 

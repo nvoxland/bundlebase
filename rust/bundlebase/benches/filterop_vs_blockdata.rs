@@ -562,7 +562,9 @@ fn bench_q3_indexed_point(c: &mut Criterion) {
                 let dir_url = fresh_local_dir("ab_idx");
                 let b = BundleBuilder::create(&dir_url, None).await.expect("create");
                 b.attach(&data_url, None).await.expect("attach");
-                b.rebuild_index("id").await.expect("index");
+                b.create_index(&["id"], bundlebase_index::IndexType::BTree, None)
+                    .await
+                    .expect("index");
                 b.commit("setup+index").await.expect("commit");
                 for k in 0..n {
                     apply_delete(&b, repr, &edit_pred(k, quoted_ids))
