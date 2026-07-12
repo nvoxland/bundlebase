@@ -811,10 +811,17 @@ impl TableProvider for DataBlock {
             }
         }
 
-        // Try column index optimization
+        // Try column index optimization.
+        //
+        // Skipped when update overlays exist (bb-fqm.1): the index was built
+        // on base values, so a lookup could return the wrong row set for an
+        // updated column, and this path never merges overlay values into its
+        // output. The fallback scans below apply overlays correctly. (An
+        // overlay-aware index lookup could lift this later.)
         let indexable_filters = FilterAnalyzer::extract_indexable(filters);
+        let has_overlays = !self.update_overlays.read().is_empty();
 
-        if !indexable_filters.is_empty() {
+        if !indexable_filters.is_empty() && !has_overlays {
             // Evaluate all indexable filters and select the best column index
             if let Some(best) = self
                 .select_best_index(&indexable_filters, &versioned_block)

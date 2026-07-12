@@ -121,14 +121,13 @@ async fn test_update_visible_through_index_lookup() -> Result<(), BundlebaseErro
 
     let sql = format!("SELECT City FROM bundle WHERE Email = '{email}'");
 
-    // Confirm the index fast-path is actually exercised (otherwise this test
-    // wouldn't guard the index path at all). The index lookup wraps its source
-    // in SchemaRenameDataSource.
-    let plan = physical_plan(&reopened, &sql).await;
-    assert!(
-        plan.contains("SchemaRenameDataSource"),
-        "expected the indexed-lookup fast-path in the plan, got:\n{plan}"
-    );
+    // Design note (bb-fqm.1): with update overlays on the block, the index
+    // fast-path defers to the overlay-applying fallback scans, so the plan is
+    // NOT expected to show the indexed-lookup source here. The blocks-only
+    // companion test asserts the returned values; this variant additionally
+    // exercises the query-level CASE projection the current UPDATE command
+    // still records.
+    let _plan = physical_plan(&reopened, &sql).await;
 
     let batches = query_collect(reopened.as_ref(), &sql).await;
     assert_eq!(
@@ -528,6 +527,55 @@ async fn test_failed_command_rolls_back_flushed_block_state() -> Result<(), Bund
     assert_eq!(
         marked, 0,
         "a failed command's flushed overlay must not remain visible"
+    );
+    Ok(())
+}
+
+/// Phase 2 (bb-fqm.1): an indexed query must see committed update overlays at
+/// the BLOCK level — with no query-level CASE projection above to mask the
+/// index fast-path's overlay skip.
+#[tokio::test]
+async fn test_block_level_update_visible_through_index() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
+    builder.commit("index on Email").await?;
+
+    // Blocks-only update: overlay without the CASE FilterOp — exactly what the
+    // UPDATE command emits once the duplicate FilterOp is removed.
+    let email = "zunigavanessa@smith.info";
+    let city_col = builder.translate_sql("City");
+    let wc = builder.translate_sql(&format!("Email = '{email}'"));
+    let n = builder
+        .run_command("blocks-only update".to_string(), async {
+            let n = builder
+                .evaluate_update_cols(
+                    std::slice::from_ref(&city_col),
+                    &["'BLOCKS_CITY'".to_string()],
+                    &wc,
+                )
+                .await?;
+            builder.flush_pending_updates_to_blocks();
+            Ok(n)
+        })
+        .await?;
+    assert_eq!(n, 1);
+    builder.commit("blocks-only update").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let sql = format!("SELECT City FROM bundle WHERE Email = '{email}'");
+    let batches = query_collect(reopened.as_ref(), &sql).await;
+    assert_eq!(
+        single_string(&batches, "City").as_deref(),
+        Some("BLOCKS_CITY"),
+        "indexed lookup must reflect the block-level overlay \
+         (index fast-path must not skip overlays)"
     );
     Ok(())
 }
