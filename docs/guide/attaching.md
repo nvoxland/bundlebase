@@ -135,13 +135,19 @@ The same `NO INDEX` flag is available on `FETCH` and `FETCH ALL`.
 
 ## Column Types
 
-**CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable: a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
-
-**JSON files** retain their native types (string, number, boolean) since the JSON format encodes types directly in the data.
+**CSV, TSV, and JSONL files** are imported with all columns as text (`Utf8`) — JSONL values, including numbers and booleans, are stringified. Type inference from sampled rows is unreliable for these formats: a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
 
 **Parquet files** retain their native types since the schema is embedded in the file.
 
-To convert text columns to specific types after attaching CSV data, use `cast_column`:
+!!! warning "Text columns compare lexicographically"
+    Until you cast, predicates on numeric-looking text columns compare as
+    strings: `WHERE id >= 0 AND id < 10` on a text `id` column matches only
+    `'0'` and `'1'` (the strings that sort between `'0'` and `'10'`), not
+    the numbers 0 through 9. Cast first, and use
+    `PROFILE COLUMN id FOR CAST TO integer` to check that every value
+    converts cleanly.
+
+To convert text columns to specific types after attaching CSV or JSONL data, use `cast_column`:
 
 === "Async API"
 
