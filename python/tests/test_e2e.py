@@ -278,9 +278,10 @@ async def test_to_pandas():
     """Test conversion to pandas DataFrame"""
     c = await bundlebase.create(random_bundle())
 
-    # Empty bundle (no data attached) raises error
-    with pytest.raises(ValueError):
-        await c.to_pandas()
+    # Empty bundle (no data attached) returns an empty DataFrame — matches
+    # QueryResult semantics (empty results are empty frames, not errors).
+    empty_df = await c.to_pandas()
+    assert empty_df.shape[0] == 0
 
     c = await c.attach(datafile("userdata.parquet"))
 
@@ -297,9 +298,10 @@ async def test_to_pandas():
 @pytest.mark.asyncio
 async def test_to_polars():
     c = await bundlebase.create(random_bundle())
-    # Empty bundle (no data attached) raises error
-    with pytest.raises(ValueError):
-        await c.to_polars()
+    # Empty bundle (no data attached) returns an empty DataFrame — matches
+    # QueryResult semantics (empty results are empty frames, not errors).
+    empty_df = await c.to_polars()
+    assert empty_df.shape[0] == 0
 
     c = await c.attach(datafile("userdata.parquet"))
 
@@ -2322,7 +2324,12 @@ async def test_delete_all_rows():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
 
-    c = await c.delete("salary >= 0")
+    # NULL-salary rows do not match `salary >= 0` (SQL three-valued logic:
+    # NULL >= 0 is NULL, not TRUE), so cover them explicitly. The old
+    # query-level delete filter hid NULL rows too — over-deleting relative to
+    # the recorded tombstones — which this fixture's 68 NULL salaries exposed
+    # once tombstones became the sole representation (ADR-009).
+    c = await c.delete("salary >= 0 OR salary IS NULL")
     assert await c.num_rows() == 0
 
 

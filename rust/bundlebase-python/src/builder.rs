@@ -436,6 +436,35 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Drop a temporary function.
+    ///
+    /// # Arguments
+    /// * `name` - The dotted function name (e.g., "acme.double_val")
+    /// * `platform` - Optional platform filter (e.g., "linux/amd64"). None drops all.
+    ///
+    /// Returns a message describing what was dropped.
+    #[pyo3(signature = (name, platform=None))]
+    fn drop_temp_function<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        platform: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let platform = platform.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let count = inner
+                .drop_temp_function(&name, platform.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop temporary function", e))?;
+            Ok(format!(
+                "Dropped {} temporary function entries for: {}",
+                count, name
+            ))
+        })
+    }
+
     #[pyo3(signature = (location, pack="base"))]
     fn attach<'py>(
         slf: PyRef<'_, Self>,

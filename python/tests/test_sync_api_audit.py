@@ -62,3 +62,37 @@ def test_sync_opened_bundle_has_no_status():
     opened = bb.open(path)
     with pytest.raises(AttributeError):
         opened.status()
+
+def test_sync_drop_temp_function_reaches_rust_layer():
+    """bb-cko: drop_temp_function previously had NO Rust binding on either
+    class — the sync wrapper delegated to a method that didn't exist. Dropping
+    a nonexistent temp function must reach the Rust layer (bundlebase error or
+    a drop-count message), never an AttributeError/TypeError from the missing
+    binding.
+    """
+    c = bb.create(random_bundle())
+    try:
+        result = c.drop_temp_function("nonexistent.fn")
+        # Some registries treat dropping a missing temp function as a no-op.
+        assert "temporary function" in str(result)
+    except Exception as e:
+        assert not isinstance(e, (TypeError, AttributeError)), (
+            f"drop_temp_function never reached the Rust layer: {e!r}"
+        )
+
+
+def test_sync_opened_bundle_drop_temp_function_binding_exists():
+    """bb-cko: the opened-bundle class needs the binding too."""
+    path = random_bundle()
+    c = bb.create(path)
+    c.attach(datafile("userdata.parquet"))
+    c.commit("initial")
+
+    opened = bb.open(path)
+    try:
+        result = opened.drop_temp_function("nonexistent.fn")
+        assert "temporary function" in str(result)
+    except Exception as e:
+        assert not isinstance(e, (TypeError, AttributeError)), (
+            f"drop_temp_function never reached the Rust layer: {e!r}"
+        )

@@ -675,6 +675,45 @@ impl PyBundle {
         })
     }
 
+    /// Drop a temporary function.
+    ///
+    /// # Arguments
+    /// * `name` - The dotted function name (e.g., "acme.double_val")
+    /// * `platform` - Optional platform filter (e.g., "linux/amd64"). None drops all.
+    ///
+    /// Returns a message describing what was dropped.
+    #[pyo3(signature = (name, platform=None))]
+    fn drop_temp_function<'py>(
+        &self,
+        name: &str,
+        platform: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let name = name.to_string();
+        let platform: Option<bundlebase_common::Platform> = platform
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: bundlebase_common::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let count = inner
+                .drop_temp_function(&name, platform.as_ref())
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to drop temporary function: {}",
+                        e
+                    ))
+                })?;
+            Ok(format!(
+                "Dropped {} temporary function entries for: {}",
+                count, name
+            ))
+        })
+    }
+
     fn operations(&self) -> Vec<super::operation::PyOperation> {
         self.inner
             .operations()

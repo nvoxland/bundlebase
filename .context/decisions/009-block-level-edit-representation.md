@@ -91,6 +91,13 @@ No compact/optimize step exists, and none could fix in-session accumulation.
 - One representation to reason about; the manifest stays small.
 - COUNT(*) after deletes is metadata-speed.
 
+**Behavioral correction (intentional):** DELETE now follows SQL
+three-valued logic — rows where the predicate evaluates to NULL are NOT
+deleted. The old `WHERE NOT (pred)` filter also excluded NULL-predicate rows
+from query results (NOT(NULL) is NULL), silently over-deleting relative to
+the recorded tombstones; e.g. `DELETE WHERE salary >= 0` on data with NULL
+salaries now correctly leaves the NULL rows in place.
+
 **Negative / accepted:**
 - In-session edit visibility depends on the block flush discipline — new
   block-touching paths must honor `deleted_rows`/`update_overlays` (the
