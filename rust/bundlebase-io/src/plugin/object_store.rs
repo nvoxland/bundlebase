@@ -449,16 +449,52 @@ impl IOReadWriteFile for ObjectStoreFile {
             return Err(format!("Cannot write to {}:// URL: {}", EMPTY_SCHEME, self.url).into());
         }
 
-        // TODO: actually stream it
-        // Collect stream into a single buffer
-        let mut buffer = Vec::new();
-        while let Some(chunk_result) = source.next().await {
-            let chunk = chunk_result?;
-            buffer.extend_from_slice(&chunk);
+        // Buffer chunks only up to a threshold: streams that end below it are
+        // uploaded with one single-shot put (cheaper than a multipart dance);
+        // anything larger switches to a multipart upload so the content is
+        // never fully materialized in memory (ADR-003).
+        const MULTIPART_THRESHOLD: usize = 8 * 1024 * 1024;
+        let mut head: Vec<Bytes> = Vec::new();
+        let mut head_len = 0usize;
+        while head_len < MULTIPART_THRESHOLD {
+            match source.next().await {
+                Some(chunk_result) => {
+                    let chunk = chunk_result?;
+                    head_len += chunk.len();
+                    head.push(chunk);
+                }
+                None => {
+                    let payload: object_store::PutPayload = head.into_iter().collect();
+                    self.store.put(&self.path, payload).await?;
+                    return Ok(());
+                }
+            }
         }
 
-        let put_result = object_store::PutPayload::from_bytes(Bytes::from(buffer));
-        self.store.put(&self.path, put_result).await?;
+        let upload = self.store.put_multipart(&self.path).await?;
+        let mut writer = object_store::WriteMultipart::new(upload);
+        for chunk in head {
+            writer.put(chunk);
+        }
+        loop {
+            match source.next().await {
+                None => break,
+                Some(Ok(chunk)) => {
+                    // Bound the number of in-flight parts so memory stays
+                    // constant regardless of stream size.
+                    if let Err(e) = writer.wait_for_capacity(8).await {
+                        let _ = writer.abort().await;
+                        return Err(e.into());
+                    }
+                    writer.put(chunk);
+                }
+                Some(Err(e)) => {
+                    let _ = writer.abort().await;
+                    return Err(e.into());
+                }
+            }
+        }
+        writer.finish().await?;
         Ok(())
     }
 
@@ -776,6 +812,214 @@ mod tests {
     use super::*;
     use crate::test_utils::random_memory_file;
     use rstest::rstest;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// ObjectStore wrapper that counts single-shot puts vs multipart uploads,
+    /// so tests can pin which upload path `write_stream` takes (bb-xn0.1).
+    #[derive(Debug)]
+    struct RecordingStore {
+        inner: object_store::memory::InMemory,
+        puts: AtomicUsize,
+        multiparts: AtomicUsize,
+    }
+
+    impl RecordingStore {
+        fn new() -> Self {
+            RecordingStore {
+                inner: object_store::memory::InMemory::new(),
+                puts: AtomicUsize::new(0),
+                multiparts: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Display for RecordingStore {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "RecordingStore")
+        }
+    }
+
+    #[async_trait]
+    impl ObjectStore for RecordingStore {
+        async fn put_opts(
+            &self,
+            location: &ObjectPath,
+            payload: object_store::PutPayload,
+            opts: object_store::PutOptions,
+        ) -> object_store::Result<object_store::PutResult> {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+            self.inner.put_opts(location, payload, opts).await
+        }
+
+        async fn put_multipart_opts(
+            &self,
+            location: &ObjectPath,
+            opts: object_store::PutMultipartOptions,
+        ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
+            self.multiparts.fetch_add(1, Ordering::SeqCst);
+            self.inner.put_multipart_opts(location, opts).await
+        }
+
+        async fn get_opts(
+            &self,
+            location: &ObjectPath,
+            options: object_store::GetOptions,
+        ) -> object_store::Result<object_store::GetResult> {
+            self.inner.get_opts(location, options).await
+        }
+
+        fn delete_stream(
+            &self,
+            locations: BoxStream<'static, object_store::Result<ObjectPath>>,
+        ) -> BoxStream<'static, object_store::Result<ObjectPath>> {
+            self.inner.delete_stream(locations)
+        }
+
+        fn list(
+            &self,
+            prefix: Option<&ObjectPath>,
+        ) -> BoxStream<'static, object_store::Result<ObjectMeta>> {
+            self.inner.list(prefix)
+        }
+
+        async fn list_with_delimiter(
+            &self,
+            prefix: Option<&ObjectPath>,
+        ) -> object_store::Result<object_store::ListResult> {
+            self.inner.list_with_delimiter(prefix).await
+        }
+
+        async fn copy_opts(
+            &self,
+            from: &ObjectPath,
+            to: &ObjectPath,
+            opts: object_store::CopyOptions,
+        ) -> object_store::Result<()> {
+            self.inner.copy_opts(from, to, opts).await
+        }
+    }
+
+    fn recording_file(store: Arc<RecordingStore>) -> ObjectStoreFile {
+        ObjectStoreFile {
+            url: Url::parse("memory:///recorded/file.bin").expect("static url"),
+            store,
+            path: ObjectPath::from("recorded/file.bin"),
+            config: crate::test_utils::test_config(),
+        }
+    }
+
+    fn bytes_stream(chunks: Vec<Bytes>) -> BoxStream<'static, Result<Bytes, std::io::Error>> {
+        Box::pin(futures::stream::iter(chunks.into_iter().map(Ok)))
+    }
+
+    /// Small streams should use one single-shot put — no multipart overhead.
+    #[tokio::test]
+    async fn test_write_stream_small_uses_single_put() {
+        let store = Arc::new(RecordingStore::new());
+        let file = recording_file(Arc::clone(&store));
+
+        file.write_stream(bytes_stream(vec![
+            Bytes::from_static(b"hello "),
+            Bytes::from_static(b"world"),
+        ]))
+        .await
+        .expect("write_stream");
+
+        assert_eq!(store.puts.load(Ordering::SeqCst), 1);
+        assert_eq!(store.multiparts.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            file.read_bytes().await.expect("read"),
+            Some(Bytes::from_static(b"hello world"))
+        );
+    }
+
+    /// The dir-level content-addressed write must work end-to-end on real
+    /// backends — in particular the rename of temp/<name> into a hash-prefix
+    /// subdirectory that does not exist yet (bb-xn0.1 fast path).
+    #[rstest]
+    #[case::local_fs(true)]
+    #[case::memory(false)]
+    #[tokio::test]
+    async fn test_dir_write_stream_content_addresses(#[case] local: bool) {
+        use bundlebase_common::content_address::{
+            ContentAddress, ContentCategory, ContentFormat,
+        };
+
+        let _temp_guard;
+        let url = if local {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let url = Url::from_directory_path(temp.path()).expect("dir url");
+            _temp_guard = temp;
+            url
+        } else {
+            Url::parse(&format!(
+                "memory:///dir_write_stream_{:016x}",
+                rand::random::<u64>()
+            ))
+            .expect("static url")
+        };
+        let dir = ObjectStoreDir::from_url(&url, crate::test_utils::test_config())
+            .expect("dir");
+
+        let address = ContentAddress::new(ContentCategory::Block, ContentFormat::Parquet);
+        let result = IOReadWriteDir::write_stream(
+            &dir,
+            bytes_stream(vec![Bytes::from_static(b"real backend content")]),
+            &address,
+        )
+        .await
+        .expect("write_stream");
+
+        // Content lands at <2-char prefix>/<hash>.<ext> and reads back intact
+        let file = dir
+            .file(&dir.relative_path(result.file.as_ref()).expect("relative"))
+            .expect("file");
+        assert_eq!(
+            file.read_bytes().await.expect("read"),
+            Some(Bytes::from_static(b"real backend content"))
+        );
+
+        // No temp leftovers
+        let temp_files = dir
+            .subdir("temp")
+            .expect("subdir")
+            .list_files()
+            .await
+            .expect("list");
+        assert!(
+            temp_files.is_empty(),
+            "temp files left behind: {temp_files:?}"
+        );
+    }
+
+    /// Large streams must switch to a multipart upload instead of buffering
+    /// the whole content in memory (bb-xn0.1, ADR-003).
+    #[tokio::test]
+    async fn test_write_stream_large_uses_multipart() {
+        let store = Arc::new(RecordingStore::new());
+        let file = recording_file(Arc::clone(&store));
+
+        // 12 x 1 MiB chunks — crosses the multipart threshold
+        let chunk = Bytes::from(vec![7u8; 1024 * 1024]);
+        let chunks: Vec<Bytes> = (0..12).map(|_| chunk.clone()).collect();
+        file.write_stream(bytes_stream(chunks))
+            .await
+            .expect("write_stream");
+
+        assert_eq!(
+            store.multiparts.load(Ordering::SeqCst),
+            1,
+            "large stream must upload via multipart"
+        );
+        assert_eq!(
+            store.puts.load(Ordering::SeqCst),
+            0,
+            "large stream must not buffer into a single put"
+        );
+        let content = file.read_bytes().await.expect("read").expect("exists");
+        assert_eq!(content.len(), 12 * 1024 * 1024);
+        assert!(content.iter().all(|b| *b == 7));
+    }
 
     #[tokio::test]
     async fn test_read_write() {
