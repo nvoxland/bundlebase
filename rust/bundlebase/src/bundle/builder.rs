@@ -642,8 +642,9 @@ impl BundleBuilder {
             let tomb_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[DELETE] Tombstone file written: {}", tomb_filename);
 
-            // Add DeleteOp alongside the existing FilterOp.
-            // The FilterOp handles query-time exclusion, the DeleteOp records the tombstone.
+            // Record the DeleteOp — block-level tombstones are the sole
+            // representation of DELETE (ADR-009); no query-level FilterOp is
+            // emitted.
             // On future opens, the tombstone will be loaded for scan-level filtering.
             let delete_op = DeleteOp::new(&tomb_filename, delete_wheres.join("; "));
             if let Some(last_change) = changes.last_mut() {

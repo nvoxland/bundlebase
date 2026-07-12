@@ -1,6 +1,6 @@
 """Type stubs for bundlebase module."""
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
 __version__: str
 
@@ -105,9 +105,9 @@ class PyBundle:
         sql: str,
         params: Optional[List[Any]] = None,
         hard_limit: Optional[int] = None,
-    ) -> "PyRecordBatchStream":
+    ) -> "QueryResult":
         """
-        Execute a SQL query and stream the results.
+        Execute a SQL query and return a streaming result.
 
         Args:
             sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
@@ -115,12 +115,12 @@ class PyBundle:
             hard_limit: Optional maximum number of rows to return
 
         Returns:
-            PyRecordBatchStream yielding pyarrow RecordBatches
+            QueryResult wrapping the result stream (to_pandas/to_polars/
+            to_dict/stream_batches)
 
         Example:
-            stream = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
-            async for batch in stream:
-                print(batch.num_rows)
+            result = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
+            df = await result.to_pandas()
         """
         ...
 
@@ -194,7 +194,8 @@ class PyBundle:
 
         Raises:
             ImportError: If pandas is not installed
-            ValueError: If conversion fails or bundle has no data
+            ValueError: If query execution fails (an empty result returns an
+                empty DataFrame)
 
         Example:
             df = await bundle.to_pandas()
@@ -210,7 +211,8 @@ class PyBundle:
 
         Raises:
             ImportError: If polars is not installed
-            ValueError: If conversion fails or bundle has no data
+            ValueError: If query execution fails (an empty result returns an
+                empty DataFrame)
 
         Example:
             df = await bundle.to_polars()
@@ -340,7 +342,7 @@ class PyBundle:
         """DataFusion session context for direct SQL access."""
         ...
 
-    def describe_data(self, columns: Any = None) -> Any:
+    def describe_data(self, columns: Any) -> Any:
         """Profile column statistics; returns an awaitable QueryResult."""
         ...
 
@@ -377,7 +379,7 @@ class PyBundle:
         ...
 
     def views(self) -> Dict[str, str]:
-        """Mapping of view name to view definition."""
+        """Mapping of view id to view name."""
         ...
 
     async def import_temp_connector(self, name: str, from_: str, platform: str = "*/*") -> str:
@@ -563,9 +565,9 @@ class PyBundleBuilder:
         sql: str,
         params: Optional[List[Any]] = None,
         hard_limit: Optional[int] = None,
-    ) -> "PyRecordBatchStream":
+    ) -> "QueryResult":
         """
-        Execute a SQL query and stream the results.
+        Execute a SQL query and return a streaming result.
 
         Args:
             sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
@@ -573,12 +575,12 @@ class PyBundleBuilder:
             hard_limit: Optional maximum number of rows to return
 
         Returns:
-            PyRecordBatchStream yielding pyarrow RecordBatches
+            QueryResult wrapping the result stream (to_pandas/to_polars/
+            to_dict/stream_batches)
 
         Example:
-            stream = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
-            async for batch in stream:
-                print(batch.num_rows)
+            result = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
+            df = await result.to_pandas()
         """
         ...
 
@@ -692,11 +694,25 @@ class PyBundleBuilder:
         """
         ...
 
+    def drop_report(self, id: str) -> "OperationChain":
+        """
+        Remove a stored report.
+
+        Args:
+            id: Report identifier
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
     def import_connector(
         self,
         name: str,
         from_: str,
         platform: str = "*/*",
+        *,
+        src: Optional[str] = None,
     ) -> "OperationChain":
         """
         Load a named connector with logic (persisted).
@@ -1093,10 +1109,6 @@ class PyBundleBuilder:
         """
         ...
 
-    def drop_report(self, id: str) -> "OperationChain":
-        """Drop a stored report by id."""
-        ...
-
     async def generate_report(self, id: str, output: str, no_branding: bool = False) -> str:
         """
         Generate a PDF from a stored report template.
@@ -1246,7 +1258,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base", *, fetch: bool = True) -> "OperationChain":
         """
         Create a data source for a pack.
 
@@ -1418,7 +1430,8 @@ class PyBundleBuilder:
 
         Raises:
             ImportError: If pandas is not installed
-            ValueError: If conversion fails or bundle has no data
+            ValueError: If query execution fails (an empty result returns an
+                empty DataFrame)
 
         Example:
             df = await bundle.to_pandas()
@@ -1434,7 +1447,8 @@ class PyBundleBuilder:
 
         Raises:
             ImportError: If polars is not installed
-            ValueError: If conversion fails or bundle has no data
+            ValueError: If query execution fails (an empty result returns an
+                empty DataFrame)
 
         Example:
             df = await bundle.to_polars()
@@ -1509,7 +1523,7 @@ class PyBundleBuilder:
         """DataFusion session context for direct SQL access."""
         ...
 
-    def describe_data(self, columns: Any = None) -> Any:
+    def describe_data(self, columns: Any) -> Any:
         """Profile column statistics; returns an awaitable QueryResult."""
         ...
 
@@ -1521,7 +1535,7 @@ class PyBundleBuilder:
         """Remove a session-only function."""
         ...
 
-    async def export_tar(self, tar_path: str, *, gzip: bool = False) -> None:
+    async def export_tar(self, tar_path: str, *, gzip: bool = False) -> "PyBundleBuilder":
         """Export the bundle as a single .tar (or .tar.gz) archive."""
         ...
 
@@ -1546,7 +1560,7 @@ class PyBundleBuilder:
         ...
 
     def views(self) -> Dict[str, str]:
-        """Mapping of view name to view definition."""
+        """Mapping of view id to view name."""
         ...
 
     def update(self, set_where: str) -> "OperationChain":
@@ -1577,7 +1591,7 @@ class PyBundleBuilder:
         """Create a new builder layered on this bundle's committed state."""
         ...
 
-    async def export_empty(self, path: str) -> None:
+    async def export_empty(self, path: str) -> "PyBundleBuilder":
         """Export the bundle definition without data files."""
         ...
 
@@ -1648,14 +1662,6 @@ class OperationChain:
         """Queue a drop_view operation."""
         ...
 
-    def create_report(self, id: str, name: str, description: str, content: str) -> "OperationChain":
-        """Queue a create_report operation."""
-        ...
-
-    def drop_report(self, id: str) -> "OperationChain":
-        """Queue a drop_report operation."""
-        ...
-
     def drop_index(self, column: str) -> "OperationChain":
         """Queue a drop_index operation."""
         ...
@@ -1685,34 +1691,8 @@ class OperationChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temp_function(
-        self,
-        name: str,
-        from_: str,
-        platform: str = "*/*",
-    ) -> "OperationChain":
-        """Queue a import_temp_function operation."""
-        ...
-
-    def drop_function(
-        self,
-        name: str,
-        platform: Optional[str] = None,
-        input_types: Optional[List[str]] = None,
-    ) -> "OperationChain":
-        """Queue a drop_function operation."""
-        ...
-
-    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base", *, fetch: bool = True) -> "OperationChain":
         """Queue a create_source operation."""
-        ...
-
-    def rename_connector(self, old_name: str, new_name: str) -> "OperationChain":
-        """Queue a rename_connector operation."""
-        ...
-
-    def rename_function(self, old_name: str, new_name: str) -> "OperationChain":
-        """Queue a rename_function operation."""
         ...
 
     def rename_view(self, old_name: str, new_name: str) -> "OperationChain":
@@ -1811,20 +1791,8 @@ class CreateChain:
         """Queue a drop_view operation."""
         ...
 
-    def create_report(self, id: str, name: str, description: str, content: str) -> "CreateChain":
-        """Queue a create_report operation."""
-        ...
-
-    def drop_report(self, id: str) -> "CreateChain":
-        """Queue a drop_report operation."""
-        ...
-
     def drop_index(self, column: str) -> "CreateChain":
         """Queue a drop_index operation."""
-        ...
-
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
-        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "CreateChain":
@@ -1852,34 +1820,8 @@ class CreateChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temp_function(
-        self,
-        name: str,
-        from_: str,
-        platform: str = "*/*",
-    ) -> "CreateChain":
-        """Queue a import_temp_function operation."""
-        ...
-
-    def drop_function(
-        self,
-        name: str,
-        platform: Optional[str] = None,
-        input_types: Optional[List[str]] = None,
-    ) -> "CreateChain":
-        """Queue a drop_function operation."""
-        ...
-
-    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "CreateChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base", *, fetch: bool = True) -> "CreateChain":
         """Queue a create_source operation."""
-        ...
-
-    def rename_connector(self, old_name: str, new_name: str) -> "CreateChain":
-        """Queue a rename_connector operation."""
-        ...
-
-    def rename_function(self, old_name: str, new_name: str) -> "CreateChain":
-        """Queue a rename_function operation."""
         ...
 
     def rename_view(self, old_name: str, new_name: str) -> "CreateChain":
@@ -1978,20 +1920,8 @@ class ExtendChain:
         """Queue a drop_view operation."""
         ...
 
-    def create_report(self, id: str, name: str, description: str, content: str) -> "ExtendChain":
-        """Queue a create_report operation."""
-        ...
-
-    def drop_report(self, id: str) -> "ExtendChain":
-        """Queue a drop_report operation."""
-        ...
-
     def drop_index(self, column: str) -> "ExtendChain":
         """Queue a drop_index operation."""
-        ...
-
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":
-        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "ExtendChain":
@@ -2019,34 +1949,8 @@ class ExtendChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temp_function(
-        self,
-        name: str,
-        from_: str,
-        platform: str = "*/*",
-    ) -> "ExtendChain":
-        """Queue a import_temp_function operation."""
-        ...
-
-    def drop_function(
-        self,
-        name: str,
-        platform: Optional[str] = None,
-        input_types: Optional[List[str]] = None,
-    ) -> "ExtendChain":
-        """Queue a drop_function operation."""
-        ...
-
-    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "ExtendChain":
+    def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base", *, fetch: bool = True) -> "ExtendChain":
         """Queue a create_source operation."""
-        ...
-
-    def rename_connector(self, old_name: str, new_name: str) -> "ExtendChain":
-        """Queue a rename_connector operation."""
-        ...
-
-    def rename_function(self, old_name: str, new_name: str) -> "ExtendChain":
-        """Queue a rename_function operation."""
         ...
 
     def rename_view(self, old_name: str, new_name: str) -> "ExtendChain":
@@ -2156,6 +2060,27 @@ class PySchemaField:
         """Get string representation of the field."""
         ...
 
+class QueryResult:
+    """Streaming query result returned by ``query()``. Consume ONCE via one
+    of the converters; a second consumption raises RuntimeError."""
+
+    async def to_pandas(self) -> Any:
+        """Collect the result into a pandas DataFrame."""
+        ...
+
+    async def to_polars(self) -> Any:
+        """Collect the result into a polars DataFrame."""
+        ...
+
+    async def to_dict(self) -> Dict[str, list]:
+        """Collect the result into a dict of column lists."""
+        ...
+
+    def stream_batches(self) -> AsyncIterator[Any]:
+        """Yield pyarrow RecordBatches one at a time (bounded memory)."""
+        ...
+
+
 class PyRecordBatchStream:
     """Stream of pyarrow RecordBatches produced by query()."""
 
@@ -2167,6 +2092,7 @@ class PyRecordBatchStream:
         """Collect all remaining batches (defeats streaming; small data only)."""
         ...
 
+    @property
     def schema(self) -> "PySchema":
         """Schema of the result stream."""
         ...

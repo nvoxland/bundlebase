@@ -86,7 +86,11 @@ pub fn try_test_datafile(name: &str) -> Result<&'static str, Vec<&'static str>> 
     let responses = TEST_DATAFILE_RESPONSES.get_or_init(init_test_datafiles);
     match responses.get(name) {
         Some(url) => Ok(url.as_str()),
-        None => Err(responses.keys().map(|k| k.as_str()).collect()),
+        None => {
+            let mut available: Vec<&'static str> = responses.keys().map(|k| k.as_str()).collect();
+            available.sort_unstable();
+            Err(available)
+        }
     }
 }
 

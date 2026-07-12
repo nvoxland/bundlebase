@@ -59,19 +59,23 @@ def test_pybundlebuilder_stub_methods_exist_at_runtime():
     )
 
 
-def test_operationchain_stub_methods_are_proxyable():
-    """OperationChain proxies to PyBundleBuilder — every stubbed method must
-    resolve there (or be one of the chain's own dunders)."""
-    stub = _stub_methods(_stub_classes()["OperationChain"])
-    missing = [
-        name
-        for name in stub
-        if name not in CHAIN_OWN_METHODS
-        and not hasattr(bundlebase.PyBundleBuilder, name)
-    ]
-    assert missing == [], (
-        f"OperationChain stub declares methods the builder does not have: {missing}"
-    )
+def test_chain_stub_methods_are_proxyable():
+    """Chains resolve method names through chain._ORIGINAL_METHODS at
+    execution time — a stubbed method not registered there raises
+    AttributeError when chained, so the registry (not the builder class)
+    is the oracle."""
+    from bundlebase.chain import _ORIGINAL_METHODS
+
+    for cls in ("OperationChain", "CreateChain", "ExtendChain"):
+        stub = _stub_methods(_stub_classes()[cls])
+        missing = [
+            name
+            for name in stub
+            if name not in CHAIN_OWN_METHODS and name not in _ORIGINAL_METHODS
+        ]
+        assert missing == [], (
+            f"{cls} stub declares methods the chain cannot proxy: {missing}"
+        )
 
 
 def test_pyrecordbatchstream_stub_methods_exist_at_runtime():

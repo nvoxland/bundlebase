@@ -784,7 +784,7 @@ class TestApiSurface:
         assert "upgrade_bundle" in bundlebase.__all__
 
 
-class TestThreadSafety:
+class TestThreadSafetyConcurrentUse:
     """The sync wrapper must tolerate concurrent use from multiple threads
     (each thread gets its own event-loop runner)."""
 
