@@ -125,9 +125,13 @@ impl BundlebaseFlightSqlService {
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
         let sessions = new_session_store();
+        let issued_tokens: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
 
-        // Start background task to clean up idle sessions
+        // Start background task to clean up idle sessions. The issued-token
+        // set is pruned along with the session, so it stays bounded and an
+        // expired token is fully forgotten (bb-8gq.4).
         let cleanup_sessions = Arc::clone(&sessions);
+        let cleanup_tokens = Arc::clone(&issued_tokens);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(SESSION_CLEANUP_INTERVAL).await;
@@ -142,9 +146,17 @@ impl BundlebaseFlightSqlService {
                         .collect()
                 };
                 if !expired.is_empty() {
-                    let mut sessions = cleanup_sessions.write();
-                    for token in &expired {
-                        sessions.remove(token);
+                    {
+                        let mut sessions = cleanup_sessions.write();
+                        for token in &expired {
+                            sessions.remove(token);
+                        }
+                    }
+                    {
+                        let mut tokens = cleanup_tokens.write();
+                        for token in &expired {
+                            tokens.remove(token);
+                        }
                     }
                     info!("Cleaned up {} idle session(s)", expired.len());
                 }
@@ -156,16 +168,17 @@ impl BundlebaseFlightSqlService {
             bundle_config,
             read_only,
             sessions,
-            issued_tokens: Arc::new(RwLock::new(HashSet::new())),
+            issued_tokens,
             authenticator,
         }
     }
 
     /// Get the session state for a request.
     ///
-    /// Looks up the session by auth token from request metadata.
-    /// If token is valid format but session doesn't exist (e.g., server restarted),
-    /// creates a new session for the token automatically.
+    /// Looks up the session by auth token from request metadata. A token
+    /// whose session has idle-expired is rejected with an explicit
+    /// unauthenticated error (the client must re-handshake) — session state
+    /// is never silently replaced.
     async fn get_bundle<T>(&self, request: &Request<T>) -> Result<Arc<dyn BundleFacade>, Status> {
         // Try to extract auth token from request metadata
         if let Some(auth_header) = request.metadata().get("authorization") {
@@ -182,17 +195,21 @@ impl BundlebaseFlightSqlService {
                     }
                 }
 
-                // Token was issued by this server but session was dropped.
-                // Re-create the session for the existing token.
-                if self.issued_tokens.read().contains(token) {
+                // The token was issued by this server but its session is
+                // gone (idle-expired). Silently handing out a FRESH session
+                // here discarded the client's staged work with no signal and
+                // raced concurrent requests through create_session
+                // (bb-8gq.4). Tell the client to re-handshake instead.
+                if self.issued_tokens.write().remove(token) {
                     info!(
-                        "Session for token {} expired, re-creating",
+                        "Rejecting expired session token {} — client must re-handshake",
                         redact_token(token)
                     );
-                    let session = self.create_session().await?;
-                    let state = Arc::clone(&session.bundle);
-                    self.sessions.write().insert(token.to_string(), session);
-                    return Ok(state);
+                    return Err(Status::unauthenticated(format!(
+                        "Session expired after {}s idle; uncommitted session state was \
+                         discarded. Call do_handshake to start a new session.",
+                        SESSION_IDLE_TIMEOUT.as_secs()
+                    )));
                 }
             }
         }
@@ -903,6 +920,40 @@ fn encode_schema(schema: &SchemaRef) -> Result<Bytes, Status> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_expired_issued_token_is_rejected_not_recreated() {
+        // bb-8gq.4: a token whose session idle-expired must get an explicit
+        // unauthenticated error — silently minting a fresh empty session
+        // discarded the client's staged work with no signal.
+        let svc = BundlebaseFlightSqlService::new(
+            "memory:///expired_token_test".to_string(),
+            None,
+            true,
+            crate::auth::BundlebaseAuthenticator::default(),
+        );
+        // Simulate: token was issued, session has since been cleaned up.
+        svc.issued_tokens.write().insert("token-expired".to_string());
+
+        let mut req = tonic::Request::new(());
+        req.metadata_mut()
+            .insert("authorization", "Bearer token-expired".parse().expect("meta"));
+
+        let err = svc
+            .get_bundle(&req)
+            .await
+            .err()
+            .expect("expired token must be rejected");
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
+        assert!(
+            err.message().contains("re-handshake") || err.message().contains("do_handshake"),
+            "error should tell the client to re-handshake: {}",
+            err.message()
+        );
+        // The token is forgotten — the issued set stays bounded.
+        assert!(svc.issued_tokens.read().is_empty());
+        assert!(!svc.has_sessions());
+    }
 
     #[test]
     fn test_redact_token_does_not_expose_full_token() {
