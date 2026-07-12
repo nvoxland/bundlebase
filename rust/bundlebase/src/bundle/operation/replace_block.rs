@@ -137,10 +137,6 @@ impl Operation for ReplaceBlockOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // SSRF guard for manifest-stored referenced locations (bb-1xq) —
-        // REPLACE is the other op whose apply opens an external location.
-        super::check_referenced_location(&self.new_location, bundle.config().as_ref())?;
-
         // Find the block and its pack
         let (pack_id, old_block) = self
             .find_block_in_packs(bundle)
@@ -230,28 +226,6 @@ impl Operation for ReplaceBlockOp {
 mod tests {
     use super::*;
 
-    /// A crafted manifest replacing a block location with an internal/SSRF
-    /// target must be rejected at apply, same as ATTACH (bb-1xq).
-    #[tokio::test]
-    async fn test_apply_rejects_internal_new_location() {
-        let bundle = crate::test_utils::empty_bundle().await;
-        let op = ReplaceBlockOp {
-            id: BlockId::generate(),
-            new_location: "http://169.254.169.254/latest/meta-data.csv".to_string(),
-            format: AttachFormat::Csv,
-            new_version: "v".to_string(),
-            new_hash: "0".repeat(64),
-            source_info: None,
-        };
-        let err = match op.apply(bundle.bundle()).await {
-            Ok(()) => panic!("internal new_location must be rejected at apply"),
-            Err(e) => e.to_string(),
-        };
-        assert!(
-            err.contains("SSRF") || err.contains("not allowed as a source"),
-            "error must explain the refusal, got: {err}"
-        );
-    }
     #[test]
     fn test_describe() {
         let block_id = BlockId::generate();

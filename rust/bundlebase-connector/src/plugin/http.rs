@@ -15,7 +15,6 @@ use bundlebase_common::connector::{
     ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData, SourceFormat,
 };
 use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
-use bundlebase_common::url_safety::check_source_url;
 use bundlebase_common::{
     config_keys, config_scopes, BundlebaseError, ConfigKey, ConfigProvider, ConfigScope, Scope,
 };
@@ -320,10 +319,6 @@ impl Connector for HttpConnector {
         config: &Arc<dyn ConfigProvider>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let url = shared_utils::require_url(args, "http")?;
-        // Refuse internal/metadata targets before any network call, so an
-        // untrusted bundle can't SSRF the consumer's network on attach or
-        // refresh (bb-e0b.4). Opt out with system.allow_internal_sources.
-        check_source_url(&url, config.as_ref())?;
 
         // POST/PUT endpoints can't be meaningfully HEAD-probed, and the response
         // content-type depends on the body. Skip HEAD for non-GET requests.
@@ -609,27 +604,6 @@ mod tests {
         assert!(connector.validate_args(&args).is_err());
     }
 
-    #[tokio::test]
-    async fn test_discover_rejects_internal_targets_by_default() {
-        // The guard fires before any network call, so no mock server is needed.
-        let connector = HttpConnector;
-        let config = crate::test_utils::test_config(); // internal NOT allowed
-        for bad in [
-            "http://169.254.169.254/latest/meta-data/",
-            "http://127.0.0.1:9000/x",
-            "http://localhost/x",
-            "http://metadata.google.internal/x",
-        ] {
-            let mut args = HashMap::new();
-            args.insert("url".to_string(), bad.to_string());
-            let result = connector.discover(&args, &HashSet::new(), &config).await;
-            assert!(
-                result.is_err(),
-                "{bad} must be rejected as an SSRF target by default"
-            );
-        }
-    }
-
     #[test]
     fn test_validate_args_allows_non_credential_headers() {
         let connector = HttpConnector;
@@ -858,7 +832,6 @@ mod tests {
         let server_url = url::Url::parse(&server.uri()).expect("server url");
         let host_scope = format!("http/{}", server_url.host_str().expect("host"));
         let config = crate::test_utils::test_config_with_values(&[
-            ("system", "allow_internal_sources", "true"),
             (
                 &host_scope,
                 SECRET_HEADERS_CFG.key,
@@ -923,7 +896,6 @@ mod tests {
         let server_url = url::Url::parse(&server.uri()).expect("server url");
         let host_scope = format!("http/{}", server_url.host_str().expect("host"));
         let config = crate::test_utils::test_config_with_values(&[
-            ("system", "allow_internal_sources", "true"),
             (&host_scope, AUTH_CFG.key, "Bearer tok123"),
         ]);
         let config: Arc<dyn ConfigProvider> = config;

@@ -420,9 +420,6 @@ impl Operation for AttachBlockOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // SSRF guard for manifest-stored referenced locations (bb-1xq).
-        super::check_referenced_location(&self.location, bundle.config().as_ref())?;
-
         // Only validate version for files that are NOT copied from a source.
         // When a file is copied (source_info.is_some()), the stored version is the
         // SOURCE version, not the local copy's version. The local copy is internal
@@ -517,46 +514,8 @@ mod tests {
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
     }
 
-    /// A manifest-stored referenced location pointing at an internal/SSRF
-    /// target must be rejected when the block is opened, not just at
-    /// fetch/discover time — a hand-crafted manifest bypasses those
-    /// (bb-1xq). Gated on system.allow_internal_sources like the
-    /// fetch-time guard.
-    #[tokio::test]
-    async fn test_apply_rejects_internal_referenced_location() {
-        let bundle = empty_bundle().await;
-        let op = AttachBlockOp {
-            location: "http://169.254.169.254/latest/meta-data.csv".to_string(),
-            format: AttachFormat::Csv,
-            version: "test-version".to_string(),
-            hash: "0".repeat(64),
-            id: BlockId::generate(),
-            pack: ObjectId::generate(),
-            num_rows: None,
-            bytes: None,
-            schema: "00/00000000000000.block.schema.yaml".to_string(),
-            column_ids: "00/00000000000000.block.columns.yaml".to_string(),
-            schema_cache: Some(std::sync::Arc::new(arrow::datatypes::Schema::new(vec![
-                arrow::datatypes::Field::new("a", arrow::datatypes::DataType::Utf8, true),
-            ]))),
-            layout: None,
-            source_info: None,
-            read_options: None,
-            column_ids_cache: vec![],
-        };
-
-        let err = match op.apply(bundle.bundle()).await {
-            Ok(()) => panic!("internal referenced location must be rejected at apply"),
-            Err(e) => e.to_string(),
-        };
-        assert!(
-            err.contains("SSRF") || err.contains("not allowed as a source"),
-            "error must explain the refusal, got: {err}"
-        );
-    }
-
-    /// Normal attach flows (relative in-bundle paths, safe URLs) are
-    /// untouched by the guard.
+    /// Normal attach flows (relative in-bundle paths, absolute URLs) apply
+    /// without any source-location classification.
     #[tokio::test]
     async fn test_apply_allows_relative_and_safe_locations() {
         let datafile = test_datafile("userdata.parquet");

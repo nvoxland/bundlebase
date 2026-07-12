@@ -1,31 +1,3 @@
-/// Guard a manifest-stored data location before it is opened for reading
-/// (bb-1xq). A referenced absolute-URL location is fetched on whatever
-/// machine opens the bundle, so internal/metadata targets are refused unless
-/// `system.allow_internal_sources` is set — fetch/discover-time checks alone
-/// don't cover manifests the consumer didn't author. `file://` stays exempt:
-/// attaching local files by absolute path is a first-class local workflow.
-pub(crate) fn check_referenced_location(
-    location: &str,
-    config: &dyn bundlebase_common::ConfigProvider,
-) -> Result<(), datafusion::common::DataFusionError> {
-    use datafusion::common::DataFusionError;
-    if let Ok(url) = url::Url::parse(location) {
-        if url.scheme() != "file" {
-            if let bundlebase_common::url_safety::UrlSafety::Blocked(reason) =
-                bundlebase_common::url_safety::classify_source_url(&url)
-            {
-                let allowed =
-                    bundlebase_common::system_config::is_internal_sources_allowed(config)
-                        .map_err(DataFusionError::External)?;
-                if !allowed {
-                    return Err(DataFusionError::External(reason.into()));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 mod add_column;
 mod always_delete;
 mod always_update;

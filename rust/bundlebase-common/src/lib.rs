@@ -13,7 +13,6 @@ pub mod indexed_blocks;
 pub mod namespaced_name;
 pub mod save_as;
 pub mod source_utils;
-pub mod url_safety;
 pub use indexed_blocks::IndexedBlocks;
 pub mod file_info;
 pub mod io_dir;

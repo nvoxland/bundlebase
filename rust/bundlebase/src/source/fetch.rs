@@ -14,7 +14,6 @@ use bundlebase_common::source_utils::{
     convert_to_parquet, detect_format_from_bytes, filename_from_url, http_status_error,
     record_batch_stream_to_parquet,
 };
-use bundlebase_common::url_safety::{check_source_url, SourceUrlAction};
 use bytes::Bytes;
 use futures::stream;
 use futures::StreamExt;
@@ -329,32 +328,12 @@ async fn get_data_for_location(
     if let Some(stable) = func.stable_url(location, args, config).await? {
         match &strategy {
             ResolvedSaveAs::Ref => {
-                // A bare reference is re-fetched from this URL by everyone who
-                // opens the bundle, so it must not point at the local filesystem
-                // or an internal/metadata endpoint (bb-e0b.4 / bb-e0b.8).
-                match check_source_url(&stable, config.as_ref())? {
-                    SourceUrlAction::Reference => {
-                        // Reference URL directly — no download
-                        return Ok(FetchedData {
-                            attach_location: stable.to_string(),
-                            source_url: stable.to_string(),
-                            hash: None,
-                        });
-                    }
-                    SourceUrlAction::CopyLocal => {
-                        // Copy the local data into the bundle instead of storing a
-                        // file:// reference the consumer would read from their own
-                        // disk.
-                        return save_from_url(
-                            &stable,
-                            &ResolvedSaveAs::Copy,
-                            &location.format,
-                            data_dir,
-                            config,
-                        )
-                        .await;
-                    }
-                }
+                // Reference the URL directly — no download.
+                return Ok(FetchedData {
+                    attach_location: stable.to_string(),
+                    source_url: stable.to_string(),
+                    hash: None,
+                });
             }
             _ => {
                 return save_from_url(&stable, &strategy, &location.format, data_dir, config).await;
