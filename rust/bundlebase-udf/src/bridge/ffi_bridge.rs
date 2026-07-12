@@ -247,6 +247,8 @@ pub struct LibAccumulator {
     state: *mut std::ffi::c_void,
     #[allow(dead_code)]
     return_type: DataType,
+    /// One-shot flag so the merge-fallback warning logs once per accumulator.
+    merge_fallback_warned: bool,
 }
 
 // Safety: The C library manages its own state; we only pass the pointer across threads.
@@ -289,6 +291,7 @@ impl LibAccumulator {
             symbol: symbol.to_string(),
             state,
             return_type,
+            merge_fallback_warned: false,
         })
     }
 
@@ -303,10 +306,17 @@ impl LibAccumulator {
     }
 }
 
-impl datafusion::logical_expr::Accumulator for LibAccumulator {
-    fn update_batch(&mut self, values: &[ArrayRef]) -> datafusion::common::Result<()> {
+impl LibAccumulator {
+    /// Invoke an accumulate-shaped C function (`<symbol>_<suffix>`) with the
+    /// given arrays. Shared by `update_batch` (accumulate) and `merge_batch`
+    /// (merge).
+    fn call_state_fn(
+        &mut self,
+        suffix: &str,
+        values: &[ArrayRef],
+    ) -> datafusion::common::Result<()> {
         let accumulate_fn: Symbol<AccumulateFn> = self
-            .get_symbol("accumulate")
+            .get_symbol(suffix)
             .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string()))?;
 
         let mut ffi_arrays: Vec<FFI_ArrowArray> = Vec::with_capacity(values.len());
@@ -350,21 +360,51 @@ impl datafusion::logical_expr::Accumulator for LibAccumulator {
         if rc != 0 {
             let err_msg = extract_c_error(&err_buf);
             return Err(datafusion::common::DataFusionError::Execution(format!(
-                "Lib accumulate for '{}' failed: {}",
-                self.symbol, err_msg
+                "Lib {} for '{}' failed: {}",
+                suffix, self.symbol, err_msg
             )));
         }
 
         Ok(())
     }
 
+    /// Whether the library exports a `<symbol>_merge` function.
+    fn has_merge_symbol(&self) -> bool {
+        self.get_symbol::<AccumulateFn>("merge").is_ok()
+    }
+}
+
+impl datafusion::logical_expr::Accumulator for LibAccumulator {
+    fn update_batch(&mut self, values: &[ArrayRef]) -> datafusion::common::Result<()> {
+        self.call_state_fn("accumulate", values)
+    }
+
     fn merge_batch(&mut self, states: &[ArrayRef]) -> datafusion::common::Result<()> {
-        // For lib aggregates, merge is optional. If the symbol doesn't exist,
-        // we fall back to treating each state array element as a batch to accumulate.
         if states.is_empty() {
             return Ok(());
         }
-        self.update_batch(states)
+        // Prefer a dedicated `<symbol>_merge` export (same C ABI as
+        // accumulate, receiving the partial-state arrays). Without one, fall
+        // back to feeding partials through accumulate — correct ONLY for
+        // aggregates where merging equals accumulating the partial results
+        // (sum/min/max-style); warn so authors of other aggregates know their
+        // multi-partition results are at risk (bb-dvo.8).
+        if self.has_merge_symbol() {
+            return self.call_state_fn("merge", states);
+        }
+        if !self.merge_fallback_warned {
+            self.merge_fallback_warned = true;
+            log::warn!(
+                "Lib aggregate '{}' in '{}' has no {}_merge export; merging partial \
+                 states via {}_accumulate — correct only for sum/min/max-style \
+                 aggregates",
+                self.symbol,
+                self.lib_path,
+                self.symbol,
+                self.symbol
+            );
+        }
+        self.call_state_fn("accumulate", states)
     }
 
     fn evaluate(&mut self) -> datafusion::common::Result<ScalarValue> {
@@ -591,6 +631,45 @@ mod tests {
         let lib_name = "test_lib_function.dll";
 
         format!("{}/target/debug/{}", test_lib_dir, lib_name)
+    }
+
+    #[test]
+    fn test_merge_batch_uses_merge_symbol_when_present() {
+        // bb-dvo.8: merge_batch must call <symbol>_merge when the library
+        // exports it. merge_probe's merge adds a 1_000_000 marker per call,
+        // so the result proves which C function ran.
+        use datafusion::logical_expr::Accumulator;
+        let path = test_lib_path();
+        let mut acc =
+            LibAccumulator::new(&path, "merge_probe", DataType::Int64).expect("accumulator");
+        let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1i64, 2, 3]));
+        acc.update_batch(&[input]).expect("accumulate");
+
+        let partial: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![10i64]));
+        acc.merge_batch(&[partial]).expect("merge");
+
+        let result = acc.evaluate().expect("evaluate");
+        assert_eq!(
+            result,
+            datafusion::scalar::ScalarValue::Int64(Some(1_000_016)),
+            "merge_batch must run the merge export, not the accumulate fallback"
+        );
+    }
+
+    #[test]
+    fn test_merge_batch_falls_back_to_accumulate() {
+        // int_sum exports no merge symbol: the accumulate fallback applies
+        // (correct for sum-style aggregates) with a one-time warning.
+        use datafusion::logical_expr::Accumulator;
+        let path = test_lib_path();
+        let mut acc =
+            LibAccumulator::new(&path, "int_sum", DataType::Int64).expect("accumulator");
+        let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1i64, 2, 3]));
+        acc.update_batch(&[input]).expect("accumulate");
+        let partial: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![10i64]));
+        acc.merge_batch(&[partial]).expect("merge fallback");
+        let result = acc.evaluate().expect("evaluate");
+        assert_eq!(result, datafusion::scalar::ScalarValue::Int64(Some(16)));
     }
 
     #[test]

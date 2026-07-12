@@ -179,6 +179,78 @@ pub unsafe extern "C" fn int_sum_free_state(state: *mut c_void) {
     }
 }
 
+// ==================== merge_probe aggregate ====================
+//
+// Distinguishes the merge path from the accumulate fallback: `merge` adds a
+// 1_000_000 marker per merged partial, so a merged result proves which C
+// function ran (bb-dvo.8 wiring test).
+
+#[no_mangle]
+pub extern "C" fn merge_probe_create_state() -> *mut c_void {
+    let state = Box::new(SumState { sum: 0 });
+    Box::into_raw(state) as *mut c_void
+}
+
+/// # Safety
+/// Called via FFI. `state` must be a valid pointer from `merge_probe_create_state`.
+#[no_mangle]
+pub unsafe extern "C" fn merge_probe_accumulate(
+    state: *mut c_void,
+    args: *const *const FFI_ArrowArray,
+    arg_schemas: *const *const FFI_ArrowSchema,
+    n_args: i64,
+    err_buf: *mut u8,
+    err_buf_len: i64,
+) -> i32 {
+    match int_sum_accumulate_impl(state, args, arg_schemas, n_args) {
+        Ok(()) => 0,
+        Err(msg) => {
+            write_error(err_buf, err_buf_len, &msg);
+            1
+        }
+    }
+}
+
+/// # Safety
+/// Called via FFI. `state` must be a valid pointer from `merge_probe_create_state`.
+#[no_mangle]
+pub unsafe extern "C" fn merge_probe_merge(
+    state: *mut c_void,
+    args: *const *const FFI_ArrowArray,
+    arg_schemas: *const *const FFI_ArrowSchema,
+    n_args: i64,
+    err_buf: *mut u8,
+    err_buf_len: i64,
+) -> i32 {
+    // Same as accumulate, plus a marker so tests can tell the paths apart.
+    let rc = merge_probe_accumulate(state, args, arg_schemas, n_args, err_buf, err_buf_len);
+    if rc == 0 {
+        let state = &mut *(state as *mut SumState);
+        state.sum += 1_000_000;
+    }
+    rc
+}
+
+/// # Safety
+/// Called via FFI. `state` must be a valid pointer from `merge_probe_create_state`.
+#[no_mangle]
+pub unsafe extern "C" fn merge_probe_evaluate(
+    state: *mut c_void,
+    out_array: *mut FFI_ArrowArray,
+    out_schema: *mut FFI_ArrowSchema,
+    err_buf: *mut u8,
+    err_buf_len: i64,
+) -> i32 {
+    int_sum_evaluate(state, out_array, out_schema, err_buf, err_buf_len)
+}
+
+/// # Safety
+/// Called via FFI. `state` must be a valid pointer from `merge_probe_create_state`.
+#[no_mangle]
+pub unsafe extern "C" fn merge_probe_free_state(state: *mut c_void) {
+    int_sum_free_state(state)
+}
+
 // ==================== Manifest ====================
 
 const MANIFEST_JSON: &str = r#"{"functions": [
