@@ -83,11 +83,11 @@ impl UdfEntrypoint for IpcRuntime {
     fn invoke_scalar(
         &self,
         name: &str,
-        _function_name: &str,
+        function_name: &str,
         args: &datafusion::logical_expr::ScalarFunctionArgs,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<ColumnarValue> {
-        invoke_ipc_scalar_impl(name, &self.path, args, subprocess_cache)
+        invoke_ipc_scalar_impl(name, &self.path, function_name, args, subprocess_cache)
     }
 
     fn create_accumulator(

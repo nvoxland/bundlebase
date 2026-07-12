@@ -9,9 +9,15 @@ use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
 /// Shared IPC scalar invocation for Ipc, Java, and Docker runtimes.
+///
+/// `name` is the DataFusion display name (post-registration this is the
+/// internal `fn_<id>` alias) and is used only for error messages;
+/// `function_name` is the function's real bare name and is what goes on the
+/// wire — a conforming function server has never heard of the display name.
 pub(crate) fn invoke_ipc_scalar_impl(
     name: &str,
     entrypoint: &str,
+    function_name: &str,
     args: &datafusion::logical_expr::ScalarFunctionArgs,
     subprocess_cache: &SubprocessCache,
 ) -> DFResult<ColumnarValue> {
@@ -26,11 +32,7 @@ pub(crate) fn invoke_ipc_scalar_impl(
         })
         .collect::<DFResult<Vec<_>>>()?;
 
-    // Extract function name from the call - use the name parameter which is the display name
-    // For IPC, we need to extract the actual function name from the display name (namespace.name -> name)
-    let func_name = name.rsplit('.').next().unwrap_or(name);
-
-    let result = ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, func_name, &arrays)
+    let result = ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, function_name, &arrays)
         .map_err(|e| {
             datafusion::common::DataFusionError::Execution(format!(
                 "IPC function '{}' ({}) failed: {}",
@@ -183,5 +185,84 @@ pub(crate) async fn verify_ipc_handshake(call_string: &str) -> Result<(), Bundle
         Err(_) => Err(
             "Connector verification failed: subprocess did not respond within 10 seconds".into(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bridge::ipc_bridge::new_subprocess_cache;
+    use arrow::array::Int64Array;
+
+    /// bb-dvo.3: the JSON-RPC `invoke` request must carry the function's REAL
+    /// bare name, not the DataFusion display name (which is the internal
+    /// `fn_<id>` alias after registration — a conforming function server has
+    /// never heard of it).
+    ///
+    /// Uses a stub entrypoint that closes stdout (the handshake tolerates
+    /// that), records the first two request lines, and exits — the invocation
+    /// fails, but the captured request shows what went on the wire.
+    #[test]
+    fn test_scalar_invoke_sends_bare_function_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stub = dir.path().join("stub.sh");
+        let capture = dir.path().join("capture.txt");
+        std::fs::write(&stub, "exec >&-\nhead -n 2 > \"$1\"\n").expect("write stub");
+
+        let entrypoint = format!(
+            "sh {} {}",
+            stub.to_str().expect("utf8"),
+            capture.to_str().expect("utf8")
+        );
+
+        let arr: ArrayRef = Arc::new(Int64Array::from(vec![1i64, 2, 3]));
+        let args = datafusion::logical_expr::ScalarFunctionArgs {
+            args: vec![ColumnarValue::Array(Arc::clone(&arr))],
+            arg_fields: vec![Arc::new(arrow::datatypes::Field::new(
+                "arg_0",
+                DataType::Int64,
+                true,
+            ))],
+            number_rows: 3,
+            return_field: Arc::new(arrow::datatypes::Field::new(
+                "out",
+                DataType::Int64,
+                true,
+            )),
+            config_options: Arc::new(datafusion::common::config::ConfigOptions::default()),
+        };
+
+        let cache = new_subprocess_cache();
+        // The stub can't answer, so the call errors — that's fine.
+        let r = invoke_ipc_scalar_impl(
+            "acme.fn_deadbeef00000000",
+            &entrypoint,
+            "real_function_name",
+            &args,
+            &cache,
+        );
+        assert!(r.is_err(), "the stub cannot answer; the call must error");
+
+        // The stub writes the capture file as the parent tears down — poll
+        // briefly rather than racing it.
+        let mut captured = String::new();
+        for _ in 0..100 {
+            if let Ok(c) = std::fs::read_to_string(&capture) {
+                if c.contains("invoke") {
+                    captured = c;
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!captured.is_empty(), "stub never wrote the capture file");
+        assert!(
+            captured.contains("\"function\":\"real_function_name\""),
+            "wire request must use the bare function name; captured: {captured}"
+        );
+        assert!(
+            !captured.contains("fn_deadbeef00000000"),
+            "wire request must not leak the display alias; captured: {captured}"
+        );
     }
 }

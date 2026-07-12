@@ -57,11 +57,11 @@ impl UdfEntrypoint for DockerRuntime {
     fn invoke_scalar(
         &self,
         name: &str,
-        _function_name: &str,
+        function_name: &str,
         args: &datafusion::logical_expr::ScalarFunctionArgs,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<ColumnarValue> {
-        invoke_ipc_scalar_impl(name, &self.image, args, subprocess_cache)
+        invoke_ipc_scalar_impl(name, &self.image, function_name, args, subprocess_cache)
     }
 
     fn create_accumulator(
