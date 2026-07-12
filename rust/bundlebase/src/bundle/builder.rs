@@ -221,6 +221,10 @@ pub struct BundleBuilder {
     >,
     /// WHERE clauses from UPDATE commands, stored for historical reference in the operation log.
     pending_update_wheres: RwLock<Vec<String>>,
+    /// True when uncommitted pending edits have been flushed into the live
+    /// DataBlocks (overlays/tombstones). Lets failure paths know the blocks
+    /// must be rebuilt even when the failed change recorded no operations.
+    flushed_block_state: std::sync::atomic::AtomicBool,
     /// Cumulative snapshots of the pending delete/update accumulators, one per
     /// completed change in `status` (bb-fqm.4). `undo()` restores the previous
     /// snapshot so an undone DELETE/UPDATE's pending side-state doesn't ride
@@ -266,6 +270,10 @@ impl Clone for BundleBuilder {
             pending_updates: RwLock::new(self.pending_updates.read().clone()),
             pending_update_wheres: RwLock::new(self.pending_update_wheres.read().clone()),
             pending_snapshots: RwLock::new(self.pending_snapshots.read().clone()),
+            flushed_block_state: std::sync::atomic::AtomicBool::new(
+                self.flushed_block_state
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
         }
     }
 }
@@ -336,6 +344,7 @@ impl BundleBuilder {
             pending_updates: RwLock::new(std::collections::HashMap::new()),
             pending_update_wheres: RwLock::new(Vec::new()),
             pending_snapshots: RwLock::new(Vec::new()),
+            flushed_block_state: std::sync::atomic::AtomicBool::new(false),
         });
 
         // Re-register schema providers and the search() UDTF with BundleBuilder as
@@ -392,6 +401,7 @@ impl BundleBuilder {
             pending_updates: RwLock::new(std::collections::HashMap::new()),
             pending_update_wheres: RwLock::new(Vec::new()),
             pending_snapshots: RwLock::new(Vec::new()),
+            flushed_block_state: std::sync::atomic::AtomicBool::new(false),
         });
 
         // Re-register schema providers and the search() UDTF with BundleBuilder as
@@ -760,6 +770,8 @@ impl BundleBuilder {
         self.pending_updates.write().clear();
         self.pending_update_wheres.write().clear();
         self.pending_snapshots.write().clear();
+        self.flushed_block_state
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         info!("Committed version {}", self.bundle.version());
 
@@ -827,6 +839,8 @@ impl BundleBuilder {
         self.pending_updates.write().clear();
         self.pending_update_wheres.write().clear();
         self.pending_snapshots.write().clear();
+        self.flushed_block_state
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -866,12 +880,9 @@ impl BundleBuilder {
         self.restore_pending_from_last_snapshot();
 
         // Reload the bundle from the last committed state and reapply the
-        // remaining uncommitted changes
+        // remaining uncommitted changes (this also re-flushes the restored
+        // pending overlays/tombstones into the rebuilt blocks).
         self.restore_uncommitted_state().await?;
-
-        // Re-flush any remaining pending updates: reload rebuilt the blocks
-        // without the in-session overlays.
-        self.flush_pending_updates_to_blocks();
 
         info!("UNDONE: {}", description);
 
@@ -893,6 +904,13 @@ impl BundleBuilder {
             }
         }
 
+        // The reload rebuilt the blocks without the in-session flushed state —
+        // mirror the (possibly restored) pending accumulators back in.
+        self.flushed_block_state
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.flush_pending_updates_to_blocks();
+        self.flush_pending_deletes_to_blocks();
+
         Ok(())
     }
 
@@ -910,7 +928,13 @@ impl BundleBuilder {
         // roll the accumulators back so the next commit doesn't persist
         // side-state for a change that was never recorded (bb-fqm.4 family).
         self.restore_pending_from_last_snapshot();
-        if discarded.is_some_and(|c| !c.operations.is_empty()) {
+        // Rebuild the live bundle when the failed change applied operations OR
+        // flushed overlays/tombstones into the blocks (a failed DELETE/UPDATE
+        // body mutates block state without recording any operation).
+        let flushed = self
+            .flushed_block_state
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if flushed || discarded.is_some_and(|c| !c.operations.is_empty()) {
             if let Err(restore_err) = self.restore_uncommitted_state().await {
                 return Err(format!(
                     "Command failed ({}) and restoring the pre-command state also failed: {}",
@@ -1246,6 +1270,47 @@ impl BundleBuilder {
 
         // Clear cached dataframe so next query picks up the overlay
         self.bundle.dataframe.clear();
+        self.flushed_block_state
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Push pending deleted row numbers to DataBlocks for immediate in-session
+    /// visibility (mirror of `flush_pending_updates_to_blocks`). Idempotent:
+    /// `add_deleted_rows` sorts and dedups, so re-flushing (and the commit-time
+    /// DeleteOp re-applying the same rows) is safe.
+    pub fn flush_pending_deletes_to_blocks(&self) {
+        let pending = self.pending_deletes.read();
+        if pending.is_empty() {
+            return;
+        }
+        log::debug!(
+            "[DELETE] Flushing {} pending deletes to blocks",
+            pending.len()
+        );
+
+        let mut by_block: std::collections::HashMap<u16, Vec<u32>> =
+            std::collections::HashMap::new();
+        for row_id in pending.iter() {
+            by_block
+                .entry(row_id.block_ref().as_u16())
+                .or_default()
+                .push(row_id.row_number());
+        }
+
+        let packs = self.bundle.packs().read().clone();
+        if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
+            let blocks = pack.blocks();
+            for (block_idx, row_numbers) in by_block {
+                if let Some(block) = blocks.get(block_idx as usize) {
+                    block.add_deleted_rows(row_numbers);
+                }
+            }
+        }
+
+        // Clear cached dataframe so the next query sees the tombstones
+        self.bundle.dataframe.clear();
+        self.flushed_block_state
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Returns the current always-delete rules.
@@ -1299,6 +1364,9 @@ impl BundleBuilder {
         self.pending_delete_wheres
             .write()
             .push(where_clause.to_string());
+        // Mirror the tombstones into the blocks immediately so same-session
+        // queries exclude the rows without any query-level filter.
+        self.flush_pending_deletes_to_blocks();
     }
 
     /// Collect RowIds of rows matching a WHERE clause from all blocks.

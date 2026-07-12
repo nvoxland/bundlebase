@@ -450,3 +450,84 @@ async fn test_delete_after_update_does_not_lose_rows() -> Result<(), BundlebaseE
 
     Ok(())
 }
+
+/// Phase 2 (FilterOp removal): a DELETE's tombstones must be visible
+/// in-session at the BLOCK level — without any query-level FilterOp above.
+/// `mark_deleted` must flush row numbers into the blocks immediately, the way
+/// updates are flushed.
+#[tokio::test]
+async fn test_block_level_delete_visible_in_session() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("attach").await?;
+    let total = builder.num_rows().await?;
+
+    // Blocks-only delete: no FilterOp — exactly what the DELETE command does
+    // once the duplicate FilterOp is removed.
+    let wc = builder.translate_sql("salary > 200000");
+    let ids = builder.select_row_ids(&wc).await?;
+    let n = ids.len();
+    assert!(n > 0);
+    builder
+        .run_command("blocks-only delete".to_string(), async {
+            builder.mark_deleted(ids, &wc);
+            Ok(())
+        })
+        .await?;
+
+    let batches = query_collect(builder.as_ref(), "SELECT * FROM bundle").await;
+    let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(
+        streamed,
+        total - n,
+        "tombstoned rows must disappear from same-session queries at the block level"
+    );
+    Ok(())
+}
+
+/// A command that mutates block-level state (overlays/tombstones) and then
+/// FAILS must not leave that state behind. Pre-existing gap for updates: the
+/// overlay was flushed to blocks mid-command; on failure the pending
+/// accumulators are restored but the block overlay lingered.
+#[tokio::test]
+async fn test_failed_command_rolls_back_flushed_block_state() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("attach").await?;
+
+    let col = builder.translate_sql("salary");
+    let wc = builder.translate_sql("salary > 200000");
+    let result = builder
+        .run_command("update then fail".to_string(), async {
+            builder
+                .evaluate_update_cols(
+                    std::slice::from_ref(&col),
+                    &["-777.0".to_string()],
+                    &wc,
+                )
+                .await?;
+            builder.flush_pending_updates_to_blocks();
+            Err::<(), BundlebaseError>("simulated failure".into())
+        })
+        .await;
+    assert!(result.is_err());
+
+    let marked = query_count(
+        builder.as_ref(),
+        "SELECT COUNT(*) AS c FROM bundle WHERE salary = -777.0",
+    )
+    .await;
+    assert_eq!(
+        marked, 0,
+        "a failed command's flushed overlay must not remain visible"
+    );
+    Ok(())
+}
