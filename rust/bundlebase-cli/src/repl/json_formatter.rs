@@ -11,6 +11,18 @@ use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 use serde_json::{json, Value};
 
+/// Downcast to a concrete array and produce a typed JSON value, falling back
+/// to the display string if the concrete type doesn't match the declared
+/// DataType (ADR-007: never panic on a malformed array).
+macro_rules! typed_json {
+    ($col:expr, $row:expr, $arr:ty) => {
+        match $col.as_any().downcast_ref::<$arr>() {
+            Some(a) => json!(a.value($row)),
+            None => json!(super::display::format_array_value($col, $row)),
+        }
+    };
+}
+
 /// Convert an Arrow array value at a given row to a serde_json::Value.
 ///
 /// Produces typed JSON values (numbers as numbers, booleans as booleans, etc.)
@@ -20,52 +32,19 @@ fn array_value_to_json(column: &ArrayRef, row_idx: usize) -> Value {
     }
 
     match column.data_type() {
-        DataType::Int8 => json!(column
-            .as_any()
-            .downcast_ref::<Int8Array>()
-            .expect("Int8 downcast")
-            .value(row_idx)),
-        DataType::Int16 => json!(column
-            .as_any()
-            .downcast_ref::<Int16Array>()
-            .expect("Int16 downcast")
-            .value(row_idx)),
-        DataType::Int32 => json!(column
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .expect("Int32 downcast")
-            .value(row_idx)),
-        DataType::Int64 => json!(column
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .expect("Int64 downcast")
-            .value(row_idx)),
-        DataType::UInt8 => json!(column
-            .as_any()
-            .downcast_ref::<UInt8Array>()
-            .expect("UInt8 downcast")
-            .value(row_idx)),
-        DataType::UInt16 => json!(column
-            .as_any()
-            .downcast_ref::<UInt16Array>()
-            .expect("UInt16 downcast")
-            .value(row_idx)),
-        DataType::UInt32 => json!(column
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .expect("UInt32 downcast")
-            .value(row_idx)),
-        DataType::UInt64 => json!(column
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .expect("UInt64 downcast")
-            .value(row_idx)),
+        DataType::Int8 => typed_json!(column, row_idx, Int8Array),
+        DataType::Int16 => typed_json!(column, row_idx, Int16Array),
+        DataType::Int32 => typed_json!(column, row_idx, Int32Array),
+        DataType::Int64 => typed_json!(column, row_idx, Int64Array),
+        DataType::UInt8 => typed_json!(column, row_idx, UInt8Array),
+        DataType::UInt16 => typed_json!(column, row_idx, UInt16Array),
+        DataType::UInt32 => typed_json!(column, row_idx, UInt32Array),
+        DataType::UInt64 => typed_json!(column, row_idx, UInt64Array),
         DataType::Float32 => {
-            let v = column
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .expect("Float32 downcast")
-                .value(row_idx);
+            let Some(arr) = column.as_any().downcast_ref::<Float32Array>() else {
+                return json!(super::display::format_array_value(column, row_idx));
+            };
+            let v = arr.value(row_idx);
             if v.is_finite() {
                 json!(v)
             } else {
@@ -73,37 +52,20 @@ fn array_value_to_json(column: &ArrayRef, row_idx: usize) -> Value {
             }
         }
         DataType::Float64 => {
-            let v = column
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .expect("Float64 downcast")
-                .value(row_idx);
+            let Some(arr) = column.as_any().downcast_ref::<Float64Array>() else {
+                return json!(super::display::format_array_value(column, row_idx));
+            };
+            let v = arr.value(row_idx);
             if v.is_finite() {
                 json!(v)
             } else {
                 json!(v.to_string())
             }
         }
-        DataType::Boolean => json!(column
-            .as_any()
-            .downcast_ref::<BooleanArray>()
-            .expect("Boolean downcast")
-            .value(row_idx)),
-        DataType::Utf8 => json!(column
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("Utf8 downcast")
-            .value(row_idx)),
-        DataType::LargeUtf8 => json!(column
-            .as_any()
-            .downcast_ref::<LargeStringArray>()
-            .expect("LargeUtf8 downcast")
-            .value(row_idx)),
-        DataType::Utf8View => json!(column
-            .as_any()
-            .downcast_ref::<StringViewArray>()
-            .expect("Utf8View downcast")
-            .value(row_idx)),
+        DataType::Boolean => typed_json!(column, row_idx, BooleanArray),
+        DataType::Utf8 => typed_json!(column, row_idx, StringArray),
+        DataType::LargeUtf8 => typed_json!(column, row_idx, LargeStringArray),
+        DataType::Utf8View => typed_json!(column, row_idx, StringViewArray),
         // Date / Time / Timestamp / Duration / Interval / Decimal all go
         // through display::format_array_value, which delegates to Arrow's
         // ArrayFormatter for unit-aware ISO-8601 rendering. Previously
@@ -262,6 +224,26 @@ fn format_as_array(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_dictionary_column_formats_without_panic() {
+        // bb-8gq.8: dictionary/REE columns previously fell through to Debug
+        // output in the display path and were a panic risk in refactors; the
+        // ArrayFormatter delegation renders their VALUES.
+        use arrow::array::{DictionaryArray, Int32Array, StringArray};
+        use std::sync::Arc;
+
+        let keys = Int32Array::from(vec![0, 1, 0]);
+        let values = StringArray::from(vec!["alpha", "beta"]);
+        let dict = DictionaryArray::new(keys, Arc::new(values));
+        let col: ArrayRef = Arc::new(dict);
+
+        let display = super::super::display::format_array_value(&col, 1);
+        assert_eq!(display, "beta");
+
+        let j = array_value_to_json(&col, 1);
+        assert_eq!(j, serde_json::json!("beta"));
+    }
+
     use super::*;
     use arrow::datatypes::{Field, Schema};
     use arrow::record_batch::RecordBatch;
