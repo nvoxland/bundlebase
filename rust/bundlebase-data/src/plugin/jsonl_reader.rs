@@ -130,54 +130,79 @@ impl DataReader for JsonlReader {
             return Ok(Some(cached.clone()));
         }
 
-        // Attach-time path: read the full file and union top-level keys
+        // Attach-time path: stream the full file and union top-level keys
         // across every line. Heterogeneous JSONL datasets (e.g. claude
         // transcripts where a `summary` record on line 1 has different keys
         // than the `user`/`assistant` rows that follow) would otherwise
         // silently drop the fields that aren't on line 1. Correctness wins
-        // over the per-row cost of a wider schema.
+        // over the per-row cost of a wider schema. Lines are processed as
+        // chunks arrive — the file is never buffered whole (bb-xn0.2).
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
         let result = store
             .get_opts(&path, object_store::GetOptions::default())
             .await?;
-        let bytes = result.bytes().await?;
-
-        // Validate the file is JSONL (one object per line), not a JSON array.
-        let first_char = bytes.iter().find(|b| !b.is_ascii_whitespace()).copied();
-        if first_char == Some(b'[') {
-            return Err(BundlebaseError::from(format!(
-                "File '{}' contains a JSON array, not JSON Lines. \
-                 Use a connector with SAVE AS PARQUET to convert JSON arrays, \
-                 or convert the file to JSONL format (one JSON object per line).",
-                self.inner.url()
-            )));
-        }
+        let mut stream = result.into_stream();
 
         let mut keys: Vec<String> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut saw_object = false;
-        for line in bytes.split(|&b| b == b'\n') {
+        let mut saw_non_ws = false;
+        let mut pending: Vec<u8> = Vec::new();
+
+        fn collect_line_keys(
+            line: &[u8],
+            keys: &mut Vec<String>,
+            seen: &mut std::collections::HashSet<String>,
+            saw_object: &mut bool,
+        ) {
             let line = if line.last() == Some(&b'\r') {
                 &line[..line.len() - 1]
             } else {
                 line
             };
             if line.iter().all(|b| b.is_ascii_whitespace()) {
-                continue;
+                return;
             }
             let parsed: serde_json::Value = match serde_json::from_slice(line) {
                 Ok(v) => v,
-                Err(_) => continue, // matches query-time tolerance for malformed rows
+                Err(_) => return, // matches query-time tolerance for malformed rows
             };
             if let serde_json::Value::Object(map) = parsed {
-                saw_object = true;
+                *saw_object = true;
                 for k in map.keys() {
-                    if seen.insert(k.clone()) {
+                    if !seen.contains(k) {
+                        seen.insert(k.clone());
                         keys.push(k.clone());
                     }
                 }
             }
+        }
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            // Validate the file is JSONL (one object per line), not a JSON array.
+            if !saw_non_ws {
+                if let Some(first) = chunk.iter().find(|b| !b.is_ascii_whitespace()) {
+                    saw_non_ws = true;
+                    if *first == b'[' {
+                        return Err(BundlebaseError::from(format!(
+                            "File '{}' contains a JSON array, not JSON Lines. \
+                             Use a connector with SAVE AS PARQUET to convert JSON arrays, \
+                             or convert the file to JSONL format (one JSON object per line).",
+                            self.inner.url()
+                        )));
+                    }
+                }
+            }
+            pending.extend_from_slice(&chunk);
+            while let Some(nl) = pending.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=nl).collect();
+                collect_line_keys(&line[..line.len() - 1], &mut keys, &mut seen, &mut saw_object);
+            }
+        }
+        if !pending.is_empty() {
+            collect_line_keys(&pending, &mut keys, &mut seen, &mut saw_object);
         }
         if !saw_object {
             return Err(BundlebaseError::from(format!(
@@ -232,92 +257,22 @@ impl DataReader for JsonlReader {
                 LineOrientedFormat::JsonLines,
             )));
         }
-        // Read JSONL with serde_json and stringify all values to produce all-Utf8
-        // Arrow columns. This avoids Arrow's strict JSON reader which rejects
-        // non-string values (booleans, numbers, objects) when schema says Utf8.
+        // Full scan: stream the file into bounded all-Utf8 batches. serde_json
+        // stringification (not Arrow's strict JSON reader) tolerates
+        // non-string values (booleans, numbers, objects) when schema says
+        // Utf8; the streaming source never materializes the file (bb-xn0.2).
         let schema = self
             .read_schema()
             .await
             .map_err(|e| DataFusionError::External(e))?
             .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
-        let store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let result = store
-            .get_opts(&path, Default::default())
-            .await
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let bytes = result
-            .bytes()
-            .await
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-        // Build builders only for the projected columns. Rows come in with a
-        // fixed set of top-level keys; the visitor's name→idx map only maps
-        // the ones we care about, so per-row cost is O(projected) rather than
-        // O(schema_fields). That makes wide schemas (schema-union over
-        // heterogeneous JSONL) as cheap as narrow ones for aggregation
-        // queries that only read 1-3 columns.
-        let projected_schema: SchemaRef = match projection {
-            Some(proj) => Arc::new(
-                schema
-                    .project(proj)
-                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
-            ),
-            None => schema.clone(),
-        };
-        let col_names: Vec<&str> = projected_schema
-            .fields()
-            .iter()
-            .map(|f| f.name().as_str())
-            .collect();
-        let name_to_idx: std::collections::HashMap<&str, usize> =
-            col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
-        let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
-            .map(|_| arrow::array::StringBuilder::new())
-            .collect();
-        for line in bytes.split(|&b| b == b'\n') {
-            let line = if line.last() == Some(&b'\r') {
-                &line[..line.len() - 1]
-            } else {
-                line
-            };
-            if line.is_empty() || line.iter().all(|b| b.is_ascii_whitespace()) {
-                // Whitespace-only lines are not logical rows (the layout's row
-                // numbering skips them too).
-                continue;
-            }
-            // A malformed line must be an error, not a silent skip: dropped lines
-            // desync logical row numbers from the byte-offset layout, and every
-            // downstream RowId (tombstones, overlays, indexes) would point at the
-            // wrong row (bb-dvo.1).
-            if !crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders) {
-                return Err(datafusion::error::DataFusionError::External(
-                    format!(
-                        "Malformed JSONL line (not a JSON object): {}",
-                        String::from_utf8_lossy(&line[..line.len().min(120)])
-                    )
-                    .into(),
-                )
-                .into());
-            }
-        }
-
-        let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
-            .into_iter()
-            .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
-            .collect();
-        let batch = arrow::record_batch::RecordBatch::try_new(projected_schema.clone(), arrays)
-            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-
-        let partitions = vec![vec![batch]];
-        let source = Arc::new(datafusion::datasource::memory::MemorySourceConfig::try_new(
-            &partitions,
-            projected_schema,
-            None,
-        )?);
-        Ok(source as Arc<dyn DataSource>)
+        let source = crate::streaming_jsonl_data_source::StreamingJsonlDataSource::new(
+            self.inner.file().as_object_store_file(),
+            schema,
+            projection.cloned(),
+        )?;
+        Ok(Arc::new(source) as Arc<dyn DataSource>)
     }
 
     async fn read_version(&self) -> Result<String, BundlebaseError> {
@@ -398,47 +353,64 @@ impl DataReader for JsonlReader {
         let name_to_idx: HashMap<&str, usize> =
             col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
 
-        // Read file bytes once — used for both page layout and column stats.
+        // Pass 1: stream the file through the incremental page-map builder
+        // to get page boundaries — the file is never buffered whole
+        // (bb-xn0.2, ADR-003).
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut file_stream = get_result.into_stream();
-        let mut buffer = Vec::new();
+        let mut pm_builder = crate::page_map::PageMapBuilder::new(false, DEFAULT_PAGE_SIZE, false);
         while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            buffer.extend_from_slice(&chunk);
+            pm_builder.feed(&chunk);
         }
-
-        // Build page layout first (no stats yet) to get page boundaries.
-        let initial_layout = match PageMap::build(&buffer, false, DEFAULT_PAGE_SIZE, vec![], false) {
+        let initial_layout = match pm_builder.finish(vec![]) {
             None => return Ok(None),
             Some(l) => l,
         };
         let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
 
-        // Compute column stats with page-level tracking.
+        // Pass 2: stream the file again for column stats, now that page
+        // boundaries are known. Two streaming passes keep memory O(1); the
+        // second read costs I/O but attach-time layout building is one-shot.
         let mut builder = if col_count > 0 {
             ColumnStatsBuilder::new(col_count, &page_row_starts)
         } else {
             ColumnStatsBuilder::new(0, &[])
         };
 
-        for line in buffer.split(|&b| b == b'\n') {
+        let mut process_stats_line = |line: &[u8]| {
             let line = if line.last() == Some(&b'\r') {
                 &line[..line.len() - 1]
             } else {
                 line
             };
             if line.is_empty() {
-                continue;
+                return;
             }
-            match serde_json::from_slice::<serde_json::Value>(line) {
-                Ok(serde_json::Value::Object(m)) => {
-                    builder.process_jsonl_row(&m, &name_to_idx, col_count);
-                }
-                _ => continue,
+            if let Ok(serde_json::Value::Object(m)) =
+                serde_json::from_slice::<serde_json::Value>(line)
+            {
+                builder.process_jsonl_row(&m, &name_to_idx, col_count);
+            }
+        };
+
+        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
+        let mut file_stream = get_result.into_stream();
+        let mut pending: Vec<u8> = Vec::new();
+        while let Some(chunk) = file_stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            pending.extend_from_slice(&chunk);
+            while let Some(nl) = pending.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = pending.drain(..=nl).collect();
+                process_stats_line(&line[..line.len() - 1]);
             }
         }
+        if !pending.is_empty() {
+            process_stats_line(&pending.clone());
+        }
+        drop(process_stats_line);
 
-        let column_stats = builder.finish(buffer.len() as u64);
+        let column_stats = builder.finish(initial_layout.file_size);
 
         // Assemble final layout with stats and write.
         let layout = PageMap {
@@ -869,6 +841,98 @@ mod tests {
             }
         }
         Ok(values)
+    }
+
+    /// Full scans must stream bounded batches, not materialize the whole
+    /// file as one giant in-memory batch (bb-xn0.2, ADR-003).
+    #[tokio::test]
+    async fn test_full_scan_streams_in_bounded_batches() -> Result<(), BundlebaseError> {
+        let mut content = String::with_capacity(1024 * 1024);
+        for i in 0..20_000 {
+            content.push_str(&format!("{{\"id\":\"{}\",\"name\":\"row{}\"}}\n", i, i));
+        }
+        write_jsonl("memory:///test_stream_scan/data.jsonl", &content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_stream_scan/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let ds = reader.data_source(None, &[], None, None).await?;
+        let ctx = test_context().ctx;
+        let stream = ds.open(0, ctx.task_ctx())?;
+        let batches: Vec<_> = stream.collect::<Vec<_>>().await;
+
+        let mut total = 0usize;
+        let mut first: Option<String> = None;
+        let mut last: Option<String> = None;
+        let n_batches = batches.len();
+        for batch in batches {
+            let batch = batch.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let idx = batch.schema().index_of("id")?;
+            let arr: StringArray = downcast_array(batch.column(idx).as_ref());
+            if first.is_none() {
+                first = Some(arr.value(0).to_string());
+            }
+            last = Some(arr.value(arr.len() - 1).to_string());
+            total += batch.num_rows();
+        }
+
+        assert_eq!(20_000, total, "all rows must be scanned");
+        assert_eq!(Some("0".to_string()), first, "row order must be preserved");
+        assert_eq!(Some("19999".to_string()), last);
+        assert!(
+            n_batches >= 2,
+            "full scan must yield multiple bounded batches (streaming), got {}",
+            n_batches
+        );
+        Ok(())
+    }
+
+    /// A malformed line surfacing mid-stream must error the scan, not be
+    /// silently skipped (row numbering integrity, bb-dvo.1).
+    #[tokio::test]
+    async fn test_full_scan_errors_on_malformed_line() -> Result<(), BundlebaseError> {
+        let content = "{\"id\":\"0\"}\nnot json at all\n{\"id\":\"2\"}\n";
+        write_jsonl("memory:///test_stream_malformed/data.jsonl", content).await?;
+
+        let plugin = JsonlPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                "memory:///test_stream_malformed/data.jsonl",
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let ds = reader.data_source(None, &[], None, None).await?;
+        let ctx = test_context().ctx;
+        let stream = ds.open(0, ctx.task_ctx())?;
+        let batches: Vec<_> = stream.collect::<Vec<_>>().await;
+        assert!(
+            batches.iter().any(|b| b.is_err()),
+            "malformed line must produce a stream error"
+        );
+        Ok(())
     }
 
     /// Index-path reads must not drop rows longer than the 4KB read-ahead.

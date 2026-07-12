@@ -10,6 +10,7 @@ mod page_map_data_source;
 pub mod plugin;
 pub mod reader_factory;
 mod rowid_stream;
+mod streaming_jsonl_data_source;
 
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;

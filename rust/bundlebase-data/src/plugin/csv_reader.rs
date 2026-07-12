@@ -466,22 +466,18 @@ impl DataReader for CsvReader {
         let path = object_store::path::Path::parse(self.inner.url().path())?;
         let delimiter = self.inner.config().delimiter;
 
-        // Read file bytes once — used for both page layout and column stats.
+        // Pass 1: stream the file through the incremental page-map builder —
+        // the file is never buffered whole (bb-xn0.2, ADR-003).
         let get_result = object_store
             .get_opts(&path, object_store::GetOptions::default())
             .await?;
         let mut file_stream = get_result.into_stream();
-        let mut buffer = Vec::new();
+        let mut pm_builder = crate::page_map::PageMapBuilder::new(true, DEFAULT_PAGE_SIZE, true);
         while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            buffer.extend_from_slice(&chunk);
+            pm_builder.feed(&chunk);
         }
-
-        // Build page layout first (no stats yet) to get page boundaries.
-        // This is a SIMD newline scan (memchr) — fast enough that the double
-        // pass over `buffer` (here + Arrow CSV reader below) is dominated
-        // entirely by the Arrow CSV reader.
-        let initial_layout = match PageMap::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![], true) {
+        let initial_layout = match pm_builder.finish(vec![]) {
             None => return Ok(None),
             Some(l) => l,
         };
@@ -514,9 +510,19 @@ impl DataReader for CsvReader {
                 BundlebaseError::from("CSV schema unavailable during build_layout")
             })?;
 
-        // Compute column stats with page-level tracking.
-        let column_stats =
-            self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter, schema)?;
+        // Pass 2: stream the file again through an incremental CSV decoder
+        // for column stats, now that page boundaries are known.
+        let get_result = object_store
+            .get_opts(&path, object_store::GetOptions::default())
+            .await?;
+        let column_stats = Self::compute_column_stats_streaming(
+            get_result.into_stream(),
+            initial_layout.file_size,
+            &page_row_starts,
+            delimiter,
+            schema,
+        )
+        .await?;
 
         // Assemble final layout with stats and write.
         let layout = PageMap {
@@ -732,9 +738,11 @@ impl CsvReader {
     ///
     /// `page_row_starts` — `layout.pages[i].row_begin` for each page, used to populate
     /// per-page min/max in the builder.
-    fn compute_column_stats_sync(
-        &self,
-        bytes: &[u8],
+    /// Stream file chunks through an incremental Arrow CSV decoder, feeding
+    /// each decoded batch to the stats builder — O(1) memory (bb-xn0.2).
+    async fn compute_column_stats_streaming(
+        mut file_stream: futures::stream::BoxStream<'static, object_store::Result<bytes::Bytes>>,
+        file_size: u64,
         page_row_starts: &[u32],
         delimiter: u8,
         schema: SchemaRef,
@@ -751,19 +759,47 @@ impl CsvReader {
         let format = arrow::csv::reader::Format::default()
             .with_header(true)
             .with_delimiter(delimiter);
-        let reader = arrow::csv::ReaderBuilder::new(schema)
+        let mut decoder = arrow::csv::ReaderBuilder::new(schema)
             .with_format(format)
             .with_batch_size(8192)
-            .build(std::io::Cursor::new(bytes))
-            .map_err(|e| BundlebaseError::from(format!("CSV stats read error: {}", e)))?;
+            .build_decoder();
 
-        for batch_result in reader {
-            let batch = batch_result
-                .map_err(|e| BundlebaseError::from(format!("CSV stats batch error: {}", e)))?;
+        while let Some(chunk) = file_stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            let mut buf: &[u8] = &chunk;
+            while !buf.is_empty() {
+                let decoded = decoder
+                    .decode(buf)
+                    .map_err(|e| BundlebaseError::from(format!("CSV stats read error: {}", e)))?;
+                buf = &buf[decoded..];
+                if !buf.is_empty() {
+                    // Decoder stopped early — a full batch is ready.
+                    match decoder.flush().map_err(|e| {
+                        BundlebaseError::from(format!("CSV stats batch error: {}", e))
+                    })? {
+                        Some(batch) => builder.process_batch(&batch),
+                        None if decoded == 0 => {
+                            return Err(BundlebaseError::from(
+                                "CSV stats decoder made no progress",
+                            ));
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+        // Signal end of input so a final row without trailing newline decodes.
+        decoder
+            .decode(&[])
+            .map_err(|e| BundlebaseError::from(format!("CSV stats read error: {}", e)))?;
+        if let Some(batch) = decoder
+            .flush()
+            .map_err(|e| BundlebaseError::from(format!("CSV stats batch error: {}", e)))?
+        {
             builder.process_batch(&batch);
         }
 
-        Ok(builder.finish(bytes.len() as u64))
+        Ok(builder.finish(file_size))
     }
 }
 

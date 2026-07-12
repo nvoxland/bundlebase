@@ -325,6 +325,147 @@ pub struct PageMap {
     pub has_quoted_newlines: bool,
 }
 
+/// Incremental page-map builder: `feed()` file chunks in order, then
+/// `finish()`. Produces the same layout as [`PageMap::build`] over the
+/// concatenated bytes (pinned by equivalence tests) without ever holding the
+/// file in memory (ADR-003, bb-xn0.2).
+pub struct PageMapBuilder {
+    skip_first: bool,
+    page_size: usize,
+    quote_aware: bool,
+    /// Absolute offset of the next byte to be fed.
+    offset: u64,
+    /// Absolute offset where the current (unterminated) line starts.
+    line_start: u64,
+    /// Whether every byte of the current line seen so far is whitespace.
+    current_line_blank: bool,
+    in_quotes: bool,
+    has_quoted_newlines: bool,
+    row_count: u32,
+    page_start: u64,
+    pages: Vec<PageGroup>,
+}
+
+impl PageMapBuilder {
+    pub fn new(skip_first_line: bool, page_size: usize, quote_aware: bool) -> Self {
+        Self {
+            skip_first: skip_first_line,
+            page_size,
+            quote_aware,
+            offset: 0,
+            line_start: 0,
+            current_line_blank: true,
+            in_quotes: false,
+            has_quoted_newlines: false,
+            row_count: 0,
+            page_start: 0,
+            pages: vec![PageGroup {
+                physical_start: 0,
+                row_begin: 0,
+            }],
+        }
+    }
+
+    /// Mark the current line non-blank if `segment` has any non-whitespace.
+    fn update_blankness(&mut self, segment: &[u8]) {
+        if self.current_line_blank && segment.iter().any(|b| !b.is_ascii_whitespace()) {
+            self.current_line_blank = false;
+        }
+    }
+
+    /// Process the next chunk of file bytes.
+    pub fn feed(&mut self, chunk: &[u8]) {
+        let base = self.offset;
+        // Start (within chunk) of bytes not yet examined for blankness.
+        let mut seg_start = 0usize;
+
+        // Same SIMD-accelerated scan as PageMap::build.
+        for i in memchr::memchr2_iter(b'\n', b'"', chunk) {
+            if chunk[i] == b'"' {
+                if self.quote_aware {
+                    self.in_quotes = !self.in_quotes;
+                }
+                // The quote itself is non-whitespace.
+                self.update_blankness(&chunk[seg_start..=i]);
+                seg_start = i + 1;
+                continue;
+            }
+            if self.in_quotes {
+                self.has_quoted_newlines = true;
+                continue;
+            }
+            self.update_blankness(&chunk[seg_start..i]);
+            seg_start = i + 1;
+
+            let abs = base + i as u64;
+            if self.skip_first {
+                self.skip_first = false;
+                // Adjust page start past the header
+                self.page_start = abs + 1;
+                self.pages[0].physical_start = self.page_start;
+                self.line_start = abs + 1;
+                self.current_line_blank = true;
+                continue;
+            }
+
+            // Blank/whitespace-only rows produce no logical row in the parsers
+            // (JSONL skips them, CSV never emits them), so they are not counted
+            // here either — row offsets must align with logical row numbers.
+            let is_blank = self.current_line_blank;
+            self.line_start = abs + 1;
+            self.current_line_blank = true;
+            if is_blank {
+                continue;
+            }
+            self.row_count += 1;
+
+            let page_bytes = (abs + 1 - self.page_start) as usize;
+            if page_bytes >= self.page_size {
+                self.page_start = abs + 1;
+                self.pages.push(PageGroup {
+                    physical_start: self.page_start,
+                    row_begin: self.row_count,
+                });
+            }
+        }
+
+        if seg_start < chunk.len() {
+            self.update_blankness(&chunk[seg_start..]);
+        }
+        self.offset = base + chunk.len() as u64;
+    }
+
+    /// Complete the layout. Returns `None` for empty files or files with no
+    /// data rows, matching [`PageMap::build`].
+    pub fn finish(mut self, column_stats: Vec<ColumnStats>) -> Option<PageMap> {
+        if self.offset == 0 {
+            return None;
+        }
+
+        // Handle final line without newline (skipping blank trailing content)
+        if self.line_start < self.offset && !self.skip_first && !self.current_line_blank {
+            self.row_count += 1;
+        }
+
+        if self.row_count == 0 {
+            return None;
+        }
+
+        // Small files get a single implicit page covering the whole file.
+        if self.offset as usize <= self.page_size {
+            self.pages.truncate(1);
+        }
+
+        Some(PageMap {
+            total_rows: self.row_count as u64,
+            file_size: self.offset,
+            pages: self.pages,
+            column_stats,
+            has_quoted_newlines: self.has_quoted_newlines,
+        })
+    }
+}
+
 impl PageMap {
     /// Build a layout by scanning file bytes for newlines.
     ///
@@ -884,6 +1025,102 @@ impl LogicalLineCounter {
 
 #[cfg(test)]
 mod tests {
+    // ── PageMapBuilder equivalence (bb-xn0.2) ──────────────────────────
+    //
+    // The incremental builder must produce byte-for-byte the same layout as
+    // the whole-buffer PageMap::build for every chunking of the input.
+
+    fn assert_builder_equivalent(
+        bytes: &[u8],
+        skip_first_line: bool,
+        page_size: usize,
+        quote_aware: bool,
+        chunk_size: usize,
+    ) {
+        let expected = PageMap::build(bytes, skip_first_line, page_size, vec![], quote_aware);
+
+        let mut builder = PageMapBuilder::new(skip_first_line, page_size, quote_aware);
+        for chunk in bytes.chunks(chunk_size.max(1)) {
+            builder.feed(chunk);
+        }
+        let actual = builder.finish(vec![]);
+
+        match (&expected, &actual) {
+            (None, None) => {}
+            (Some(e), Some(a)) => {
+                assert_eq!(e.total_rows, a.total_rows, "total_rows (chunk={chunk_size})");
+                assert_eq!(e.file_size, a.file_size, "file_size (chunk={chunk_size})");
+                assert_eq!(e.pages, a.pages, "pages (chunk={chunk_size})");
+                assert_eq!(
+                    e.has_quoted_newlines, a.has_quoted_newlines,
+                    "has_quoted_newlines (chunk={chunk_size})"
+                );
+            }
+            _ => panic!(
+                "build/builder disagree on Some/None (chunk={chunk_size}): {expected:?} vs {actual:?}"
+            ),
+        }
+    }
+
+    fn assert_equivalent_all_chunkings(
+        bytes: &[u8],
+        skip_first_line: bool,
+        page_size: usize,
+        quote_aware: bool,
+    ) {
+        for chunk_size in [1, 2, 3, 7, 64, 1024, usize::MAX] {
+            let chunk_size = chunk_size.min(bytes.len().max(1));
+            assert_builder_equivalent(bytes, skip_first_line, page_size, quote_aware, chunk_size);
+        }
+    }
+
+    #[test]
+    fn test_builder_equivalent_jsonl_basic() {
+        let mut content = String::new();
+        for i in 0..500 {
+            content.push_str(&format!("{{\"id\": {}, \"name\": \"row{}\"}}\n", i, i));
+        }
+        assert_equivalent_all_chunkings(content.as_bytes(), false, 1024, false);
+    }
+
+    #[test]
+    fn test_builder_equivalent_csv_with_header() {
+        let mut content = String::from("id,name\n");
+        for i in 0..500 {
+            content.push_str(&format!("{},row{}\n", i, i));
+        }
+        assert_equivalent_all_chunkings(content.as_bytes(), true, 1024, true);
+    }
+
+    #[test]
+    fn test_builder_equivalent_blank_lines_and_no_trailing_newline() {
+        let content = "a,b\n1,2\n\n   \n3,4\n\t\n5,6";
+        assert_equivalent_all_chunkings(content.as_bytes(), true, 8, true);
+        assert_equivalent_all_chunkings(content.as_bytes(), false, 8, false);
+    }
+
+    #[test]
+    fn test_builder_equivalent_quoted_newlines() {
+        let content = "id,note\n1,\"line one\nline two\"\n2,plain\n";
+        assert_equivalent_all_chunkings(content.as_bytes(), true, 16, true);
+        // Not quote-aware: the embedded newline counts as a row boundary
+        assert_equivalent_all_chunkings(content.as_bytes(), true, 16, false);
+    }
+
+    #[test]
+    fn test_builder_equivalent_empty_and_whitespace_only() {
+        assert_equivalent_all_chunkings(b"", false, 1024, false);
+        assert_equivalent_all_chunkings(b"   \n\t\n  ", false, 1024, false);
+        assert_equivalent_all_chunkings(b"header\n", true, 1024, true);
+    }
+
+    #[test]
+    fn test_builder_equivalent_small_file_single_page() {
+        // File smaller than page_size — single implicit page
+        let content = "x\n1\n2\n3\n";
+        assert_equivalent_all_chunkings(content.as_bytes(), true, 1 << 20, true);
+    }
+
     use super::*;
 
     #[test]
