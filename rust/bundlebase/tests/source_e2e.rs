@@ -1243,3 +1243,196 @@ async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), Bundleb
 
     Ok(())
 }
+
+/// bb-dvo.1: a CSV with newlines inside quoted values must produce correct
+/// logical rows through the whole stack — attach, query, and reopen. The
+/// quote-aware layout scan detects the embedded newlines at attach, enables
+/// `newlines_in_values` (persisted with the attach's read options), and skips
+/// the byte-offset layout so no row seek can land mid-record.
+#[tokio::test]
+async fn test_csv_quoted_newlines_end_to_end() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("newlines-in-values.csv"), None)
+        .await?;
+    builder.commit("attach quoted csv").await?;
+
+    // 3 logical rows (6 physical lines).
+    use futures::TryStreamExt;
+    let batches: Vec<arrow::record_batch::RecordBatch> = builder
+        .query("SELECT * FROM bundle", vec![], None)
+        .await?
+        .try_collect()
+        .await?;
+    let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(streamed, 3, "quoted newlines must not split rows");
+
+    // The row AFTER two multi-line records must come back intact (a physical
+    // line counter would seek mid-record here).
+    let batches: Vec<arrow::record_batch::RecordBatch> = builder
+        .query(
+            "SELECT name, value FROM bundle WHERE id = '3'",
+            vec![],
+            None,
+        )
+        .await?
+        .try_collect()
+        .await?;
+    let batch = batches
+        .iter()
+        .find(|b| b.num_rows() > 0)
+        .expect("row with id 3");
+    let names = batch
+        .column_by_name("name")
+        .expect("name col")
+        .as_any()
+        .downcast_ref::<arrow::array::StringViewArray>()
+        .map(|a| a.value(0).to_string())
+        .or_else(|| {
+            batch
+                .column_by_name("name")
+                .and_then(|c| c.as_any().downcast_ref::<arrow::array::StringArray>())
+                .map(|a| a.value(0).to_string())
+        })
+        .expect("string name");
+    assert_eq!(names, "Carol");
+
+    // The detection must survive commit + reopen (persisted read options).
+    let reopened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let batches: Vec<arrow::record_batch::RecordBatch> = reopened
+        .query("SELECT * FROM bundle", vec![], None)
+        .await?
+        .try_collect()
+        .await?;
+    let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(streamed, 3, "detection must persist across reopen");
+
+    Ok(())
+}
+
+/// bb-dvo.1, the observable failure: an INDEXED lookup on a quoted-newline
+/// CSV. The BTree index stores logical RowIds; without quote-aware handling
+/// the byte-offset layout maps them to physical lines, so the index read
+/// seeks mid-record and returns garbage or nothing. The fix detects the
+/// quoted newlines at attach and routes indexed reads through the full scan.
+#[tokio::test]
+async fn test_csv_quoted_newlines_indexed_lookup() -> Result<(), BundlebaseError> {
+    init();
+    use futures::TryStreamExt;
+    use std::io::Write;
+
+    // 200 rows, EVERY row has a quoted embedded newline: logical row N sits at
+    // physical line 2N — maximal desync for a physical-line layout.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("quoted.csv");
+    {
+        let f = std::fs::File::create(&path).expect("create");
+        let mut w = std::io::BufWriter::new(f);
+        writeln!(w, "id,name,description").expect("header");
+        for i in 0..200 {
+            writeln!(w, "r{i:03},name_{i:03},\"line one\nline two for row {i}\"")
+                .expect("row");
+        }
+        w.flush().expect("flush");
+    }
+
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let url = format!("file://{}", path.to_str().expect("utf8"));
+    builder.attach(&url, None).await?;
+    builder
+        .create_index(&["id"], bundlebase_index::IndexType::BTree, None)
+        .await?;
+    builder.commit("attach + index").await?;
+
+    let reopened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let batches: Vec<arrow::record_batch::RecordBatch> = reopened
+        .query("SELECT name FROM bundle WHERE id = 'r150'", vec![], None)
+        .await?
+        .try_collect()
+        .await?;
+    let batch = batches
+        .iter()
+        .find(|b| b.num_rows() > 0)
+        .expect("indexed lookup must return the row");
+    let name = arrow::util::display::array_value_to_string(
+        batch.column_by_name("name").expect("name col"),
+        0,
+    )
+    .expect("render");
+    assert_eq!(
+        name, "name_150",
+        "indexed lookup must return the logical row, not a physical-line seek"
+    );
+
+    Ok(())
+}
+
+/// bb-dvo.1: a malformed JSONL line must be an error, not a silent skip —
+/// silently dropped lines desync logical row numbers from the byte-offset
+/// layout and every RowId points at the wrong row.
+#[tokio::test]
+async fn test_jsonl_malformed_line_is_an_error() -> Result<(), BundlebaseError> {
+    init();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("bad.jsonl");
+    std::fs::write(
+        &path,
+        "{\"a\": 1, \"b\": \"x\"}\nnot json at all\n{\"a\": 2, \"b\": \"y\"}\n",
+    )
+    .expect("write jsonl");
+
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let url = format!("file://{}", path.to_str().expect("utf8"));
+
+    // The malformed line must surface as an error somewhere in
+    // attach/commit/query — never as a silently shorter result set.
+    match builder.attach(&url, None).await {
+        Err(e) => {
+            assert!(
+                e.to_string().contains("Malformed JSONL"),
+                "unexpected error: {e}"
+            );
+        }
+        Ok(_) => match builder.commit("attach").await {
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("Malformed JSONL"),
+                    "unexpected error: {e}"
+                );
+            }
+            Ok(_) => {
+                use futures::TryStreamExt;
+                let result: Result<Vec<arrow::record_batch::RecordBatch>, BundlebaseError> =
+                    async {
+                        let stream = builder.query("SELECT * FROM bundle", vec![], None).await?;
+                        let batches: Vec<arrow::record_batch::RecordBatch> =
+                            stream.try_collect().await?;
+                        Ok(batches)
+                    }
+                    .await;
+                match result {
+                    Err(e) => {
+                        assert!(
+                            e.to_string().contains("Malformed JSONL"),
+                            "unexpected error: {e}"
+                        );
+                    }
+                    Ok(batches) => {
+                        // If nothing errored, the row set MUST include both
+                        // valid rows and nothing was silently dropped — which
+                        // is impossible with the malformed line, so fail.
+                        let n: usize = batches.iter().map(|b| b.num_rows()).sum();
+                        panic!(
+                            "malformed JSONL was silently tolerated ({n} rows returned)"
+                        );
+                    }
+                }
+            }
+        },
+    }
+    Ok(())
+}

@@ -317,6 +317,12 @@ pub struct PageMap {
     /// Per-column statistics, positional (index = column order in file schema).
     /// Empty when no stats were computed (e.g., layout loaded from storage with old format).
     pub column_stats: Vec<ColumnStats>,
+    /// True when a newline was seen inside a double-quoted value during the
+    /// build scan — the file needs CSV `newlines_in_values` handling, and
+    /// byte-offset row seeks must not assume one physical line per row.
+    /// In-memory only (not part of the persisted layout format): the durable
+    /// switch is the `newlines_in_values` read option captured at attach.
+    pub has_quoted_newlines: bool,
 }
 
 impl PageMap {
@@ -330,11 +336,16 @@ impl PageMap {
     /// * `skip_first_line` - Whether to skip the first line (e.g., CSV header)
     /// * `page_size` - Target page size in bytes (use `DEFAULT_PAGE_SIZE`)
     /// * `column_stats` - Pre-computed per-column statistics to embed in the layout
+    /// * `quote_aware` - Treat newlines inside double-quoted values as part of
+    ///   the record (CSV semantics), so row counts match the parser's LOGICAL
+    ///   rows. Quote state is tracked by parity, which also handles
+    ///   `""`-escaped quotes. Pass false for JSONL.
     pub fn build(
         bytes: &[u8],
         skip_first_line: bool,
         page_size: usize,
         column_stats: Vec<ColumnStats>,
+        quote_aware: bool,
     ) -> Option<PageMap> {
         if bytes.is_empty() {
             return None;
@@ -356,10 +367,23 @@ impl PageMap {
             row_begin: 0,
         });
 
-        // SIMD-accelerated newline scan: memchr skips 16-32 bytes at a time
-        // vs the scalar `bytes.iter().enumerate()` loop, which is ~20× faster
-        // on typical hardware and removes this scan from attach-time profiles.
-        for i in memchr::memchr_iter(b'\n', bytes) {
+        // SIMD-accelerated scan: memchr skips 16-32 bytes at a time vs the
+        // scalar loop. When quote_aware, quotes are tracked so a newline
+        // inside a quoted value is NOT a row boundary — the parsers count
+        // LOGICAL rows and the layout must agree (bb-dvo.1).
+        let mut in_quotes = false;
+        let mut has_quoted_newlines = false;
+        for i in memchr::memchr2_iter(b'\n', b'"', bytes) {
+            if bytes[i] == b'"' {
+                if quote_aware {
+                    in_quotes = !in_quotes;
+                }
+                continue;
+            }
+            if in_quotes {
+                has_quoted_newlines = true;
+                continue;
+            }
             if skip_first {
                 skip_first = false;
                 // Adjust page start past the header
@@ -369,7 +393,7 @@ impl PageMap {
                 continue;
             }
 
-            // Blank/whitespace-only lines produce no logical row in the parsers
+            // Blank/whitespace-only rows produce no logical row in the parsers
             // (JSONL skips them, CSV never emits them), so they are not counted
             // here either — row offsets must align with logical row numbers.
             let is_blank = bytes[line_start..i].iter().all(|b| b.is_ascii_whitespace());
@@ -414,6 +438,7 @@ impl PageMap {
             file_size: bytes.len() as u64,
             pages,
             column_stats,
+            has_quoted_newlines,
         })
     }
 
@@ -427,11 +452,13 @@ impl PageMap {
     /// * `data_dir` - Directory to write the layout file into
     /// * `skip_first_line` - Whether to skip the first line (e.g., CSV header)
     /// * `column_stats` - Pre-computed per-column statistics to embed
+    /// * `quote_aware` - CSV quote semantics for row counting (see `build`)
     pub async fn build_and_write(
         datafile: &ObjectStoreFile,
         data_dir: &dyn IOReadWriteDir,
         skip_first_line: bool,
         column_stats: Vec<ColumnStats>,
+        quote_aware: bool,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         // Read the full file
         let mut file_stream = datafile.read_existing().await?;
@@ -441,7 +468,7 @@ impl PageMap {
             buffer.extend_from_slice(&chunk);
         }
 
-        match Self::build(&buffer, skip_first_line, DEFAULT_PAGE_SIZE, column_stats) {
+        match Self::build(&buffer, skip_first_line, DEFAULT_PAGE_SIZE, column_stats, quote_aware) {
             None => Ok(None),
             Some(layout) => {
                 let index_bytes = layout.serialize()?;
@@ -571,6 +598,7 @@ impl PageMap {
             total_rows,
             file_size,
             pages,
+            has_quoted_newlines: false,
             column_stats,
         })
     }
@@ -860,7 +888,7 @@ mod tests {
 
     #[test]
     fn test_build_empty_file() {
-        let result = PageMap::build(b"", false, DEFAULT_PAGE_SIZE, vec![]);
+        let result = PageMap::build(b"", false, DEFAULT_PAGE_SIZE, vec![], false);
         assert!(result.is_none());
     }
 
@@ -868,7 +896,7 @@ mod tests {
     fn test_build_file_smaller_than_page_size() {
         // Small files still get a layout (for column stats), just with one page.
         let data = b"row1\nrow2\n";
-        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![], false).unwrap();
         assert_eq!(result.total_rows, 2);
         assert_eq!(result.pages.len(), 1, "Single page for small files");
     }
@@ -877,7 +905,7 @@ mod tests {
     fn test_build_with_small_page_size() {
         // Use a tiny page size to test page splitting
         let data = b"row1\nrow2\nrow3\nrow4\nrow5\nrow6\n";
-        let result = PageMap::build(data, false, 10, vec![]).unwrap();
+        let result = PageMap::build(data, false, 10, vec![], false).unwrap();
 
         assert_eq!(result.total_rows, 6);
         assert_eq!(result.file_size, data.len() as u64);
@@ -894,7 +922,7 @@ mod tests {
     #[test]
     fn test_build_with_header_skip() {
         let data = b"header\nrow1\nrow2\nrow3\n";
-        let result = PageMap::build(data, true, 10, vec![]).unwrap();
+        let result = PageMap::build(data, true, 10, vec![], false).unwrap();
 
         // Should have 3 data rows (header skipped)
         assert_eq!(result.total_rows, 3);
@@ -905,7 +933,7 @@ mod tests {
     #[test]
     fn test_build_header_only() {
         let data = b"header\n";
-        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![]);
+        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![], false);
         assert!(result.is_none(), "No rows after skipping header");
     }
 
@@ -913,7 +941,7 @@ mod tests {
     fn test_build_no_trailing_newline() {
         let data = b"row1\nrow2\nrow3";
         // Use small page to force layout creation
-        let result = PageMap::build(data, false, 5, vec![]).unwrap();
+        let result = PageMap::build(data, false, 5, vec![], false).unwrap();
         assert_eq!(result.total_rows, 3); // row3 counted even without \n
     }
 
@@ -927,7 +955,7 @@ mod tests {
         data_with_newline.extend_from_slice(&vec![b'y'; 20]);
         data_with_newline.push(b'\n');
 
-        let result = PageMap::build(&data_with_newline, false, 10, vec![]).unwrap();
+        let result = PageMap::build(&data_with_newline, false, 10, vec![], false).unwrap();
         assert_eq!(result.total_rows, 2);
         // Large row gets its own page
         assert!(result.pages.len() >= 1);
@@ -974,6 +1002,7 @@ mod tests {
                 },
             ],
             column_stats: vec![stats],
+            has_quoted_newlines: false,
         };
 
         let bytes = layout.serialize().expect("serialize should succeed");
@@ -1043,6 +1072,7 @@ mod tests {
                 },
             ],
             column_stats: vec![],
+            has_quoted_newlines: false,
         };
 
         assert_eq!(layout.find_page(0), Some(0));
@@ -1075,6 +1105,7 @@ mod tests {
                 },
             ],
             column_stats: vec![],
+            has_quoted_newlines: false,
         };
 
         assert_eq!(layout.page_byte_range(0), (0, 50000));
@@ -1102,6 +1133,7 @@ mod tests {
                 },
             ],
             column_stats: vec![],
+            has_quoted_newlines: false,
         };
 
         assert_eq!(layout.page_row_range(0), (0, 100));
@@ -1118,7 +1150,7 @@ mod tests {
         }
 
         // Use 50-byte page size to get multiple pages
-        let layout = PageMap::build(&data, false, 50, vec![]).unwrap();
+        let layout = PageMap::build(&data, false, 50, vec![], false).unwrap();
         assert_eq!(layout.total_rows, 100);
 
         // Every row should map to a valid page
@@ -1142,14 +1174,14 @@ mod tests {
         // Blank/whitespace-only lines produce no logical row in the parsers,
         // so they must not be counted as rows here either.
         let data = b"row1\n\nrow2\n   \nrow3\n";
-        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![], false).unwrap();
         assert_eq!(result.total_rows, 3);
     }
 
     #[test]
     fn test_build_skips_blank_final_line_without_newline() {
         let data = b"row1\nrow2\n   ";
-        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![], false).unwrap();
         assert_eq!(result.total_rows, 2);
     }
 
@@ -1228,5 +1260,71 @@ mod tests {
         let data = b"row0\nrow1\n";
         let offsets = scan_newline_offsets(data, 0, 0, &[]);
         assert!(offsets.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod quote_aware_tests {
+    use super::*;
+
+    const QUOTED_CSV: &[u8] = b"id,name,description,value\n\
+        1,Alice,\"This is a\nmulti-line description\",100\n\
+        2,Bob,\"Simple description\",200\n\
+        3,Carol,\"Another\nmulti-line\nentry here\",300\n";
+
+    #[test]
+    fn test_build_quote_aware_counts_logical_rows() {
+        // bb-dvo.1: 6 physical data lines, 3 logical rows. The parsers number
+        // rows logically, so the layout must too.
+        let layout =
+            PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], true).expect("layout");
+        assert_eq!(layout.total_rows, 3, "quoted newlines are not row breaks");
+        assert!(
+            layout.has_quoted_newlines,
+            "the scan must detect quoted newlines"
+        );
+    }
+
+    #[test]
+    fn test_build_physical_mode_counts_physical_lines() {
+        // Without quote awareness (JSONL mode) the same bytes count 6 rows —
+        // this is the old CSV behavior that desynced RowIds.
+        let layout =
+            PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], false).expect("layout");
+        assert_eq!(layout.total_rows, 6);
+        assert!(!layout.has_quoted_newlines);
+    }
+
+    #[test]
+    fn test_build_quote_aware_escaped_quotes() {
+        // ""-escaped quotes toggle parity twice; rows stay aligned.
+        let bytes = b"h\n\"a \"\"quoted\"\" word\",1\nplain,2\n";
+        let layout = PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true).expect("layout");
+        assert_eq!(layout.total_rows, 2);
+        assert!(!layout.has_quoted_newlines);
+    }
+
+    #[test]
+    fn test_build_quote_aware_clean_file_unflagged() {
+        let bytes = b"h\na,1\nb,2\nc,3\n";
+        let layout = PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true).expect("layout");
+        assert_eq!(layout.total_rows, 3);
+        assert!(!layout.has_quoted_newlines);
+    }
+
+    #[test]
+    fn test_build_quote_aware_pages_use_logical_row_begin() {
+        // Force multiple pages with a tiny page size; row_begin values must be
+        // logical row numbers even with quoted newlines in earlier pages.
+        let layout = PageMap::build(QUOTED_CSV, true, 40, vec![], true).expect("layout");
+        assert_eq!(layout.total_rows, 3);
+        for w in layout.pages.windows(2) {
+            assert!(
+                w[0].row_begin < w[1].row_begin || w[1].row_begin == layout.total_rows as u32,
+                "row_begin must be monotonically increasing logical rows: {:?}",
+                layout.pages
+            );
+        }
+        assert!(layout.pages.iter().all(|p| p.row_begin <= 3));
     }
 }

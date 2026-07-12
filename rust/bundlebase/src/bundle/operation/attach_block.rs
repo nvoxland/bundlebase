@@ -258,6 +258,18 @@ impl AttachBlockOp {
             None => None,
         };
 
+        // Layout building can DISCOVER read options (e.g. the CSV quote scan
+        // detecting embedded newlines enables `newlines_in_values`). Refresh
+        // the persisted options so the discovery survives reopen.
+        op.read_options = {
+            let opts = adapter.read_options();
+            if opts.is_empty() {
+                None
+            } else {
+                Some(opts)
+            }
+        };
+
         Ok(op)
     }
 

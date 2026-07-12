@@ -376,6 +376,7 @@ impl DataReader for ParquetDataReader {
             file_size: 0,
             pages: vec![],
             column_stats,
+            has_quoted_newlines: false,
         };
 
         let index_bytes = layout.serialize()?;

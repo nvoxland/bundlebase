@@ -481,10 +481,28 @@ impl DataReader for CsvReader {
         // This is a SIMD newline scan (memchr) — fast enough that the double
         // pass over `buffer` (here + Arrow CSV reader below) is dominated
         // entirely by the Arrow CSV reader.
-        let initial_layout = match PageMap::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![]) {
+        let initial_layout = match PageMap::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![], true) {
             None => return Ok(None),
             Some(l) => l,
         };
+
+        // The quote-aware scan doubles as detection: if any newline lives
+        // inside a quoted value, the file needs `newlines_in_values` for every
+        // read, and byte-offset row seeks are unsafe — record the flag (it is
+        // persisted with the attach's read options) and skip the layout, the
+        // same as when the option is set explicitly (bb-dvo.1).
+        if initial_layout.has_quoted_newlines {
+            log::info!(
+                "CSV {} contains newlines inside quoted values; enabling newlines_in_values \
+                 and skipping the byte-offset layout",
+                self.inner.url()
+            );
+            self.inner
+                .config()
+                .newlines_in_values
+                .store(true, Ordering::Release);
+            return Ok(None);
+        }
         let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
 
         // Reuse the already-inferred schema instead of re-parsing the header

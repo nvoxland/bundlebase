@@ -788,10 +788,25 @@ where
         } else {
             line
         };
-        if line.is_empty() {
+        if line.is_empty() || line.iter().all(|b| b.is_ascii_whitespace()) {
+            // Whitespace-only lines are not logical rows (the layout's row
+            // numbering skips them too).
             continue;
         }
-        crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
+        // A malformed line must be an error, not a silent skip: dropped lines
+        // desync logical row numbers from the byte-offset layout, and every
+        // downstream RowId (tombstones, overlays, indexes) would point at the
+        // wrong row (bb-dvo.1).
+        if !crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders) {
+            return Err(datafusion::error::DataFusionError::External(
+                format!(
+                    "Malformed JSONL line (not a JSON object): {}",
+                    String::from_utf8_lossy(&line[..line.len().min(120)])
+                )
+                .into(),
+            )
+            .into());
+        }
     }
     let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
         .into_iter()

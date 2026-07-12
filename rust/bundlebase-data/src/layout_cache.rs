@@ -210,6 +210,7 @@ mod tests {
                 },
             ],
             column_stats: vec![],
+            has_quoted_newlines: false,
         })
     }
 
