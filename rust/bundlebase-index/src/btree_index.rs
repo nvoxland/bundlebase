@@ -137,21 +137,45 @@ impl IndexedValue {
             return Err("Unexpected end of index data".into());
         }
 
+        // Bound every read by the remaining bytes: lengths come from the
+        // (possibly corrupt) file, and bytes::Buf panics on underflow.
+        fn need(cursor: &Cursor<&[u8]>, bytes: usize) -> Result<(), BundlebaseError> {
+            let remaining = cursor.get_ref().len().saturating_sub(cursor.position() as usize);
+            if remaining < bytes {
+                return Err("Unexpected end of index data".into());
+            }
+            Ok(())
+        }
+
         let type_tag = cursor.get_u8();
         match type_tag {
             0 => Ok(IndexedValue::Null),
-            1 => Ok(IndexedValue::Int64(cursor.get_i64())),
-            2 => Ok(IndexedValue::Float64(OrderedFloat(cursor.get_f64()))),
+            1 => {
+                need(cursor, 8)?;
+                Ok(IndexedValue::Int64(cursor.get_i64()))
+            }
+            2 => {
+                need(cursor, 8)?;
+                Ok(IndexedValue::Float64(OrderedFloat(cursor.get_f64())))
+            }
             3 => {
+                need(cursor, 4)?;
                 let len = cursor.get_u32() as usize;
+                need(cursor, len)?;
                 let mut bytes = vec![0u8; len];
                 cursor.copy_to_slice(&mut bytes);
                 let s = String::from_utf8(bytes)
                     .map_err(|e| format!("Invalid UTF-8 in index: {}", e))?;
                 Ok(IndexedValue::Utf8(s))
             }
-            4 => Ok(IndexedValue::Boolean(cursor.get_u8() != 0)),
-            5 => Ok(IndexedValue::Timestamp(cursor.get_i64())),
+            4 => {
+                need(cursor, 1)?;
+                Ok(IndexedValue::Boolean(cursor.get_u8() != 0))
+            }
+            5 => {
+                need(cursor, 8)?;
+                Ok(IndexedValue::Timestamp(cursor.get_i64()))
+            }
             _ => Err(format!("Unknown index value type tag: {}", type_tag).into()),
         }
     }
@@ -288,17 +312,38 @@ impl IndexBlock {
     fn deserialize(data: &[u8], version: u8) -> Result<Self, BundlebaseError> {
         let mut cursor = Cursor::new(data);
 
+        // Counts come from the (possibly corrupt) file: bound every read by
+        // the remaining bytes so bit rot past the header returns Err instead
+        // of a huge allocation or a bytes::Buf underflow panic.
+        fn ensure_remaining(cursor: &Cursor<&[u8]>, needed: usize) -> Result<(), BundlebaseError> {
+            let remaining = cursor.get_ref().len().saturating_sub(cursor.position() as usize);
+            if remaining < needed {
+                return Err(format!(
+                    "Corrupt index block: needs {} more bytes, {} remain",
+                    needed, remaining
+                )
+                .into());
+            }
+            Ok(())
+        }
+
+        ensure_remaining(&cursor, 4)?;
         let entry_count = cursor.get_u32() as usize;
-        let mut entries = Vec::with_capacity(entry_count);
+        // Every entry needs at least a value header + count, so entry_count
+        // can't exceed the remaining byte count — cap the preallocation.
+        let mut entries = Vec::with_capacity(entry_count.min(data.len()));
 
         for _ in 0..entry_count {
             let value = IndexedValue::deserialize(&mut cursor)?;
             // Version 1 stored row-id counts as u16; version 2+ uses u32
             let row_id_count = if version >= 2 {
+                ensure_remaining(&cursor, 4)?;
                 cursor.get_u32() as usize
             } else {
+                ensure_remaining(&cursor, 2)?;
                 cursor.get_u16() as usize
             };
+            ensure_remaining(&cursor, row_id_count.saturating_mul(8))?;
 
             let mut row_ids = Vec::with_capacity(row_id_count);
             for _ in 0..row_id_count {
@@ -968,6 +1013,30 @@ mod tests {
         assert!(IndexedValue::Null < IndexedValue::Int64(0));
         assert!(IndexedValue::Int64(1) < IndexedValue::Int64(2));
         assert!(IndexedValue::Utf8("a".to_string()) < IndexedValue::Utf8("b".to_string()));
+    }
+
+    /// A block body with a huge claimed count must return Err — not attempt
+    /// a multi-GB allocation or panic on bytes::Buf underflow (review P2).
+    #[test]
+    fn test_deserialize_rejects_corrupt_block_body() {
+        // entry_count = u32::MAX, then nothing
+        let mut data = Vec::new();
+        data.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(IndexBlock::deserialize(&data, 2).is_err());
+
+        // one entry: Utf8 tag with absurd length
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u32.to_be_bytes()); // entry_count = 1
+        data.push(3); // Utf8 tag
+        data.extend_from_slice(&u32::MAX.to_be_bytes()); // len = u32::MAX
+        assert!(IndexBlock::deserialize(&data, 2).is_err());
+
+        // one entry: valid value, absurd row_id_count
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u32.to_be_bytes());
+        data.push(0); // Null value
+        data.extend_from_slice(&u32::MAX.to_be_bytes()); // row_id_count
+        assert!(IndexBlock::deserialize(&data, 2).is_err());
     }
 
     #[test]
