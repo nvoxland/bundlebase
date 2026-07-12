@@ -87,7 +87,16 @@ fn log_metrics() {
 /// Get memory URL for test data file
 #[pyfunction]
 pub fn test_datafile(name: String) -> PyResult<String> {
-    Ok(::bundlebase::test_utils::test_datafile(&name).to_string())
+    // Map a miss to a Python ValueError — the Rust helper panics (fine in
+    // Rust tests), which surfaced as an opaque PanicException over FFI.
+    match ::bundlebase::test_utils::try_test_datafile(&name) {
+        Ok(url) => Ok(url.to_string()),
+        Err(available) => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "No test datafile named '{}'. Available: {}",
+            name,
+            available.join(", ")
+        ))),
+    }
 }
 
 /// Get random memory URL for test bundle

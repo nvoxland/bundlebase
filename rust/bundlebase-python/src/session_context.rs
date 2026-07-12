@@ -22,13 +22,23 @@ impl PySessionContext {
                         PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
                     })?;
 
-            let record_batches =
-                dataframe
-                    .collect()
-                    .await
-                    .map_err(|e: datafusion::error::DataFusionError| {
+            // Stream execution (ADR-003) and accumulate only the final
+            // result batches — collect() materializes ~3x the dataset in
+            // DataFusion's intermediate state (bb-cko.3). The return contract
+            // (a list of pyarrow batches) is unchanged.
+            let mut stream = dataframe.execute_stream().await.map_err(
+                |e: datafusion::error::DataFusionError| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
+                },
+            )?;
+            let mut record_batches = Vec::new();
+            while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+                record_batches.push(batch.map_err(
+                    |e: datafusion::error::DataFusionError| {
                         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
-                    })?;
+                    },
+                )?);
+            }
 
             Python::attach(|py| -> PyResult<Py<PyAny>> {
                 record_batches

@@ -259,15 +259,18 @@ async def _get_arrow_table(bundle: "PyBundle") -> pa.Table:
         RuntimeError: If Arrow conversion fails
         TypeError: If bundle is not a valid PyBundle
     """
-    if not hasattr(bundle, 'as_pyarrow'):
+    if not hasattr(bundle, 'as_pyarrow_stream'):
         raise TypeError(
             f"Expected PyBundle, got {type(bundle).__name__}. "
-            "Bundle must have as_pyarrow() method."
+            "Bundle must have as_pyarrow_stream() method."
         )
 
     try:
-        # Get record batches from bundle (async)
-        record_batches = await bundle.as_pyarrow()
+        # Stream batches incrementally — as_pyarrow() routes through
+        # DataFusion collect(), materializing ~3x the dataset (bb-cko.3).
+        record_batches = []
+        async for batch in stream_batches(bundle):
+            record_batches.append(batch)
     except Exception as e:
         raise ValueError(
             f"Failed to query bundle data: {e}. "

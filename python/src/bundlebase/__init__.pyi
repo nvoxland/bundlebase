@@ -91,13 +91,36 @@ class PyBundle:
         """
         ...
 
-    @property
-    def num_rows(self) -> int:
+    async def num_rows(self) -> int:
         """
         Get the number of rows in the bundle.
 
         Returns:
             Number of rows based on the attached data sources
+        """
+        ...
+
+    async def query(
+        self,
+        sql: str,
+        params: Optional[List[Any]] = None,
+        hard_limit: Optional[int] = None,
+    ) -> "PyRecordBatchStream":
+        """
+        Execute a SQL query and stream the results.
+
+        Args:
+            sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
+            params: Optional list of parameters for parameterized queries
+            hard_limit: Optional maximum number of rows to return
+
+        Returns:
+            PyRecordBatchStream yielding pyarrow RecordBatches
+
+        Example:
+            stream = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
+            async for batch in stream:
+                print(batch.num_rows)
         """
         ...
 
@@ -108,15 +131,6 @@ class PyBundle:
 
         Returns:
             Version string
-        """
-        ...
-
-    def __len__(self) -> int:
-        """
-        Get the number of rows in the bundle.
-
-        Returns:
-            Number of rows (same as num_rows property)
         """
         ...
 
@@ -460,13 +474,36 @@ class PyBundleBuilder:
         """
         ...
 
-    @property
-    def num_rows(self) -> int:
+    async def num_rows(self) -> int:
         """
         Get the number of rows in the bundle.
 
         Returns:
             Number of rows based on the attached data sources
+        """
+        ...
+
+    async def query(
+        self,
+        sql: str,
+        params: Optional[List[Any]] = None,
+        hard_limit: Optional[int] = None,
+    ) -> "PyRecordBatchStream":
+        """
+        Execute a SQL query and stream the results.
+
+        Args:
+            sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
+            params: Optional list of parameters for parameterized queries
+            hard_limit: Optional maximum number of rows to return
+
+        Returns:
+            PyRecordBatchStream yielding pyarrow RecordBatches
+
+        Example:
+            stream = await c.query("SELECT * FROM bundle WHERE id > $1", [100])
+            async for batch in stream:
+                print(batch.num_rows)
         """
         ...
 
@@ -477,15 +514,6 @@ class PyBundleBuilder:
 
         Returns:
             Version string
-        """
-        ...
-
-    def __len__(self) -> int:
-        """
-        Get the number of rows in the bundle.
-
-        Returns:
-            Number of rows (same as num_rows property)
         """
         ...
 
@@ -1143,22 +1171,6 @@ class PyBundleBuilder:
         """
         ...
 
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
-        """
-        Queue a select operation.
-
-        Args:
-            sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
-            params: Optional list of parameters for parameterized queries
-
-        Returns:
-            OperationChain for fluent chaining
-
-        Example:
-            c = await c.select("SELECT * FROM bundle LIMIT 10")
-        """
-        ...
-
     def create_source(self, connector: str, args: Optional[Dict[str, str]] = None, pack: str = "base") -> "OperationChain":
         """
         Create a data source for a pack.
@@ -1263,15 +1275,12 @@ class PyBundleBuilder:
         """
         ...
 
-    async def commit(self, message: str) -> "PyBundleBuilder":
+    async def commit(self, message: str) -> None:
         """
         Commit the current state of the bundle.
 
         Args:
             message: Commit message describing the changes
-
-        Returns:
-            The bundle after committing
 
         Raises:
             ValueError: If commit fails
@@ -1291,18 +1300,6 @@ class PyBundleBuilder:
 
         Raises:
             ValueError: If reindexing fails
-        """
-        ...
-
-    async def save(self, path: str) -> None:
-        """
-        Save the bundle definition to a file.
-
-        Args:
-            path: Path to save the bundle definition (YAML format)
-
-        Raises:
-            ValueError: If save fails
         """
         ...
 
@@ -1491,10 +1488,6 @@ class OperationChain:
 
     def drop_index(self, column: str) -> "OperationChain":
         """Queue a drop_index operation."""
-        ...
-
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
-        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "OperationChain":
@@ -1992,6 +1985,26 @@ class PySchemaField:
     def __str__(self) -> str:
         """Get string representation of the field."""
         ...
+
+class PyRecordBatchStream:
+    """Stream of pyarrow RecordBatches produced by query()."""
+
+    async def next_batch(self) -> Optional[Any]:
+        """Return the next pyarrow RecordBatch, or None when exhausted."""
+        ...
+
+    async def collect_all(self) -> List[Any]:
+        """Collect all remaining batches (defeats streaming; small data only)."""
+        ...
+
+    def schema(self) -> "PySchema":
+        """Schema of the result stream."""
+        ...
+
+    async def is_empty(self) -> bool:
+        """True if the stream has no more batches."""
+        ...
+
 
 __all__ = [
     "create",

@@ -40,10 +40,10 @@ pub async fn empty_bundle() -> Arc<BundleBuilder> {
         .unwrap()
 }
 
-pub fn test_datafile(name: &str) -> &'static str {
-    let responses = TEST_DATAFILE_RESPONSES.get_or_init(|| {
-        // Run the async writes on a fresh thread/runtime so we don't start a Tokio runtime
-        // on a thread that's already driving async tasks.
+fn init_test_datafiles() -> HashMap<String, String> {
+    // Run the async writes on a fresh thread/runtime so we don't start a Tokio runtime
+    // on a thread that's already driving async tasks.
+    {
         std::thread::spawn(|| {
             let rt = Builder::new_current_thread().enable_all().build().unwrap();
             let mut map = HashMap::new();
@@ -68,12 +68,26 @@ pub fn test_datafile(name: &str) -> &'static str {
         })
         .join()
         .expect("thread panicked while initializing test datafiles")
-    });
+    }
+}
+
+pub fn test_datafile(name: &str) -> &'static str {
+    let responses = TEST_DATAFILE_RESPONSES.get_or_init(init_test_datafiles);
 
     responses
         .get(name)
         .unwrap_or_else(|| panic!("test_datafile: no datafile `{}`", name))
         .as_str()
+}
+
+/// Fallible variant of [`test_datafile`] for callers that must not panic
+/// (e.g. across the Python FFI boundary). Returns the available names on miss.
+pub fn try_test_datafile(name: &str) -> Result<&'static str, Vec<&'static str>> {
+    let responses = TEST_DATAFILE_RESPONSES.get_or_init(init_test_datafiles);
+    match responses.get(name) {
+        Some(url) => Ok(url.as_str()),
+        None => Err(responses.keys().map(|k| k.as_str()).collect()),
+    }
 }
 
 pub fn random_memory_url() -> Url {
