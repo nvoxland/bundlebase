@@ -26,6 +26,12 @@ use url::Url;
 /// Download data and save it to the data directory using content-addressed storage.
 ///
 /// Returns a WriteResult containing the file reference and the computed SHA256 hash.
+/// Maximum concurrent per-file fetches. Each in-flight fetch streams its
+/// download, but format conversions (e.g. save-as-parquet) still materialize
+/// one file — 100 concurrent fetches multiplied that into unbounded RAM and
+/// hammered remote servers (bb-xn0.4).
+const FETCH_CONCURRENCY: usize = 8;
+
 pub async fn download_to_data_dir(
     data: Bytes,
     address: &bundlebase_common::ContentAddress,
@@ -42,10 +48,13 @@ pub async fn download_io_file_to_data_dir(
     file: &ObjectStoreFile,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<WriteResult, BundlebaseError> {
-    let data = file
-        .read_bytes()
+    // Stream source -> content-addressed write; the file is never fully
+    // materialized in memory (bb-xn0.4, ADR-003).
+    let data_stream = file
+        .read_stream()
         .await?
         .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", file.url())))?;
+    let data_stream = data_stream.map(|r| r.map_err(|e| std::io::Error::other(e.to_string())));
     let filename = filename_from_url(file.url());
     let ext_str = filename.rsplit('.').next().unwrap_or("dat");
     let format = bundlebase_common::ContentFormat::from_extension(ext_str).unwrap_or_else(|_| {
@@ -61,7 +70,7 @@ pub async fn download_io_file_to_data_dir(
         "data",
         format,
     )?;
-    download_to_data_dir(data, &address, data_dir).await
+    data_dir.write_stream(Box::pin(data_stream), &address).await
 }
 
 /// Download a file from an HTTP(S) URL to the data directory.
@@ -108,28 +117,36 @@ pub async fn download_http_to_data_dir(
         }
     }
 
-    // Stream the response body with progress reporting.
-    let data =
-        bundlebase_common::source_utils::stream_response(&format!("Downloading {}", url), response)
-            .await?;
+    // Stream the response body with progress reporting — the download is
+    // written through to storage without materializing it (bb-xn0.4).
+    let total = response.content_length();
+    let progress =
+        bundlebase_common::progress::ProgressScope::new(&format!("Downloading {}", url), total);
+    let body_stream = response.bytes_stream().map(move |chunk| match chunk {
+        Ok(chunk) => {
+            progress.increment(chunk.len() as u64, None);
+            Ok(chunk)
+        }
+        Err(e) => Err(std::io::Error::other(format!("Failed to read response: {}", e))),
+    });
+    let mut body_stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>> =
+        Box::pin(body_stream);
 
-    info!(
-        "Downloaded {} ({:.1} MB)",
-        url,
-        data.len() as f64 / 1_048_576.0
-    );
-
-    // Resolve "auto" format hint by inspecting content
+    // Resolve "auto" format hint by peeking a bounded prefix of the body.
     let resolved_hint = match format_hint {
-        Some("auto") => match detect_format_from_bytes(&data) {
-            Some(fmt) => Some(fmt),
-            None => {
-                return Err(BundlebaseError::from(format!(
+        Some("auto") => {
+            let (detected, chained) = peek_detect_format(body_stream).await?;
+            body_stream = chained;
+            match detected {
+                Some(fmt) => Some(fmt),
+                None => {
+                    return Err(BundlebaseError::from(format!(
                         "Could not detect format of data from '{}'. Specify format explicitly with WITH (format='csv')",
                         url
                     )));
+                }
             }
-        },
+        }
         other => other,
     };
 
@@ -166,7 +183,54 @@ pub async fn download_http_to_data_dir(
         "data",
         format,
     )?;
-    download_to_data_dir(data, &address, data_dir).await
+    let result = data_dir.write_stream(body_stream, &address).await?;
+    info!("Downloaded {}", url);
+    Ok(result)
+}
+
+/// Peek a bounded prefix (up to 8KB) of a byte stream to detect its data
+/// format, returning the detection result and a stream that replays the
+/// peeked bytes before the remainder — nothing beyond the peek is buffered
+/// (bb-xn0.4).
+async fn peek_detect_format(
+    mut stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
+) -> Result<
+    (
+        Option<&'static str>,
+        futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
+    ),
+    BundlebaseError,
+> {
+    const PEEK_LIMIT: usize = 8192;
+
+    let mut peeked: Vec<Bytes> = Vec::new();
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut detected = None;
+    while prefix.len() < PEEK_LIMIT {
+        match stream.next().await {
+            Some(chunk) => {
+                let chunk = chunk.map_err(|e| BundlebaseError::from(e.to_string()))?;
+                prefix.extend_from_slice(&chunk[..chunk.len().min(PEEK_LIMIT - prefix.len())]);
+                peeked.push(chunk);
+                // Don't detect on a too-short prefix: b"PA" would classify as
+                // CSV before the rest of the PAR1 magic arrives. 8 bytes
+                // covers BOM (3) + the longest magic (4) with margin.
+                if prefix.len() >= 8 {
+                    detected = detect_format_from_bytes(&prefix);
+                    if detected.is_some() {
+                        break;
+                    }
+                }
+            }
+            None => {
+                detected = detect_format_from_bytes(&prefix);
+                break;
+            }
+        }
+    }
+
+    let replay = futures::stream::iter(peeked.into_iter().map(Ok)).chain(stream);
+    Ok((detected, Box::pin(replay)))
 }
 
 /// Collect a byte stream into a single Bytes buffer.
@@ -529,7 +593,7 @@ pub async fn orchestrate_fetch(
                 },
             })
         })
-        .buffer_unordered(100)
+        .buffer_unordered(FETCH_CONCURRENCY)
         .collect()
         .await;
 
@@ -635,4 +699,61 @@ pub async fn write_merged_parquet(
         bundlebase_common::ContentFormat::Parquet,
     )?;
     download_to_data_dir(merged_bytes, &address, data_dir).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+
+    fn chunked(
+        chunks: Vec<&'static [u8]>,
+    ) -> futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>> {
+        Box::pin(futures::stream::iter(
+            chunks.into_iter().map(|c| Ok(Bytes::from_static(c))),
+        ))
+    }
+
+    async fn collect_all(
+        mut stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            out.extend_from_slice(&chunk.expect("chunk"));
+        }
+        out
+    }
+
+    /// Detection must peek only a prefix and replay it — the chained stream
+    /// yields the full original content (bb-xn0.4).
+    #[tokio::test]
+    async fn test_peek_detect_format_replays_all_bytes() {
+        let stream = chunked(vec![b"  ", b"{\"a\":1}\n", b"{\"a\":2}\n"]);
+        let (detected, replay) = peek_detect_format(stream).await.expect("peek");
+        assert_eq!(detected, Some("jsonl"));
+        assert_eq!(collect_all(replay).await, b"  {\"a\":1}\n{\"a\":2}\n".to_vec());
+    }
+
+    /// Magic bytes split across chunk boundaries must still be detected.
+    #[tokio::test]
+    async fn test_peek_detect_format_split_magic() {
+        let stream = chunked(vec![b"PA", b"R1restofparquet"]);
+        let (detected, replay) = peek_detect_format(stream).await.expect("peek");
+        assert_eq!(detected, Some("parquet"));
+        assert_eq!(collect_all(replay).await, b"PAR1restofparquet".to_vec());
+    }
+
+    #[tokio::test]
+    async fn test_peek_detect_format_empty_stream() {
+        let (detected, replay) = peek_detect_format(chunked(vec![])).await.expect("peek");
+        assert_eq!(detected, None);
+        assert!(collect_all(replay).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_peek_detect_format_csv() {
+        let stream = chunked(vec![b"id,name\n1,a\n"]);
+        let (detected, _) = peek_detect_format(stream).await.expect("peek");
+        assert_eq!(detected, Some("csv"));
+    }
 }
