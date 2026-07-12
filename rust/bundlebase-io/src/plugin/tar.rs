@@ -301,8 +301,15 @@ impl TarObjectStore {
         // rename it over the original. Previously this did File::create on the
         // live archive, which truncates it in place, so a crash (or power loss)
         // between truncate and finish destroyed every committed entry.
+        // pid alone collides when two TarObjectStore instances in the same
+        // process write the same archive (each instance has its own lock);
+        // a random component makes the staged path unique per rewrite.
         let mut tmp_os = self.tar_path.as_os_str().to_owned();
-        tmp_os.push(format!(".{}.tmp", std::process::id()));
+        tmp_os.push(format!(
+            ".{}.{:08x}.tmp",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
         let tmp_path = PathBuf::from(tmp_os);
 
         let file = File::create(&tmp_path).map_err(|e| object_store::Error::Generic {

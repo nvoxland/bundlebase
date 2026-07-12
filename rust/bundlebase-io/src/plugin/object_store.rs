@@ -494,6 +494,14 @@ impl IOReadWriteFile for ObjectStoreFile {
                 }
             }
         }
+        // finish() does not abort if one of the final in-flight parts
+        // failed — drain them first and abort explicitly so a failed upload
+        // doesn't leak orphaned multipart parts (storage cost on S3, staged
+        // temp files locally).
+        if let Err(e) = writer.wait_for_capacity(0).await {
+            let _ = writer.abort().await;
+            return Err(e.into());
+        }
         writer.finish().await?;
         Ok(())
     }

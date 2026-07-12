@@ -184,6 +184,15 @@ pub trait IOReadWriteDir: IOReadDir {
                     &format!("{}/{}", subdir_name, file_name),
                 )
                 .await;
+            if let Err(rename_err) = &rename_result {
+                // Expected for backends without rename (tar); anything else
+                // is a transient failure worth surfacing before the fallback
+                // silently re-downloads and re-uploads the whole object.
+                log::debug!(
+                    "rename to content-addressed location failed ({}); falling back to streaming copy",
+                    rename_err
+                );
+            }
             if rename_result.is_err() {
                 let final_file = final_dir.writable_file(&file_name)?;
                 let temp_stream = temp_file
