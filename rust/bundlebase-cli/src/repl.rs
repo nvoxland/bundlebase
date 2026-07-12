@@ -151,12 +151,27 @@ pub async fn execute_single(
         // The interactive REPL still applies caps via `commands::execute`.
         match commands::execute_with_hard_limit(cmd, &bundle, None).await {
             Ok(Some((stream, shape))) => {
-                let output = match format {
-                    OutputFormat::Json => format_stream_json(stream, Some(shape), None).await?,
-                    OutputFormat::Table => format_stream(stream, Some(shape), None).await?,
+                // Stream results directly to stdout — this unlimited path
+                // must not build the whole result set as one string
+                // (bb-xn0.3).
+                let mut stdout = std::io::stdout();
+                let wrote = match format {
+                    OutputFormat::Json => {
+                        json_formatter::write_stream_json(stream, Some(shape), &mut stdout)
+                            .await
+                            .map(|_| true)?
+                    }
+                    OutputFormat::Table => stream_formatter::write_stream(
+                        stream,
+                        Some(shape),
+                        &mut stdout,
+                    )
+                    .await
+                    .map(|_| true)?,
                 };
-                if !output.is_empty() {
-                    println!("{}", output);
+                if wrote {
+                    use std::io::Write;
+                    stdout.write_all(b"\n").ok();
                 }
             }
             Ok(None) => {

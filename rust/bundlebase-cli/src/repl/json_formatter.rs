@@ -119,10 +119,20 @@ pub async fn format_stream_json(
 
     futures::pin_mut!(stream);
 
-    // Collect all batches
+    // Collect batches only up to the row limit (+1 row so truncation is
+    // detectable) — draining an unbounded stream before applying the limit
+    // buffers the whole result set (bb-xn0.3).
     let mut batches = Vec::new();
-    while let Some(batch_result) = stream.next().await {
-        batches.push(batch_result?);
+    let mut collected_rows: usize = 0;
+    while collected_rows <= limit {
+        match stream.next().await {
+            Some(batch_result) => {
+                let batch = batch_result?;
+                collected_rows += batch.num_rows();
+                batches.push(batch);
+            }
+            None => break,
+        }
     }
 
     if batches.is_empty() {
@@ -189,6 +199,122 @@ pub async fn format_stream_json(
     }
 }
 
+/// Stream the result set to `out` as JSON without buffering the whole
+/// result — used by the one-shot `bundlebase query` / `extend` path where no
+/// row limit applies (bb-xn0.3). Output is byte-identical to
+/// [`format_stream_json`] with no limit (pinned by equivalence tests).
+pub async fn write_stream_json(
+    stream: SendableRecordBatchStream,
+    shape_hint: Option<OutputShape>,
+    out: &mut (dyn std::io::Write + Send),
+) -> Result<(), BundlebaseError> {
+    futures::pin_mut!(stream);
+
+    // Shape decisions (single value / dictionary) need to know whether the
+    // result has exactly one row — buffer batches only until 2 rows are seen.
+    let mut head: Vec<arrow::record_batch::RecordBatch> = Vec::new();
+    let mut head_rows = 0usize;
+    while head_rows < 2 {
+        match stream.next().await {
+            Some(batch_result) => {
+                let batch = batch_result?;
+                head_rows += batch.num_rows();
+                head.push(batch);
+            }
+            None => break,
+        }
+    }
+
+    let io_err = |e: std::io::Error| BundlebaseError::from(format!("Write error: {}", e));
+
+    if head_rows == 0 {
+        let empty = match shape_hint {
+            Some(OutputShape::SingleValue) => "null",
+            Some(OutputShape::Dictionary) => "{}",
+            _ => "[]",
+        };
+        return out.write_all(empty.as_bytes()).map_err(io_err);
+    }
+
+    let schema = head[0].schema();
+
+    if let (1, Some(batch)) = (head_rows, head.iter().find(|b| b.num_rows() > 0)) {
+        match shape_hint {
+            Some(OutputShape::SingleValue) if schema.fields().len() == 1 => {
+                let value = array_value_to_json(batch.column(0), 0);
+                let text = serde_json::to_string_pretty(&value).map_err(|e| {
+                    BundlebaseError::from(format!("JSON serialization error: {}", e))
+                })?;
+                return out.write_all(text.as_bytes()).map_err(io_err);
+            }
+            Some(OutputShape::Dictionary) => {
+                let mut obj = serde_json::Map::new();
+                for (i, field) in schema.fields().iter().enumerate() {
+                    obj.insert(
+                        field.name().clone(),
+                        array_value_to_json(batch.column(i), 0),
+                    );
+                }
+                let text =
+                    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
+                        BundlebaseError::from(format!("JSON serialization error: {}", e))
+                    })?;
+                return out.write_all(text.as_bytes()).map_err(io_err);
+            }
+            _ => {}
+        }
+    }
+
+    // Array shape: stream rows out one at a time, reproducing
+    // serde_json::to_string_pretty's array layout exactly.
+    out.write_all(b"[").map_err(io_err)?;
+    let mut wrote_any = false;
+
+    let mut write_batch = |batch: &arrow::record_batch::RecordBatch,
+                           out: &mut (dyn std::io::Write + Send)|
+     -> Result<(), BundlebaseError> {
+        for row_idx in 0..batch.num_rows() {
+            let mut obj = serde_json::Map::new();
+            for (col_idx, field) in schema.fields().iter().enumerate() {
+                obj.insert(
+                    field.name().clone(),
+                    array_value_to_json(batch.column(col_idx), row_idx),
+                );
+            }
+            let pretty = serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
+                BundlebaseError::from(format!("JSON serialization error: {}", e))
+            })?;
+            if wrote_any {
+                out.write_all(b",").map_err(io_err)?;
+            }
+            wrote_any = true;
+            // Indent each element by two spaces, matching serde's pretty
+            // array formatting.
+            for line in pretty.lines() {
+                out.write_all(b"\n  ").map_err(io_err)?;
+                out.write_all(line.as_bytes()).map_err(io_err)?;
+            }
+        }
+        Ok(())
+    };
+
+    for batch in &head {
+        write_batch(batch, out)?;
+    }
+    while let Some(batch_result) = stream.next().await {
+        let batch = batch_result?;
+        write_batch(&batch, out)?;
+    }
+    drop(write_batch);
+
+    if wrote_any {
+        out.write_all(b"\n]").map_err(io_err)?;
+    } else {
+        out.write_all(b"]").map_err(io_err)?;
+    }
+    Ok(())
+}
+
 /// Format batches as a JSON array of objects.
 fn format_as_array(
     batches: &[arrow::record_batch::RecordBatch],
@@ -224,6 +350,155 @@ fn format_as_array(
 
 #[cfg(test)]
 mod tests {
+    use arrow::array::Int64Array;
+    use arrow::datatypes::DataType;
+
+    /// A 100-batch stream that counts how many batches were pulled.
+    fn create_counted_stream(
+        pulled: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> SendableRecordBatchStream {
+        use std::sync::atomic::Ordering;
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "id",
+            DataType::Int64,
+            false,
+        )]));
+        let schema_for_iter = schema.clone();
+        let stream = futures::stream::iter((0..100).map(move |i| {
+            pulled.fetch_add(1, Ordering::SeqCst);
+            let start = (i as i64) * 10;
+            Ok(RecordBatch::try_new(
+                schema_for_iter.clone(),
+                vec![Arc::new(Int64Array::from(
+                    (start..start + 10).collect::<Vec<i64>>(),
+                ))],
+            )
+            .expect("static batch"))
+        }));
+        Box::pin(RecordBatchStreamAdapter::new(schema, stream))
+    }
+
+    /// write_stream_json must produce byte-identical output to
+    /// format_stream_json with no limit, for every shape (bb-xn0.3).
+    #[tokio::test]
+    async fn test_write_stream_json_equivalent_to_format() {
+        use arrow::array::StringArray;
+
+        type StreamFactory = Box<dyn Fn() -> SendableRecordBatchStream>;
+        fn single_col(values: Vec<i64>) -> RecordBatch {
+            let schema = Arc::new(Schema::new(vec![Field::new(
+                "count",
+                DataType::Int64,
+                false,
+            )]));
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(values))])
+                .expect("static batch")
+        }
+        fn two_col(ids: Vec<i64>, names: Vec<&str>) -> RecordBatch {
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int64, false),
+                Field::new("name", DataType::Utf8, false),
+            ]));
+            RecordBatch::try_new(
+                schema,
+                vec![
+                    Arc::new(Int64Array::from(ids)),
+                    Arc::new(StringArray::from(names)),
+                ],
+            )
+            .expect("static batch")
+        }
+        fn to_stream(batches: Vec<RecordBatch>) -> SendableRecordBatchStream {
+            let schema = batches[0].schema();
+            Box::pin(RecordBatchStreamAdapter::new(
+                schema,
+                futures::stream::iter(batches.into_iter().map(Ok)),
+            ))
+        }
+
+        let cases: Vec<(&str, Option<OutputShape>, StreamFactory)> = vec![
+            (
+                "empty single value",
+                Some(OutputShape::SingleValue),
+                Box::new(|| to_stream(vec![single_col(vec![])])),
+            ),
+            (
+                "single value",
+                Some(OutputShape::SingleValue),
+                Box::new(|| to_stream(vec![single_col(vec![42])])),
+            ),
+            (
+                "dictionary",
+                Some(OutputShape::Dictionary),
+                Box::new(|| to_stream(vec![two_col(vec![1], vec!["a"])])),
+            ),
+            (
+                "empty dictionary",
+                Some(OutputShape::Dictionary),
+                Box::new(|| to_stream(vec![two_col(vec![], vec![])])),
+            ),
+            (
+                "empty table",
+                Some(OutputShape::Table),
+                Box::new(|| to_stream(vec![two_col(vec![], vec![])])),
+            ),
+            (
+                "multi-batch table",
+                Some(OutputShape::Table),
+                Box::new(|| {
+                    to_stream(vec![
+                        two_col(vec![1, 2], vec!["a", "b"]),
+                        two_col(vec![], vec![]),
+                        two_col(vec![3], vec!["c"]),
+                    ])
+                }),
+            ),
+            (
+                "single row falls back to array",
+                Some(OutputShape::SingleValue),
+                Box::new(|| to_stream(vec![two_col(vec![1], vec!["a"])])),
+            ),
+            (
+                "no shape hint",
+                None,
+                Box::new(|| to_stream(vec![two_col(vec![1, 2], vec!["a", "b"])])),
+            ),
+        ];
+
+        for (name, shape, factory) in cases {
+            let expected = format_stream_json(factory(), shape, None)
+                .await
+                .expect("format");
+            let mut written: Vec<u8> = Vec::new();
+            write_stream_json(factory(), shape, &mut written)
+                .await
+                .expect("write");
+            assert_eq!(
+                expected,
+                String::from_utf8(written).expect("utf8"),
+                "case: {name}"
+            );
+        }
+    }
+
+    /// A row limit must stop the formatter from draining the whole stream
+    /// into memory (bb-xn0.3).
+    #[tokio::test]
+    async fn test_limit_stops_pulling_batches() {
+        use std::sync::atomic::Ordering;
+        let pulled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let stream = create_counted_stream(pulled.clone());
+        let result = format_stream_json(stream, Some(OutputShape::Table), Some(10))
+            .await
+            .expect("format");
+        assert!(!result.is_empty());
+        let n = pulled.load(Ordering::SeqCst);
+        assert!(
+            n <= 3,
+            "formatter must stop pulling batches at the row limit, pulled {n}/100"
+        );
+    }
+
     #[test]
     fn test_dictionary_column_formats_without_panic() {
         // bb-8gq.8: dictionary/REE columns previously fell through to Debug
