@@ -401,7 +401,7 @@ impl DataReader for CsvReader {
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut stream = get_result.into_stream();
 
-        let mut counter = LogicalLineCounter::new(true);
+        let mut counter = LogicalLineCounter::new(true, self.inner.config().delimiter);
         let mut file_size: usize = 0;
 
         while let Some(chunk) = stream.next().await {
@@ -472,7 +472,8 @@ impl DataReader for CsvReader {
             .get_opts(&path, object_store::GetOptions::default())
             .await?;
         let mut file_stream = get_result.into_stream();
-        let mut pm_builder = crate::page_map::PageMapBuilder::new(true, DEFAULT_PAGE_SIZE, true);
+        let mut pm_builder =
+            crate::page_map::PageMapBuilder::new(true, DEFAULT_PAGE_SIZE, true, delimiter);
         while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
             pm_builder.feed(&chunk);

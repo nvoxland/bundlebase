@@ -166,7 +166,7 @@ impl DataReader for JsonlReader {
             }
             let parsed: serde_json::Value = match serde_json::from_slice(line) {
                 Ok(v) => v,
-                Err(_) => return, // matches query-time tolerance for malformed rows
+                Err(_) => return, // schema inference is lenient; query-time scan errors on malformed lines
             };
             if let serde_json::Value::Object(map) = parsed {
                 *saw_object = true;
@@ -196,10 +196,15 @@ impl DataReader for JsonlReader {
                 }
             }
             pending.extend_from_slice(&chunk);
-            while let Some(nl) = pending.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = pending.drain(..=nl).collect();
-                collect_line_keys(&line[..line.len() - 1], &mut keys, &mut seen, &mut saw_object);
+            // Cursor scan + single compaction — per-line drain is quadratic
+            // when a backend delivers the file as one chunk.
+            let mut consumed = 0usize;
+            while let Some(nl_rel) = memchr::memchr(b'\n', &pending[consumed..]) {
+                let line_end = consumed + nl_rel;
+                collect_line_keys(&pending[consumed..line_end], &mut keys, &mut seen, &mut saw_object);
+                consumed = line_end + 1;
             }
+            pending.drain(..consumed);
         }
         if !pending.is_empty() {
             collect_line_keys(&pending, &mut keys, &mut seen, &mut saw_object);
@@ -291,7 +296,7 @@ impl DataReader for JsonlReader {
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut stream = get_result.into_stream();
 
-        let mut counter = LogicalLineCounter::new(false);
+        let mut counter = LogicalLineCounter::new(false, b',');
         let mut file_size: usize = 0;
 
         while let Some(chunk) = stream.next().await {
@@ -358,7 +363,7 @@ impl DataReader for JsonlReader {
         // (bb-xn0.2, ADR-003).
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
         let mut file_stream = get_result.into_stream();
-        let mut pm_builder = crate::page_map::PageMapBuilder::new(false, DEFAULT_PAGE_SIZE, false);
+        let mut pm_builder = crate::page_map::PageMapBuilder::new(false, DEFAULT_PAGE_SIZE, false, b',');
         while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
             pm_builder.feed(&chunk);
@@ -400,10 +405,14 @@ impl DataReader for JsonlReader {
         while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
             pending.extend_from_slice(&chunk);
-            while let Some(nl) = pending.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = pending.drain(..=nl).collect();
-                process_stats_line(&line[..line.len() - 1]);
+            // Cursor scan + single compaction (see read_schema).
+            let mut consumed = 0usize;
+            while let Some(nl_rel) = memchr::memchr(b'\n', &pending[consumed..]) {
+                let line_end = consumed + nl_rel;
+                process_stats_line(&pending[consumed..line_end]);
+                consumed = line_end + 1;
             }
+            pending.drain(..consumed);
         }
         if !pending.is_empty() {
             process_stats_line(&pending.clone());
