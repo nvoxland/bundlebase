@@ -649,7 +649,13 @@ impl Connector for PostgresConnector {
         let parsed = Url::parse(url).map_err(|e| {
             BundlebaseError::from(format!("url must be a valid PostgreSQL connection URL: {e}"))
         })?;
-        if parsed.password().is_some() {
+        // tokio-postgres also honors libpq-style URI query parameters, so a
+        // credential can hide in `?password=` / `?passfile=` — reject those
+        // the same as userinfo passwords.
+        let has_credential_query_param = parsed.query_pairs().any(|(k, _)| {
+            k.eq_ignore_ascii_case("password") || k.eq_ignore_ascii_case("passfile")
+        });
+        if parsed.password().is_some() || has_credential_query_param {
             return Err("Do not put the password in the url — it would be persisted in the \
                  bundle and shared with it. Set the postgres password via config instead, e.g. \
                  `SET CONFIG password = '<secret>' FOR 'postgres/<host>'`, and use a \
@@ -770,6 +776,28 @@ mod tests {
             .find(|s| s.name == "batch_size")
             .expect("batch_size spec");
         assert_eq!(batch_spec.default, Some("1000000"));
+    }
+
+    /// libpq-style URI query params must not smuggle credentials past the
+    /// password-in-url check — tokio-postgres honors them and the url arg is
+    /// persisted in the manifest.
+    #[test]
+    fn test_validate_args_rejects_credentials_in_query_params() {
+        let connector = PostgresConnector;
+        for url in [
+            "postgres://user@host/db?password=hunter2",
+            "postgres://user@host/db?sslmode=require&PASSWORD=hunter2",
+            "postgres://user@host/db?passfile=/tmp/pgpass",
+        ] {
+            let mut args = HashMap::new();
+            args.insert("url".to_string(), url.to_string());
+            args.insert("query".to_string(), "SELECT 1".to_string());
+            args.insert("sort_column".to_string(), "id".to_string());
+            assert!(
+                connector.validate_args(&args).is_err(),
+                "credential query param must be rejected: {url}"
+            );
+        }
     }
 
     #[test]
