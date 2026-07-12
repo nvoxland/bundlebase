@@ -129,13 +129,25 @@ impl BundleBuilderCommand for AttachCommand {
             &pack_id, &self.path, format, None, None, None, builder, None,
         )
         .await?;
+        // Always-rules re-apply to the NEWLY attached base-pack block(s) only.
+        // Re-running them against existing blocks would re-tombstone
+        // already-deleted rows and, for non-idempotent SET expressions
+        // (e.g. `SET n = n + 1`), corrupt their already-updated values on
+        // every attach (bb-c6l). Capture the base-pack block indices the
+        // attach adds; an attach to a join pack adds none, so the rules
+        // correctly apply to nothing.
+        let blocks_before = builder.base_pack_block_count();
         builder.apply_operation(op.into()).await?;
+        let blocks_after = builder.base_pack_block_count();
+        let new_block_indices: Vec<usize> = (blocks_before..blocks_after).collect();
 
         // Apply always-delete rules to the newly attached data
         let rules = builder.always_delete_rules();
-        if !rules.is_empty() {
+        if !rules.is_empty() && !new_block_indices.is_empty() {
             for rule in &rules {
-                let delete_rowids = builder.select_row_ids(rule).await?;
+                let delete_rowids = builder
+                    .select_row_ids_in_blocks(rule, &new_block_indices)
+                    .await?;
                 if !delete_rowids.is_empty() {
                     tracing::debug!(
                         "[ALWAYS DELETE] Auto-deleted {} rows matching WHERE {}",
@@ -151,7 +163,7 @@ impl BundleBuilderCommand for AttachCommand {
 
         // Apply always-update rules to the newly attached data
         let update_rules = builder.always_update_rules();
-        if !update_rules.is_empty() {
+        if !update_rules.is_empty() && !new_block_indices.is_empty() {
             for rule in &update_rules {
                 let full_sql = format!(
                     "UPDATE bundle SET {} WHERE {}",
@@ -171,7 +183,12 @@ impl BundleBuilderCommand for AttachCommand {
                         .collect();
 
                     let updated = builder
-                        .evaluate_update_cols(&columns, &expressions, &rule.where_clause)
+                        .evaluate_update_cols_in_blocks(
+                            &columns,
+                            &expressions,
+                            &rule.where_clause,
+                            &new_block_indices,
+                        )
                         .await?;
                     if updated > 0 {
                         tracing::debug!(
