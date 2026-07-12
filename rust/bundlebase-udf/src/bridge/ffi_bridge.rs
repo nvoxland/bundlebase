@@ -247,8 +247,10 @@ pub struct LibAccumulator {
     state: *mut std::ffi::c_void,
     #[allow(dead_code)]
     return_type: DataType,
-    /// One-shot flag so the merge-fallback warning logs once per accumulator.
-    merge_fallback_warned: bool,
+    /// Whether the library exports `<symbol>_merge` — resolved once at
+    /// creation (accumulators are created per GROUP BY group; a dlsym on
+    /// every merge_batch call was measurable overhead).
+    has_merge: bool,
 }
 
 // Safety: The C library manages its own state; we only pass the pointer across threads.
@@ -285,13 +287,16 @@ impl LibAccumulator {
 
         let state = unsafe { create_fn() };
 
+        let merge_sym = format!("{}_merge", symbol);
+        let has_merge = unsafe { lib.get::<AccumulateFn>(merge_sym.as_bytes()) }.is_ok();
+
         Ok(Self {
             lib,
             lib_path: lib_path.to_string(),
             symbol: symbol.to_string(),
             state,
             return_type,
-            merge_fallback_warned: false,
+            has_merge,
         })
     }
 
@@ -368,10 +373,6 @@ impl LibAccumulator {
         Ok(())
     }
 
-    /// Whether the library exports a `<symbol>_merge` function.
-    fn has_merge_symbol(&self) -> bool {
-        self.get_symbol::<AccumulateFn>("merge").is_ok()
-    }
 }
 
 impl datafusion::logical_expr::Accumulator for LibAccumulator {
@@ -389,20 +390,28 @@ impl datafusion::logical_expr::Accumulator for LibAccumulator {
         // aggregates where merging equals accumulating the partial results
         // (sum/min/max-style); warn so authors of other aggregates know their
         // multi-partition results are at risk (bb-dvo.8).
-        if self.has_merge_symbol() {
+        if self.has_merge {
             return self.call_state_fn("merge", states);
         }
-        if !self.merge_fallback_warned {
-            self.merge_fallback_warned = true;
-            log::warn!(
-                "Lib aggregate '{}' in '{}' has no {}_merge export; merging partial \
-                 states via {}_accumulate — correct only for sum/min/max-style \
-                 aggregates",
-                self.symbol,
-                self.lib_path,
-                self.symbol,
-                self.symbol
-            );
+        // Warn once per (lib, symbol) process-wide — accumulators are created
+        // per GROUP BY group, so a per-accumulator flag spams the log.
+        {
+            use std::collections::HashSet;
+            use std::sync::Mutex;
+            static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+            let key = format!("{}::{}", self.lib_path, self.symbol);
+            let mut warned = WARNED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if warned.get_or_insert_with(HashSet::new).insert(key) {
+                log::warn!(
+                    "Lib aggregate '{}' in '{}' has no {}_merge export; merging partial \
+                     states via {}_accumulate — correct only for sum/min/max-style \
+                     aggregates",
+                    self.symbol,
+                    self.lib_path,
+                    self.symbol,
+                    self.symbol
+                );
+            }
         }
         self.call_state_fn("accumulate", states)
     }

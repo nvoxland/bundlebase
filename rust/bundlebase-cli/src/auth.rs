@@ -43,10 +43,11 @@ impl BundlebaseAuthenticator {
         }
     }
 
-    /// Returns true if no custom credentials have been configured (still the
-    /// insecure admin/password default).
+    /// Returns true if either credential is still the insecure built-in
+    /// default — setting only the username silently keeps the default
+    /// password accepted, which deserves the startup warning just as much.
     pub fn is_using_defaults(&self) -> bool {
-        self.username.is_none() && self.password.is_none()
+        self.username.is_none() || self.password.is_none()
     }
 
     /// Validate username and password using a constant-time comparison so an

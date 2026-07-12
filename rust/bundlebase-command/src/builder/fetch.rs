@@ -20,6 +20,11 @@ use log::{info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Maximum concurrent AttachBlockOp setups. Ref-source setup reads schemas
+/// from the remote, so this is bounded like the download loop
+/// (fetch.rs FETCH_CONCURRENCY) instead of the old 100-way fan-out.
+const SETUP_CONCURRENCY: usize = 8;
+
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
 pub struct FetchCommand {
@@ -452,7 +457,7 @@ async fn fetch_from_source(
                     Ok((op, data.attach_location.clone()))
                 }
             })
-            .buffer_unordered(100)
+            .buffer_unordered(SETUP_CONCURRENCY)
             .collect()
             .await;
 
