@@ -78,9 +78,22 @@ const EDIT_SPACING: usize = 50;
 /// Marker value for updated cells (never produced by the data generator).
 const UPDATE_MARKER: f64 = -12345.5;
 
-fn edit_pred(k: usize) -> String {
+/// Exact IN-list predicate for edit k. `quoted` for line-oriented formats:
+/// CSV/JSONL attaches type every column Utf8 (bb-bh9), so range predicates
+/// compare lexicographically — exact (IN) matches are the only type-proof
+/// numeric predicate there.
+fn edit_pred(k: usize, quoted: bool) -> String {
     let lo = k * EDIT_SPACING;
-    format!("id >= {} AND id < {}", lo, lo + EDIT_WIDTH)
+    let vals: Vec<String> = (lo..lo + EDIT_WIDTH)
+        .map(|v| {
+            if quoted {
+                format!("'{v}'")
+            } else {
+                v.to_string()
+            }
+        })
+        .collect();
+    format!("id IN ({})", vals.join(", "))
 }
 
 /// Apply one DELETE in the given representation.
@@ -210,8 +223,9 @@ async fn build_edited_bundle(
     b.attach(&data_url, None).await.expect("attach");
     b.commit("setup").await.expect("setup commit");
 
+    let quoted_ids = !matches!(format, Format::Parquet);
     for k in 0..n_edits {
-        let pred = edit_pred(k);
+        let pred = edit_pred(k, quoted_ids);
         match kind {
             EditKind::Delete => apply_delete(&b, repr, &pred).await.expect("delete"),
             EditKind::Update => apply_update(&b, repr, &pred).await.expect("update"),
@@ -448,16 +462,21 @@ fn bench_q2_page_skip(c: &mut Criterion) {
 
     // Selective range far from the edited ids ([0, 100*50)): pages covering it
     // should be the only ones read when page skipping engages.
-    let sql = "SELECT * FROM bundle WHERE id >= 90000 AND id < 90100";
+    // Quoted range: ids are Utf8 after a JSONL attach (bb-bh9). The
+    // lexicographic match set is deterministic and identical across arms,
+    // and string page stats still prune.
+    let sql = "SELECT * FROM bundle WHERE id >= '90000' AND id < '90100'";
     let n_edits = 10;
 
     for throttle_source in [false, true] {
         let scheme = if throttle_source { "throttle" } else { "file" };
-        // Clean baseline: page-skip upper bound.
+        // Clean baseline: page-skip upper bound. JSON (not CSV): CSV attach
+        // types every column Utf8 (bb-bh9), which breaks numeric predicates;
+        // JSONL keeps numeric ids and has the same page-filter machinery.
         {
             let (_url, bundle) = rt.block_on(build_edited_bundle(
                 SCALE_100K,
-                &Format::Csv,
+                &Format::Json,
                 Repr::Current,
                 0,
                 EditKind::Delete,
@@ -480,7 +499,7 @@ fn bench_q2_page_skip(c: &mut Criterion) {
         for repr in [Repr::FilterOnly, Repr::BlocksOnly, Repr::Current] {
             let (_url, bundle) = rt.block_on(build_edited_bundle(
                 SCALE_100K,
-                &Format::Csv,
+                &Format::Json,
                 repr,
                 n_edits,
                 EditKind::Delete,
@@ -516,16 +535,22 @@ fn bench_q3_indexed_point(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(8));
 
-    // Probe outside every edited range.
-    let sql = "SELECT * FROM bundle WHERE id = 76543";
+    // Probe outside every edited range (quoted variant for line formats
+    // whose columns are Utf8 — bb-bh9).
+    let sql_typed = "SELECT * FROM bundle WHERE id = 76543";
+    let sql_quoted = "SELECT * FROM bundle WHERE id = '76543'";
 
+    // JSON (not CSV) for the line-oriented format: CSV attach types every
+    // column Utf8 (bb-bh9), breaking the numeric edit predicates.
     let cells: [(Format, usize); 3] = [
         (Format::Parquet, 1),
         (Format::Parquet, 100),
-        (Format::Csv, 1),
+        (Format::Json, 1),
     ];
 
     for (format, n) in cells {
+        let quoted_ids = !matches!(format, Format::Parquet);
+        let sql = if quoted_ids { sql_quoted } else { sql_typed };
         for repr in Repr::ALL {
             let (_url, bundle) = rt.block_on(async {
                 let data_url = bench_data::get_data_url(SCALE_100K, &format);
@@ -535,7 +560,9 @@ fn bench_q3_indexed_point(c: &mut Criterion) {
                 b.rebuild_index("id").await.expect("index");
                 b.commit("setup+index").await.expect("commit");
                 for k in 0..n {
-                    apply_delete(&b, repr, &edit_pred(k)).await.expect("delete");
+                    apply_delete(&b, repr, &edit_pred(k, quoted_ids))
+                        .await
+                        .expect("delete");
                 }
                 b.commit("edits").await.expect("edits commit");
                 let url = b.url().to_string();
