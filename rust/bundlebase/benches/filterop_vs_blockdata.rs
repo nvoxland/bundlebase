@@ -366,10 +366,27 @@ fn bench_q1_query_cost(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(8));
 
-    // (rows, n_edits) cells: N sweep at 10K, scale check at 100K.
-    let cells: [(usize, usize); 4] = [(SCALE_10K, 1), (SCALE_10K, 10), (SCALE_10K, 100), (SCALE_100K, 10)];
-
     for kind in [EditKind::Delete, EditKind::Update] {
+        // (rows, n_edits) cells: N sweep at 10K, scale check at 100K.
+        // The UPDATE ladder is capped at 16: stacked CASE projections are
+        // EXPONENTIAL in layer count (~2x per layer; 20 layers = 57s per
+        // query, 100 layers never finishes). See the write-up's stacking
+        // curve — the cap keeps the benchmark finite while the pain is
+        // still clearly visible at 16.
+        let cells: [(usize, usize); 4] = match kind {
+            EditKind::Delete => [
+                (SCALE_10K, 1),
+                (SCALE_10K, 10),
+                (SCALE_10K, 100),
+                (SCALE_100K, 10),
+            ],
+            EditKind::Update => [
+                (SCALE_10K, 1),
+                (SCALE_10K, 10),
+                (SCALE_10K, 16),
+                (SCALE_100K, 10),
+            ],
+        };
         let kind_name = match kind {
             EditKind::Delete => "del",
             EditKind::Update => "upd",
