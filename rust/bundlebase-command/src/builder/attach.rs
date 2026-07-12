@@ -5,7 +5,6 @@ use crate::parser::{extract_identifier, quote_identifier};
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::AttachBlockOp;
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 
@@ -143,15 +142,9 @@ impl BundleBuilderCommand for AttachCommand {
                         delete_rowids.len(),
                         rule
                     );
+                    // Tombstones are the sole representation; mark_deleted
+                    // mirrors them into the blocks for in-session visibility.
                     builder.mark_deleted(delete_rowids, rule);
-
-                    let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", rule);
-                    builder
-                        .apply_operation(
-                            bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![])
-                                .into(),
-                        )
-                        .await?;
                 }
             }
         }
@@ -187,38 +180,9 @@ impl BundleBuilderCommand for AttachCommand {
                             rule.set_clause,
                             rule.where_clause
                         );
+                        // The overlay is the sole representation — flushed
+                        // to the blocks for in-session visibility.
                         builder.flush_pending_updates_to_blocks();
-
-                        // Build CASE WHEN using internal name column names from the internal schema
-                        let col_names_map = builder.bundle_schema();
-                        let select_cols: Vec<String> = col_names_map
-                            .keys()
-                            .map(|col_id| {
-                                let internal_name = col_names_map
-                                    .internal_name(col_id)
-                                    .expect("column ID from schema keys");
-                                let quoted = format!("\"{}\"", internal_name);
-                                if let Some(assignment) = update_cmd
-                                    .assignments
-                                    .iter()
-                                    .find(|a| a.column == internal_name)
-                                {
-                                    format!(
-                                        "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
-                                        rule.where_clause, assignment.expression, quoted, quoted
-                                    )
-                                } else {
-                                    quoted
-                                }
-                            })
-                            .collect();
-                        let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
-                        builder
-                            .apply_operation(
-                                bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![])
-                                    .into(),
-                            )
-                            .await?;
                     }
                 }
             }

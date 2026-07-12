@@ -5,7 +5,6 @@
 
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::FilterOp;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use tracing::debug;
@@ -73,14 +72,12 @@ impl BundleBuilderCommand for DeleteCommand {
             return Ok("Deleted 0 rows".to_string());
         }
 
-        // Store deleted RowIds for commit
+        // Tombstone the rows: mark_deleted stores the RowIds for the commit's
+        // DeleteOp and mirrors them into the blocks for immediate in-session
+        // exclusion. No query-level filter is recorded — the tombstone is the
+        // sole representation (stacked per-edit FilterOps grow query cost
+        // without bound; see ideas/filterop-vs-block-overlays.md).
         builder.mark_deleted(delete_rowids, &where_clause);
-
-        // Apply a negated filter to immediately exclude deleted rows from queries
-        let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", where_clause);
-        builder
-            .apply_operation(FilterOp::new(&filter_query, vec![]).into())
-            .await?;
 
         Ok(format!("Deleted {} rows", deleted_count))
     }

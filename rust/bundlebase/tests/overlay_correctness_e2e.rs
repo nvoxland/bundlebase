@@ -686,3 +686,4 @@ async fn test_search_excludes_block_level_deletes() -> Result<(), BundlebaseErro
     assert_eq!(total, 0, "search() must not return tombstoned rows");
     Ok(())
 }
+

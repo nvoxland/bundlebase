@@ -143,16 +143,28 @@ impl UpdateOverlay {
                 new_columns.push(base_col.clone());
                 continue;
             };
-            if values.data_type() != base_col.data_type() {
-                log::warn!(
-                    "Overlay type mismatch for column {:?}: overlay={:?}, base={:?} — skipping update",
-                    column_ids.get(col_idx),
-                    values.data_type(),
-                    base_col.data_type()
-                );
-                new_columns.push(base_col.clone());
-                continue;
-            }
+            // Cast overlay values to the base column type when needed (e.g.
+            // Utf8 overlay values against a Utf8View column); skip only when
+            // the cast itself is impossible.
+            let values = if values.data_type() == base_col.data_type() {
+                values.clone()
+            } else {
+                match arrow::compute::cast(values, base_col.data_type()) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::warn!(
+                            "Overlay type mismatch for column {:?}: overlay={:?}, base={:?}, cast failed ({}) — skipping update",
+                            column_ids.get(col_idx),
+                            values.data_type(),
+                            base_col.data_type(),
+                            e
+                        );
+                        new_columns.push(base_col.clone());
+                        continue;
+                    }
+                }
+            };
+            let values = &values;
             let any_set = overlay_pos
                 .iter()
                 .flatten()

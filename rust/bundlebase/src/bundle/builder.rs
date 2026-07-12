@@ -1182,6 +1182,23 @@ impl BundleBuilder {
                         .await
                         .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
+                    // Target Arrow types = the BASE column types. Eval
+                    // expressions can produce a different type (`SET salary =
+                    // 999` yields Int64 against a Float64 column; `SET x =
+                    // NULL` yields untyped Null) and the overlay applier skips
+                    // type-mismatched columns — coerce at insertion so the
+                    // stored overlay always matches the base data.
+                    let target_types: Vec<Option<arrow::datatypes::DataType>> = col_ids
+                        .iter()
+                        .map(|(internal_name, _)| {
+                            batch
+                                .schema()
+                                .field_with_name(internal_name)
+                                .ok()
+                                .map(|f| f.data_type().clone())
+                        })
+                        .collect();
+
                     let mut pending = self.pending_updates.write();
                     for result_batch in &result_batches {
                         let idx_col = result_batch
@@ -1200,13 +1217,25 @@ impl BundleBuilder {
                             let cell_updates = pending
                                 .entry(row_id)
                                 .or_insert_with(std::collections::HashMap::new);
-                            for (col_idx, (_, col_id)) in col_ids.iter().enumerate() {
+                            for (col_idx, (internal_name, col_id)) in col_ids.iter().enumerate() {
                                 // Column is at position col_idx + 1 (after _idx)
                                 let value = datafusion::scalar::ScalarValue::try_from_array(
                                     result_batch.column(col_idx + 1),
                                     row,
                                 )
                                 .map_err(|e| BundlebaseError::from(e.to_string()))?;
+                                let value = match &target_types[col_idx] {
+                                    Some(t) if &value.data_type() != t => {
+                                        value.cast_to(t).map_err(|e| {
+                                            BundlebaseError::from(format!(
+                                                "UPDATE value for column '{}' is not \
+                                                 castable to the column type {:?}: {}",
+                                                internal_name, t, e
+                                            ))
+                                        })?
+                                    }
+                                    _ => value,
+                                };
                                 cell_updates.insert(*col_id, value);
                             }
                             updated_count += 1;

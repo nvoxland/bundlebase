@@ -259,19 +259,29 @@ impl UpdateOverlayStream {
                 continue;
             }
 
-            // Cast overlay values to match base column type if needed
+            // Cast overlay values to match the base column type if needed
+            // (e.g. Utf8 overlay values against a Utf8View scan column).
+            let casted;
             let overlay_values: &dyn arrow::array::Array = if values.data_type()
                 == base_col.data_type()
             {
                 values.as_ref()
             } else {
-                // Type mismatch — fall back to base column (overlay values incompatible)
-                log::warn!(
-                    "Overlay type mismatch for column {}: overlay={:?}, base={:?} — skipping update",
-                    col_idx, values.data_type(), base_col.data_type()
-                );
-                new_columns.push(base_col.clone());
-                continue;
+                match arrow::compute::cast(values, base_col.data_type()) {
+                    Ok(c) => {
+                        casted = c;
+                        casted.as_ref()
+                    }
+                    Err(e) => {
+                        // Uncastable — fall back to base column values
+                        log::warn!(
+                            "Overlay type mismatch for column {}: overlay={:?}, base={:?}, cast failed ({}) — skipping update",
+                            col_idx, values.data_type(), base_col.data_type(), e
+                        );
+                        new_columns.push(base_col.clone());
+                        continue;
+                    }
+                }
             };
 
             // Use MutableArrayData to copy ranges from base (source 0) or overlay (source 1)

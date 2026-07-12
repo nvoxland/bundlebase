@@ -5,7 +5,6 @@
 
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use tracing::debug;
@@ -102,7 +101,6 @@ impl BundleBuilderCommand for UpdateCommand {
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column / function names to stable internal references
-        let bundle_schema = builder.bundle_schema();
         let where_clause = builder.translate_sql(&self.where_clause);
 
         let columns: Vec<String> = self
@@ -122,42 +120,11 @@ impl BundleBuilderCommand for UpdateCommand {
         debug!("[UPDATE] Updated {} rows", updated_count);
 
         if updated_count > 0 {
-            // Push updates to DataBlocks for scan-level visibility (direct queries)
+            // Push updates to DataBlocks for scan-level visibility. The overlay
+            // is the sole representation — no query-level CASE projection is
+            // recorded (stacked CASE FilterOps are exponential in edit count;
+            // see ideas/filterop-vs-block-overlays.md).
             builder.flush_pending_updates_to_blocks();
-
-            // Also apply a DataFrame-level SQL transform so FilterOp and other
-            // DataFrame-level operations see the updated values.
-            // Uses CASE WHEN to replace values matching the WHERE condition.
-            // Build using internal name names from the internal column map.
-            let assignment_map: std::collections::HashMap<&str, &str> = columns
-                .iter()
-                .zip(expressions.iter())
-                .map(|(c, e)| (c.as_str(), e.as_str()))
-                .collect();
-            let select_cols: Vec<String> = bundle_schema
-                .keys()
-                .map(|col_id| {
-                    let internal_name = bundle_schema
-                        .internal_name(col_id)
-                        .expect("column ID from schema keys");
-                    let quoted = format!("\"{}\"", internal_name);
-                    if let Some(expr) = assignment_map.get(internal_name.as_str()) {
-                        format!(
-                            "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
-                            where_clause, expr, quoted, quoted
-                        )
-                    } else {
-                        quoted
-                    }
-                })
-                .collect();
-            let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
-            debug!("[UPDATE] Applying CASE WHEN transform for in-session visibility");
-            builder
-                .apply_operation(
-                    bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into(),
-                )
-                .await?;
         }
 
         Ok(format!("Updated {} rows", updated_count))

@@ -4,7 +4,7 @@
 
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::{AlwaysDeleteOp, FilterOp};
+use bundlebase::bundle::operation::AlwaysDeleteOp;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use tracing::debug;
@@ -69,12 +69,9 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
         );
 
         if !delete_rowids.is_empty() {
+            // Tombstones are the sole representation; mark_deleted mirrors
+            // them into the blocks for in-session visibility.
             builder.mark_deleted(delete_rowids, &where_clause);
-
-            let filter_query = format!("SELECT * FROM bundle WHERE NOT ({})", where_clause);
-            builder
-                .apply_operation(FilterOp::new(&filter_query, vec![]).into())
-                .await?;
         }
 
         // 2. Register the persistent always-delete rule (stored with internal name names)

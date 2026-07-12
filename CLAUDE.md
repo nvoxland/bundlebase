@@ -49,6 +49,7 @@ For detailed documentation, see the modular guides in the `.context/` directory:
   - [006-lazy-evaluation.md](.context/decisions/006-lazy-evaluation.md) - Lazy evaluation and the operation lifecycle
   - [007-no-unwrap.md](.context/decisions/007-no-unwrap.md) - No `.unwrap()` allowed
   - [008-no-mod-rs.md](.context/decisions/008-no-mod-rs.md) - Named module files convention
+  - [009-block-level-edit-representation.md](.context/decisions/009-block-level-edit-representation.md) - Tombstones/overlays as the sole DELETE/UPDATE representation
 
 **AI Prompt Templates:**
 - **[prompts/](.context/prompts/)** - Task-specific templates for AI-assisted development

@@ -87,6 +87,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 | [006](006-lazy-evaluation.md) | Lazy Operation Evaluation | Accepted (amended 2026-06) |
 | [007](007-no-unwrap.md) | No .unwrap() Allowed | Accepted |
 | [008](008-no-mod-rs.md) | No mod.rs Files | Accepted |
+| [009](009-block-level-edit-representation.md) | Block-Level Tombstones/Overlays Are the Sole Edit Representation | Accepted |
 
 ## References
 

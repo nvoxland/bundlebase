@@ -5,8 +5,7 @@
 use crate::builder::update::SetAssignment;
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::{AlwaysUpdateOp, FilterOp};
-use bundlebase::bundle::BundleFacade;
+use bundlebase::bundle::operation::AlwaysUpdateOp;
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 use tracing::debug;
@@ -101,7 +100,6 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column / function names to stable internal references
-        let bundle_schema = builder.bundle_schema();
         let where_clause = builder.translate_sql(&self.where_clause);
 
         let columns: Vec<String> = self
@@ -130,33 +128,9 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
         debug!("[ALWAYS UPDATE] Updated {} existing rows", updated_count);
 
         if updated_count > 0 {
+            // The overlay is the sole representation — flushed to the blocks
+            // for in-session visibility.
             builder.flush_pending_updates_to_blocks();
-
-            let select_cols: Vec<String> = bundle_schema
-                .keys()
-                .map(|col_id| {
-                    let internal_name = bundle_schema
-                        .internal_name(col_id)
-                        .expect("column ID from schema keys");
-                    let quoted = format!("\"{}\"", internal_name);
-                    if let Some(col_expr) = columns
-                        .iter()
-                        .zip(expressions.iter())
-                        .find(|(c, _)| c.as_str() == internal_name)
-                    {
-                        format!(
-                            "CASE WHEN ({}) THEN ({}) ELSE {} END AS {}",
-                            where_clause, col_expr.1, quoted, quoted
-                        )
-                    } else {
-                        quoted
-                    }
-                })
-                .collect();
-            let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
-            builder
-                .apply_operation(FilterOp::new(&filter_query, vec![]).into())
-                .await?;
         }
 
         // 2. Register the persistent always-update rule (stored with internal name names)

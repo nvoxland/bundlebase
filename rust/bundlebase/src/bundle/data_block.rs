@@ -1232,14 +1232,11 @@ impl TableProvider for DataBlock {
                         .map_err(datafusion::common::DataFusionError::External)?;
                 }
                 let mut source = self.streaming_scan_source(projection, limit).await?;
-                if !deleted.is_empty() {
-                    source = Arc::new(
-                        crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                            source,
-                            Arc::new(deleted.clone()),
-                        ),
-                    );
-                }
+                // ORDER MATTERS: both wrappers apply block-global row ordinals
+                // to their input stream. The overlay must wrap the RAW stream
+                // (it replaces values, preserving positions); the delete filter
+                // wraps above it. Deleting first would shift the ordinals the
+                // overlay sees, applying updates to the wrong rows.
                 if !overlays.is_empty() {
                     let projected_col_ids = match projection {
                         Some(proj) => proj
@@ -1269,6 +1266,14 @@ impl TableProvider for DataBlock {
                     if overlay_source.has_updates() {
                         source = Arc::new(overlay_source);
                     }
+                }
+                if !deleted.is_empty() {
+                    source = Arc::new(
+                        crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                            source,
+                            Arc::new(deleted.clone()),
+                        ),
+                    );
                 }
                 return Ok(Arc::new(DataSourceExec::new(source)));
             }
@@ -1357,17 +1362,11 @@ impl TableProvider for DataBlock {
             )?)
         };
 
-        // Apply deleted row filter if there are deleted rows
-        if !deleted.is_empty() {
-            source = Arc::new(
-                crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
-                    source,
-                    Arc::new(deleted),
-                ),
-            );
-        }
-
-        // Apply update overlay if there are updates for this block
+        // ORDER MATTERS: both wrappers apply block-global row ordinals to
+        // their input stream. The overlay wraps the RAW stream (it replaces
+        // values, preserving positions); the delete filter wraps above it.
+        // Deleting first would shift the ordinals the overlay sees, applying
+        // updates to the wrong rows.
         if !overlays.is_empty() {
             // Build projected column_ids matching the scan output columns
             let projected_col_ids = match projection {
@@ -1397,6 +1396,16 @@ impl TableProvider for DataBlock {
             if overlay_source.has_updates() {
                 source = Arc::new(overlay_source);
             }
+        }
+
+        // Apply deleted row filter above the overlay
+        if !deleted.is_empty() {
+            source = Arc::new(
+                crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                    source,
+                    Arc::new(deleted),
+                ),
+            );
         }
 
         let exec = DataSourceExec::new(source.clone());
