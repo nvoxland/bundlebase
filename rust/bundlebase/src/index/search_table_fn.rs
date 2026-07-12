@@ -694,6 +694,11 @@ impl DataSource for SearchDataSource {
             for (block, block_ref_idx) in blocks_to_scan {
                 let reader = block.reader();
                 let block_ref = ObjectIdAlias::from(block_ref_idx);
+                // Block-level edit state: the raw reader below knows nothing of
+                // tombstones or update overlays, and search output does not pass
+                // through the scan-level appliers (bb-fqm.2).
+                let deleted = block.deleted_rows();
+                let overlays = block.update_overlays();
 
                 // Build mapping: unified position → block column index (None if block lacks this column)
                 let mut unified_to_block: Vec<Option<usize>> = vec![None; num_physical_cols];
@@ -711,14 +716,33 @@ impl DataSource for SearchDataSource {
                 while let Some(batch_result) = rowid_stream.next().await {
                     let rowid_batch = batch_result.map_err(|e| DataFusionError::External(e))?;
 
-                    let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
+                    // Apply update overlays to the batch VALUES (positions are
+                    // untouched, so row_ids indexing below stays valid).
+                    let batch = if overlays.is_empty() {
+                        rowid_batch.batch.clone()
+                    } else {
+                        let row_numbers: Vec<u32> =
+                            row_ids.iter().map(|r| r.row_number()).collect();
+                        crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
+                            &overlays,
+                            &rowid_batch.batch,
+                            &block.column_ids(),
+                            &row_numbers,
+                        )
+                        .map_err(|e| DataFusionError::External(e))?
+                    };
+                    let batch = &batch;
 
                     // Find matching rows in this batch
                     let mut matching_indices: Vec<usize> = Vec::new();
                     let mut matching_scores: Vec<f64> = Vec::new();
 
                     for (idx, row_id) in row_ids.iter().enumerate() {
+                        // Tombstoned rows must not resurrect via the search index.
+                        if deleted.binary_search(&row_id.row_number()).is_ok() {
+                            continue;
+                        }
                         if let Some(&score) = score_map.get(&row_id.as_u64()) {
                             matching_indices.push(idx);
                             matching_scores.push(score);

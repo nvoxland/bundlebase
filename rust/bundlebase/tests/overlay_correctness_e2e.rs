@@ -579,3 +579,110 @@ async fn test_block_level_update_visible_through_index() -> Result<(), Bundlebas
     );
     Ok(())
 }
+
+/// Phase 2 (bb-fqm.2): search() results must reflect block-level update
+/// overlays — no query-level CASE mask.
+#[tokio::test]
+async fn test_search_sees_block_level_updates() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder
+        .create_index(
+            &["Company"],
+            IndexType::text(bundlebase_index::TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    builder.commit("text index").await?;
+
+    // Blocks-only update of a NON-indexed column on the rows search will hit.
+    let city_col = builder.translate_sql("City");
+    let wc = builder.translate_sql("Company LIKE '%Group%'");
+    let n = builder
+        .run_command("blocks-only update".to_string(), async {
+            let n = builder
+                .evaluate_update_cols(
+                    std::slice::from_ref(&city_col),
+                    &["'SEARCH_CITY'".to_string()],
+                    &wc,
+                )
+                .await?;
+            builder.flush_pending_updates_to_blocks();
+            Ok(n)
+        })
+        .await?;
+    assert!(n > 0, "fixture should have Group companies");
+    builder.commit("blocks-only update").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let batches = query_collect(
+        reopened.as_ref(),
+        "SELECT \"City\" FROM search('company_search', 'Group')",
+    )
+    .await;
+    let mut total = 0usize;
+    for batch in &batches {
+        let cities = batch
+            .column_by_name("City")
+            .expect("City column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("string City");
+        for i in 0..batch.num_rows() {
+            total += 1;
+            assert_eq!(
+                cities.value(i),
+                "SEARCH_CITY",
+                "search() returned a stale pre-update City"
+            );
+        }
+    }
+    assert!(total > 0, "search should match rows");
+    Ok(())
+}
+
+/// Phase 2 (bb-fqm.2): search() must not resurrect tombstoned rows — no
+/// query-level WHERE-NOT mask.
+#[tokio::test]
+async fn test_search_excludes_block_level_deletes() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder
+        .create_index(
+            &["Company"],
+            IndexType::text(bundlebase_index::TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    builder.commit("text index").await?;
+
+    // Blocks-only delete of every row the search would match.
+    let wc = builder.translate_sql("Company LIKE '%Group%'");
+    let ids = builder.select_row_ids(&wc).await?;
+    assert!(!ids.is_empty());
+    builder
+        .run_command("blocks-only delete".to_string(), async {
+            builder.mark_deleted(ids, &wc);
+            Ok(())
+        })
+        .await?;
+    builder.commit("blocks-only delete").await?;
+
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let batches = query_collect(
+        reopened.as_ref(),
+        "SELECT \"Company\" FROM search('company_search', 'Group')",
+    )
+    .await;
+    let total: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total, 0, "search() must not return tombstoned rows");
+    Ok(())
+}
