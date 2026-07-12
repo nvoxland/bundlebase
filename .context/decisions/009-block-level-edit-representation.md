@@ -53,12 +53,22 @@ No compact/optimize step exists, and none could fix in-session accumulation.
   blocks immediately (`flush_pending_deletes_to_blocks`) for in-session
   visibility.
 - UPDATE: `evaluate_update_cols` → `flush_pending_updates_to_blocks`; the
-  commit writes the overlay parquet/`UpdateDataOp`.
+  commit writes the overlay parquet/`UpdateDataOp`. Each flush rebuilds the
+  in-session overlay from the **full** pending accumulator and stores it in a
+  single per-block session slot (`set_session_overlay`), so repeated UPDATEs
+  in one session replace rather than accumulate — keeping the merge cost flat
+  in edit count (bb-plf; a prior push-per-flush grew it O(N²)). After a
+  successful commit the session slot is cleared, since the committed
+  `UpdateDataOp` overlay now durably represents those edits.
 - No query-level FilterOp is emitted by DELETE/UPDATE — including the
   always-rule immediate applications and their per-ATTACH re-applications.
   The `AlwaysDeleteOp`/`AlwaysUpdateOp` **rules** themselves are unchanged:
   they persist and re-execute against newly attached data; that is what makes
-  "always" semantics live long-term.
+  "always" semantics live long-term. On ATTACH a rule is applied to the
+  **newly attached block(s) only** (`select_row_ids_in_blocks` /
+  `evaluate_update_cols_in_blocks`) — re-running a rule against blocks it
+  already processed would re-tombstone deleted rows and double-apply
+  non-idempotent SET expressions like `SET n = n + 1` (bb-c6l).
 - Explicit user `filter()` operations are untouched — `FilterOp` remains the
   representation for user-authored SELECT transformations.
 

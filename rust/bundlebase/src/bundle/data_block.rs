@@ -100,8 +100,16 @@ pub struct DataBlock {
     column_ids: Vec<ColumnId>,
     /// Row numbers (within this block) that have been deleted
     deleted_rows: Arc<RwLock<Vec<u32>>>,
-    /// Update overlays to apply at scan time
+    /// Committed update overlays to apply at scan time (from `UpdateDataOp`
+    /// replay at open/reopen). Appended to as commits are replayed.
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
+    /// The single in-session flush overlay, rebuilt from the FULL pending
+    /// update accumulator on every `flush_pending_updates_to_blocks` call, so
+    /// it supersedes the previous flush. Kept in a dedicated slot (not the
+    /// committed vec) so repeated flushes replace rather than accumulate —
+    /// pushing one overlay per UPDATE made scan-time merge cost O(N²) in a
+    /// multi-update session (bb-plf). Applied last (wins over committed).
+    session_overlay: Arc<RwLock<Option<crate::bundle::update_overlay::UpdateOverlay>>>,
     /// Whether this block's version has been validated (first scan reads through reader).
     version_validated: Arc<std::sync::atomic::AtomicBool>,
     /// Count of narrow-projection bypasses served for this block. Used to
@@ -164,6 +172,7 @@ impl DataBlock {
             column_ids,
             deleted_rows: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
+            session_overlay: Arc::new(RwLock::new(None)),
             version_validated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             narrow_bypass_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             cached_df_statistics: Arc::new(RwLock::new(None)),
@@ -421,7 +430,17 @@ impl DataBlock {
     /// Used by predicate-evaluation paths that read raw file batches and must
     /// apply updates to the values before evaluating a WHERE clause (bb-wmu).
     pub fn update_overlays(&self) -> Vec<crate::bundle::update_overlay::UpdateOverlay> {
-        self.update_overlays.read().clone()
+        let mut overlays = self.update_overlays.read().clone();
+        // Session flush overlay applies last so it wins over committed ones.
+        if let Some(session) = self.session_overlay.read().clone() {
+            overlays.push(session);
+        }
+        overlays
+    }
+
+    /// Whether this block has any update overlay (committed or in-session).
+    fn has_update_overlays(&self) -> bool {
+        !self.update_overlays.read().is_empty() || self.session_overlay.read().is_some()
     }
 
     /// Snapshot of this block's deleted row numbers (scan-time delete state).
@@ -435,6 +454,20 @@ impl DataBlock {
     /// data, and overlays are applied as a filter on top at query time.
     pub fn add_update_overlay(&self, overlay: crate::bundle::update_overlay::UpdateOverlay) {
         self.update_overlays.write().push(overlay);
+    }
+
+    /// Set (replacing any prior) the in-session flush overlay. Called by
+    /// `flush_pending_updates_to_blocks`, which rebuilds the overlay from the
+    /// full pending accumulator so it supersedes the previous flush (bb-plf).
+    pub fn set_session_overlay(&self, overlay: crate::bundle::update_overlay::UpdateOverlay) {
+        *self.session_overlay.write() = Some(overlay);
+    }
+
+    /// Drop the in-session flush overlay. Called after a successful commit,
+    /// where the durable `UpdateDataOp` overlay (built from the same pending
+    /// accumulator) now represents these updates, and on reset/undo.
+    pub fn clear_session_overlay(&self) {
+        *self.session_overlay.write() = None;
     }
 
     /// Load index (from cache or disk) and estimate selectivity.
@@ -796,10 +829,7 @@ impl TableProvider for DataBlock {
         // bundle for what should be metadata-only).
         let is_count_shape = projection.is_none_or(|p| p.is_empty());
         if let (true, Some(rows)) = (is_count_shape, self.num_rows) {
-            if filters.is_empty()
-                && deleted.is_empty()
-                && self.update_overlays.read().is_empty()
-            {
+            if filters.is_empty() && deleted.is_empty() && !self.has_update_overlays() {
                 self.validate_version()
                     .await
                     .map_err(datafusion::common::DataFusionError::External)?;
@@ -819,7 +849,7 @@ impl TableProvider for DataBlock {
         // output. The fallback scans below apply overlays correctly. (An
         // overlay-aware index lookup could lift this later.)
         let indexable_filters = FilterAnalyzer::extract_indexable(filters);
-        let has_overlays = !self.update_overlays.read().is_empty();
+        let has_overlays = self.has_update_overlays();
 
         if !indexable_filters.is_empty() && !has_overlays {
             // Evaluate all indexable filters and select the best column index
@@ -917,7 +947,7 @@ impl TableProvider for DataBlock {
         // Phase 2: Stats-based optimizations (block pruning + page filtering).
         // Skipped when update overlays are present — updates can introduce values
         // outside the original stats range, so pruning could return incorrect results.
-        let overlays = self.update_overlays.read().clone();
+        let overlays = self.update_overlays();
         if overlays.is_empty() && !indexable_filters.is_empty() {
             let current_schema = self.schema.read().clone();
             let projected_schema = match projection {

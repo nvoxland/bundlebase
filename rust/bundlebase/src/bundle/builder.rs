@@ -774,6 +774,12 @@ impl BundleBuilder {
         self.flushed_block_state
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
+        // The commit-time `UpdateDataOp` replay added a committed overlay for
+        // these updates, so the in-session flush overlay is now redundant —
+        // drop it to avoid carrying the same edit as two overlays (bb-plf).
+        // Commit does not reload, so this must be explicit.
+        self.clear_session_overlays();
+
         info!("Committed version {}", self.bundle.version());
 
         Ok(self)
@@ -1066,6 +1072,33 @@ impl BundleBuilder {
         expressions: &[String],
         where_clause: &str,
     ) -> Result<usize, BundlebaseError> {
+        self.evaluate_update_cols_impl(columns, expressions, where_clause, None)
+            .await
+    }
+
+    /// Like [`evaluate_update_cols`](Self::evaluate_update_cols) but restricted
+    /// to the given base-pack block indices. Used by ATTACH to re-apply
+    /// always-update rules to the NEWLY attached block(s) only — re-running a
+    /// non-idempotent `SET x = x + 1` rule against existing blocks would
+    /// corrupt their already-updated values on every attach (bb-c6l).
+    pub async fn evaluate_update_cols_in_blocks(
+        &self,
+        columns: &[String],
+        expressions: &[String],
+        where_clause: &str,
+        block_indices: &[usize],
+    ) -> Result<usize, BundlebaseError> {
+        self.evaluate_update_cols_impl(columns, expressions, where_clause, Some(block_indices))
+            .await
+    }
+
+    async fn evaluate_update_cols_impl(
+        &self,
+        columns: &[String],
+        expressions: &[String],
+        where_clause: &str,
+        block_filter: Option<&[usize]>,
+    ) -> Result<usize, BundlebaseError> {
         use futures::StreamExt;
 
         // Resolve column names to ColumnIds.
@@ -1104,6 +1137,9 @@ impl BundleBuilder {
         if let Some(pack) = base_pack {
             let blocks = pack.blocks();
             for (idx, block) in blocks.iter().enumerate() {
+                if block_filter.is_some_and(|f| !f.contains(&idx)) {
+                    continue;
+                }
                 let block_ref = ObjectIdAlias::from(idx as u16);
                 let mut stream = block
                     .reader()
@@ -1293,7 +1329,13 @@ impl BundleBuilder {
                 if let Some(block) = blocks.get(block_idx as usize) {
                     let overlay =
                         crate::bundle::update_overlay::UpdateOverlay::from_pending(&block_updates);
-                    block.add_update_overlay(overlay);
+                    // Replace, don't append: this overlay is built from the
+                    // full pending accumulator and supersedes the prior flush
+                    // (bb-plf). A block whose rows aren't in `by_block` this
+                    // round keeps its earlier session overlay — but the
+                    // accumulator is cumulative, so once a block has updates it
+                    // stays in `by_block` for every later flush.
+                    block.set_session_overlay(overlay);
                 }
             }
         }
@@ -1302,6 +1344,30 @@ impl BundleBuilder {
         self.bundle.dataframe.clear();
         self.flushed_block_state
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Number of blocks currently in the base pack. ATTACH captures this
+    /// before and after adding data so always-rules can be scoped to just the
+    /// newly attached block indices (bb-c6l).
+    pub fn base_pack_block_count(&self) -> usize {
+        self.bundle
+            .packs()
+            .read()
+            .get(&ObjectId::BASE_PACK)
+            .map(|pack| pack.blocks().len())
+            .unwrap_or(0)
+    }
+
+    /// Drop the in-session flush overlay from every block (bb-plf). Used
+    /// after a successful commit, where the committed `UpdateDataOp` overlay
+    /// now durably represents these updates.
+    fn clear_session_overlays(&self) {
+        let packs = self.bundle.packs().read().clone();
+        for pack in packs.values() {
+            for block in pack.blocks().iter() {
+                block.clear_session_overlay();
+            }
+        }
     }
 
     /// Push pending deleted row numbers to DataBlocks for immediate in-session
@@ -1407,6 +1473,28 @@ impl BundleBuilder {
         &self,
         where_clause: &str,
     ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
+        self.select_row_ids_impl(where_clause, None).await
+    }
+
+    /// Like [`select_row_ids`](Self::select_row_ids) but restricted to the
+    /// given base-pack block indices. Used by ATTACH to re-apply always-delete
+    /// rules to the NEWLY attached block(s) only — existing blocks were already
+    /// processed when they were attached, so re-selecting them would re-tombstone
+    /// already-deleted rows (bb-c6l).
+    pub async fn select_row_ids_in_blocks(
+        &self,
+        where_clause: &str,
+        block_indices: &[usize],
+    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
+        self.select_row_ids_impl(where_clause, Some(block_indices))
+            .await
+    }
+
+    async fn select_row_ids_impl(
+        &self,
+        where_clause: &str,
+        block_filter: Option<&[usize]>,
+    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
         use futures::StreamExt;
 
         let mut matching_ids = std::collections::HashSet::new();
@@ -1420,6 +1508,9 @@ impl BundleBuilder {
         if let Some(pack) = base_pack {
             let blocks = pack.blocks();
             for (idx, block) in blocks.iter().enumerate() {
+                if block_filter.is_some_and(|f| !f.contains(&idx)) {
+                    continue;
+                }
                 let block_ref = ObjectIdAlias::from(idx as u16);
                 let mut stream = block
                     .reader()
@@ -2506,6 +2597,44 @@ mod tests {
             second,
             raw_high.len(),
             "second UPDATE must see the first update's values"
+        );
+    }
+
+    /// bb-plf: each in-session UPDATE flush rebuilds the overlay from the
+    /// FULL pending accumulator, so it supersedes the previous flush. The
+    /// block must hold a bounded number of overlays (one session overlay),
+    /// not one per UPDATE — the old push-per-flush made overlay merge cost
+    /// grow O(N²) in a multi-update session.
+    #[tokio::test]
+    async fn test_repeated_flushes_do_not_accumulate_overlays() {
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let salary_col = builder.translate_sql("salary");
+        for i in 0..8 {
+            let pred = builder.translate_sql(&format!("id = {}", i + 1));
+            builder
+                .evaluate_update_cols(
+                    std::slice::from_ref(&salary_col),
+                    &[format!("{}.0", 1000 + i)],
+                    &pred,
+                )
+                .await
+                .unwrap();
+            builder.flush_pending_updates_to_blocks();
+        }
+
+        let packs = builder.bundle.packs().read().clone();
+        let pack = packs.get(&ObjectId::BASE_PACK).expect("base pack");
+        let blocks = pack.blocks();
+        let block = blocks.first().expect("base block");
+        assert!(
+            block.update_overlays().len() <= 1,
+            "in-session flushes must collapse to one overlay, got {}",
+            block.update_overlays().len()
         );
     }
 
