@@ -72,6 +72,7 @@ _original_methods = {
     "drop_column": _PyBundleBuilder.drop_column,
     "rename_column": _PyBundleBuilder.rename_column,
     "normalize_column_names": _PyBundleBuilder.normalize_column_names,
+    "describe_column": _PyBundleBuilder.describe_column,
 
     # Row operations
     "filter": _PyBundleBuilder.filter,
@@ -100,6 +101,7 @@ _original_methods = {
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
     "set_description": _PyBundleBuilder.set_description,
+    "define_metric": _PyBundleBuilder.define_metric,
     "save_config": _PyBundleBuilder.save_config,
     "set_config": _PyBundleBuilder.set_config,
 
@@ -172,10 +174,10 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Note: extend is NOT here because it's synchronous and returns a new builder directly
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
-    "add_column", "cast_column", "drop_column", "rename_column", "filter", "join",
+    "add_column", "cast_column", "drop_column", "rename_column", "describe_column", "filter", "join",
     "delete", "update", "always_delete", "drop_always_delete", "always_update", "drop_always_update",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "save_config", "set_config",
+    "set_name", "set_description", "define_metric", "save_config", "set_config",
     "import_function", "import_temp_function", "rename_function", "drop_function",
     "rename_connector", "create_report", "drop_report",
     "create_index", "drop_index", "rebuild_index", "reindex",

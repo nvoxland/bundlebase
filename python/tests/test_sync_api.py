@@ -111,6 +111,18 @@ class TestSyncOperations:
         c.set_description("Test description")
         assert c.description == "Test description"
 
+    def test_sync_describe_column_and_define_metric(self):
+        """The sync builder exposes the semantic-layer authoring methods."""
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.describe_column("salary", "annual gross pay in USD")
+        c.define_metric("total_salary", "SUM(salary)", "gross payroll")
+        c.commit("semantic layer")
+
+        op_types = {op.op_type for commit in c.history() for op in commit.operations}
+        assert "describeColumn" in op_types
+        assert "defineMetric" in op_types
+
 
 class TestSyncChaining:
     """Test fluent method chaining in synchronous mode."""

@@ -977,6 +977,27 @@ class PyBundleBuilder:
         """
         ...
 
+    def describe_column(self, name: str, description: str) -> "OperationChain":
+        """
+        Queue a describe_column operation.
+
+        Args:
+            name: Column to describe
+            description: What the column means (surfaced to agents and BI tools)
+        """
+        ...
+
+    def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "OperationChain":
+        """
+        Queue a define_metric operation.
+
+        Args:
+            name: Metric name (e.g. "total_revenue")
+            expression: Aggregate SQL expression (e.g. "SUM(amount)")
+            description: Optional human/agent-readable description
+        """
+        ...
+
     def set_description(self, description: str) -> "OperationChain":
         """
         Queue a set_description operation.
@@ -1638,6 +1659,10 @@ class OperationChain:
         """Queue a drop_column operation."""
         ...
 
+    def describe_column(self, name: str, description: str) -> "OperationChain":
+        """Queue a describe_column operation."""
+        ...
+
     def normalize_column_names(self) -> "OperationChain":
         """Queue a normalize_column_names operation."""
         ...
@@ -1707,6 +1732,10 @@ class OperationChain:
 
     def set_description(self, description: str) -> "OperationChain":
         """Queue a set_description operation."""
+        ...
+
+    def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "OperationChain":
+        """Queue a define_metric operation."""
         ...
 
     def save_config(self, scope: str, key: str, value: str) -> "OperationChain":
@@ -1802,6 +1831,10 @@ class CreateChain:
         """Queue a drop_column operation."""
         ...
 
+    def describe_column(self, name: str, description: str) -> "CreateChain":
+        """Queue a describe_column operation."""
+        ...
+
     def normalize_column_names(self) -> "CreateChain":
         """Queue a normalize_column_names operation."""
         ...
@@ -1871,6 +1904,10 @@ class CreateChain:
 
     def set_description(self, description: str) -> "CreateChain":
         """Queue a set_description operation."""
+        ...
+
+    def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "CreateChain":
+        """Queue a define_metric operation."""
         ...
 
     def save_config(self, scope: str, key: str, value: str) -> "CreateChain":
@@ -1966,6 +2003,10 @@ class ExtendChain:
         """Queue a drop_column operation."""
         ...
 
+    def describe_column(self, name: str, description: str) -> "ExtendChain":
+        """Queue a describe_column operation."""
+        ...
+
     def normalize_column_names(self) -> "ExtendChain":
         """Queue a normalize_column_names operation."""
         ...
@@ -2035,6 +2076,10 @@ class ExtendChain:
 
     def set_description(self, description: str) -> "ExtendChain":
         """Queue a set_description operation."""
+        ...
+
+    def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "ExtendChain":
+        """Queue a define_metric operation."""
         ...
 
     def save_config(self, scope: str, key: str, value: str) -> "ExtendChain":

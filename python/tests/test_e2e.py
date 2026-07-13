@@ -2867,3 +2867,34 @@ async def test_show_always_updates():
     df = await result.to_pandas()
     assert len(df) == 1
     assert df["where_clause"].iloc[0] == "salary < 50000"
+
+
+@pytest.mark.asyncio
+async def test_describe_column_and_define_metric():
+    """The Python builder exposes the semantic-layer authoring methods
+    (describe_column / define_metric) as chainable operations."""
+    with tempfile.TemporaryDirectory() as temp:
+        c = await bundlebase.create(temp)
+        c = await c.attach(datafile("userdata.parquet"))
+        # Both semantic-layer methods chain like any other mutation.
+        c = await (c
+                   .describe_column("salary", "annual gross pay in USD")
+                   .define_metric("total_salary", "SUM(salary)", "gross payroll"))
+        await c.commit("semantic layer")
+
+        # The binding recorded both operations with their expected types.
+        op_types = {op.op_type for commit in c.history() for op in commit.operations}
+        assert "describeColumn" in op_types
+        assert "defineMetric" in op_types
+
+
+@pytest.mark.asyncio
+async def test_define_metric_without_description():
+    """define_metric's description argument is optional."""
+    with tempfile.TemporaryDirectory() as temp:
+        c = await bundlebase.create(temp)
+        c = await c.attach(datafile("userdata.parquet"))
+        c = await c.define_metric("headcount", "COUNT(*)")
+        await c.commit("metric")
+        op_types = {op.op_type for commit in c.history() for op in commit.operations}
+        assert "defineMetric" in op_types

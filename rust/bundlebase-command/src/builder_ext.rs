@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use crate::builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand,
-    CreateReportCommand, CreateSourceCommand, DeleteCommand, DetachBlockCommand,
+    CreateReportCommand, CreateSourceCommand, DefineMetricCommand, DeleteCommand,
+    DescribeColumnCommand, DetachBlockCommand,
     DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropColumnCommand, DropConnectorCommand,
     DropFunctionCommand, DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand,
     ExportEmptyCommand, FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand,
@@ -245,6 +246,22 @@ pub trait BundleBuilderExt {
 
     /// Set the bundle's description.
     async fn set_description(&self, description: &str) -> Result<&Self, BundlebaseError>;
+
+    /// Attach a semantic description to a column (the "what this column means"
+    /// half of the semantic layer).
+    async fn describe_column(
+        &self,
+        name: &str,
+        description: &str,
+    ) -> Result<&Self, BundlebaseError>;
+
+    /// Define (or redefine) a named metric — a reusable aggregate expression.
+    async fn define_metric(
+        &self,
+        name: &str,
+        expression: &str,
+        description: Option<&str>,
+    ) -> Result<&Self, BundlebaseError>;
 
     /// Save a configuration value to the bundle manifest.
     async fn save_config(
@@ -606,6 +623,29 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
+    async fn describe_column(
+        &self,
+        name: &str,
+        description: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, DescribeColumnCommand::new(name, description)).await?;
+        Ok(self)
+    }
+
+    async fn define_metric(
+        &self,
+        name: &str,
+        expression: &str,
+        description: Option<&str>,
+    ) -> Result<&Self, BundlebaseError> {
+        exec_cmd(
+            self,
+            DefineMetricCommand::new(name, expression, description.map(|s| s.to_string())),
+        )
+        .await?;
+        Ok(self)
+    }
+
     async fn save_config(
         &self,
         scope: &Scope,
@@ -866,6 +906,25 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn set_description(&self, description: &str) -> Result<&Self, BundlebaseError> {
         (**self).set_description(description).await?;
+        Ok(self)
+    }
+
+    async fn describe_column(
+        &self,
+        name: &str,
+        description: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        (**self).describe_column(name, description).await?;
+        Ok(self)
+    }
+
+    async fn define_metric(
+        &self,
+        name: &str,
+        expression: &str,
+        description: Option<&str>,
+    ) -> Result<&Self, BundlebaseError> {
+        (**self).define_metric(name, expression, description).await?;
         Ok(self)
     }
     async fn save_config(

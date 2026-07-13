@@ -297,6 +297,51 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Attach a semantic description to a column (the "what this column means"
+    /// half of the semantic layer). Travels in the bundle and is surfaced to
+    /// agents and BI tools. Mutates the bundle in place and returns it for chaining.
+    fn describe_column<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        description: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let description = description.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .describe_column(&name, &description)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to describe column", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
+        })
+    }
+
+    /// Define (or redefine) a named metric — a canonical, reusable aggregate
+    /// expression (the "how to compute the numbers" half of the semantic layer).
+    /// Travels in the bundle and is surfaced to agents. Mutates the bundle in
+    /// place and returns it for chaining.
+    #[pyo3(signature = (name, expression, description=None))]
+    fn define_metric<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        expression: &str,
+        description: Option<String>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let expression = expression.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .define_metric(&name, &expression, description.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to define metric", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
+        })
+    }
+
     /// Save a configuration value to the bundle manifest. Mutates the bundle in place and returns it for chaining.
     ///
     /// # Arguments

@@ -681,6 +681,29 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def describe_column(self, name: str, description: str) -> "SyncBundleBuilder":
+        """Attach a semantic description to a column.
+
+        Args:
+            name: Column to describe
+            description: What the column means (surfaced to agents and BI tools)
+        """
+        coro = _call_original_method(self._async, "describe_column", name, description)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def define_metric(self, name: str, expression: str, description: Optional[str] = None) -> "SyncBundleBuilder":
+        """Define (or redefine) a named metric — a reusable aggregate expression.
+
+        Args:
+            name: Metric name (e.g. "total_revenue")
+            expression: Aggregate SQL expression (e.g. "SUM(amount)")
+            description: Optional human/agent-readable description
+        """
+        coro = _call_original_method(self._async, "define_metric", name, expression, description)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def create_report(self, id: str, name: str, description: str, content: str) -> "SyncBundleBuilder":
         """Create or replace a stored report template.
 
