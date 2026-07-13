@@ -1,3 +1,7 @@
+---
+seo_title: "Python Sync API Reference (pandas-style) - Bundlebase"
+---
+
 # Sync API
 
 The sync API provides a synchronous interface for scripts and Jupyter notebooks. No `async`/`await` required.

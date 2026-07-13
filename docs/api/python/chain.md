@@ -1,3 +1,7 @@
+---
+seo_title: "Operation Chains: the Fluent Python API - Bundlebase"
+---
+
 # Operation Chains
 
 Fluent method chaining for Bundlebase operations.

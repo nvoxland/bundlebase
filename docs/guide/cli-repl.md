@@ -1,3 +1,7 @@
+---
+seo_title: "CLI and Interactive SQL REPL - Bundlebase"
+---
+
 # CLI REPL
 
 The Bundlebase CLI includes an interactive REPL (Read-Eval-Print Loop) for working with bundles from the command line.

@@ -1,3 +1,7 @@
+---
+seo_title: "Filtering Rows and Persistent Cleanup Rules - Bundlebase"
+---
+
 # Filtering
 
 The `filter()` method narrows down the rows in a bundle using a SQL SELECT query. Unlike `query()` which returns a separate result set, `filter()` modifies the bundle in place.

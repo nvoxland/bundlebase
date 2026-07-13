@@ -1,3 +1,7 @@
+---
+seo_title: "MCP Server: Give an AI Agent Access to Your Data - Bundlebase"
+---
+
 # MCP Server
 
 The Bundlebase CLI can run as a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server over stdio, allowing AI assistants like Claude Code, Cursor, and Copilot to interact with bundles directly through tool calls.

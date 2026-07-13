@@ -1,6 +1,7 @@
 ---
 title: Python Quick Start -- Bundlebase
 description: Get started with the Bundlebase Python API. Attach Parquet, CSV, or JSONL from local files or S3, filter and transform, commit, and query with SQL.
+seo_title: "Python Quick Start: Build and Query Your First Bundle - Bundlebase"
 ---
 
 # Python Quick Start

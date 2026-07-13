@@ -1,3 +1,7 @@
+---
+seo_title: "Writing a Custom Connector in Python - Bundlebase"
+---
+
 # Python SDK
 
 Build custom Bundlebase connectors in Python.

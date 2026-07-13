@@ -1,3 +1,7 @@
+---
+seo_title: "Logging and Progress Metrics - Bundlebase"
+---
+
 # Logging and Metrics
 
 ## Logging

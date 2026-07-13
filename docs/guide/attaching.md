@@ -1,3 +1,7 @@
+---
+seo_title: "Attach CSV, Parquet, and JSONL Data to a Bundle - Bundlebase"
+---
+
 # Attaching Data
 
 Data is added to the bundle via the `.attach()` method.

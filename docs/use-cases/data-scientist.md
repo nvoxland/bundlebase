@@ -1,6 +1,7 @@
 ---
 title: Bundlebase for Data Scientists — Organize and Share Datasets
 description: How data scientists use Bundlebase to combine messy CSV and Parquet sources, normalize schemas, filter and document transformations, and share versioned datasets with teammates via S3 or a local path.
+seo_title: "Bundlebase for Data Scientists — Organize and Share Datasets"
 ---
 
 # Use Case: Data Scientist

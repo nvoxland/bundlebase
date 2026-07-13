@@ -1,3 +1,7 @@
+---
+seo_title: "Data Sources: S3, HTTP, SFTP, Kaggle, and Fetch Modes - Bundlebase"
+---
+
 # Sources
 
 Sources allow you to define where data files come from and automatically discover and attach new files as they become available. This is useful for working with directories of files that grow over time, such as daily data exports or streaming data partitions.

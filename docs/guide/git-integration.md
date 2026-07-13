@@ -1,3 +1,7 @@
+---
+seo_title: "Storing Bundles in Git - Bundlebase"
+---
+
 # Storing bundles in git
 
 A bundlebase bundle is a directory of small YAML manifests next to whatever

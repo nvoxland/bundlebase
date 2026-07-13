@@ -1,6 +1,7 @@
 ---
 title: Bundlebase for Data Engineers — Automated Incremental Data Pipelines
 description: Build idempotent data pipelines with Bundlebase sources. Fetch incrementally from S3, HTTP APIs, and SFTP. Commit history is your pipeline audit log. Works with cron, Airflow, and GitHub Actions.
+seo_title: "Bundlebase for Data Engineers — Automated Incremental Data Pipelines"
 ---
 
 # Use Case: Data Engineer

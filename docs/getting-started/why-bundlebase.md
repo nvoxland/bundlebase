@@ -1,6 +1,7 @@
 ---
 title: Why Bundlebase? -- DVC vs Delta Lake vs Plain Files vs Databases
 description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases -- data an AI agent can query correctly, and analytics dataset sharing.
+seo_title: "Why Bundlebase? DVC vs Delta Lake vs Plain Files vs Databases"
 ---
 
 # Why Bundlebase?

@@ -1,3 +1,7 @@
+---
+seo_title: "Progress Tracking for Long-Running Operations - Bundlebase"
+---
+
 # Progress Tracking
 
 Monitor the progress of long-running Bundlebase operations.

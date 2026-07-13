@@ -1,3 +1,7 @@
+---
+seo_title: "Querying a Bundle with SQL, pandas, and Polars - Bundlebase"
+---
+
 # Querying
 
 Bundles can be queried using SQL ([Apache DataFusion syntax](https://datafusion.apache.org/user-guide/sql/index.html)) using the `query()` method.

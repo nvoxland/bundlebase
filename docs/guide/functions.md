@@ -1,3 +1,7 @@
+---
+seo_title: "Custom SQL Functions (UDFs) in Python, Java, and Rust - Bundlebase"
+---
+
 # Functions (FFI & IPC Runtimes)
 
 Custom functions let you extend bundlebase's SQL with high-performance scalar and aggregate functions written in any language that can produce a shared library (.so/.dylib) or standalone executable.

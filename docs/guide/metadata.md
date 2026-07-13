@@ -1,3 +1,7 @@
+---
+seo_title: "Bundle Metadata: Name, Description, and Config - Bundlebase"
+---
+
 # Metadata
 
 ## Set Name

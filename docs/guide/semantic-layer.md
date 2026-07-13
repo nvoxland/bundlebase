@@ -1,3 +1,7 @@
+---
+seo_title: "Semantic Layer: Column Descriptions and Named Metrics for AI Agents - Bundlebase"
+---
+
 # Semantic Layer
 
 A bundle can carry what its data *means*, not just its shape. Two things make up the semantic layer:

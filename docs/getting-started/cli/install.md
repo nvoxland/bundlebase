@@ -1,6 +1,7 @@
 ---
 title: CLI Install -- Bundlebase
 description: Install the Bundlebase CLI binary. No Python or other runtime required.
+seo_title: "Install the Bundlebase CLI - Bundlebase"
 ---
 
 # CLI Install

@@ -1,3 +1,7 @@
+---
+seo_title: "Writing a Custom Connector in Java - Bundlebase"
+---
+
 # Java SDK
 
 Build custom Bundlebase connectors in Java.

@@ -1,6 +1,7 @@
 ---
 title: Bundlebase as an ETL Layer — Standardized Data Collection Without Custom Pipelines
 description: Use Bundlebase to pull from SFTP, S3, HTTP APIs, and other sources on a schedule. Downstream systems read from a standardized bundle without knowing or caring about the upstream sources.
+seo_title: "Bundlebase as an ETL Layer — Standardized Data Collection"
 ---
 
 # Use Case: ETL / Periodic Data Collection

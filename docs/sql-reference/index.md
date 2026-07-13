@@ -1,3 +1,7 @@
+---
+seo_title: "SQL Reference: Full Bundlebase Command Syntax - Bundlebase"
+---
+
 # Command Syntax
 
 Bundlebase extends standard SQL with custom commands for managing bundles. This page lists every available command organized by category.

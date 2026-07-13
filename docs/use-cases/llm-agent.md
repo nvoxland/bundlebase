@@ -1,6 +1,7 @@
 ---
 title: Bundlebase for AI Assistant Users — Query Bundles in Natural Language
 description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Set up the MCP server and your assistant gets describe, schema, history, sample, and query as native tools.
+seo_title: "Bundlebase for AI Agents — Query Your Data over MCP, Correctly"
 ---
 
 # Use Case: AI Assistant User

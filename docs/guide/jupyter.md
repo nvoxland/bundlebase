@@ -1,3 +1,7 @@
+---
+seo_title: "Using Bundlebase in Jupyter Notebooks - Bundlebase"
+---
+
 # Jupyter Notebooks
 
 When using Bundlebase in a Jupyter notebook, use the sync API with the jupyter extra:

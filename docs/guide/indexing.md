@@ -1,3 +1,7 @@
+---
+seo_title: "Indexing: BTree and Full-Text Indexes for Faster Queries - Bundlebase"
+---
+
 # Indexing
 
 While Bundlebase can query any attached data, the base formats are not always the most efficient to query.

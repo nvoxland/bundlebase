@@ -1,3 +1,7 @@
+---
+seo_title: "Native (FFI) Connectors - Bundlebase"
+---
+
 # Native Mode
 
 Native mode loads your connector in-process for zero-copy Arrow data transfer, eliminating the subprocess and serialization overhead of [IPC mode](index.md).

@@ -1,6 +1,7 @@
 ---
 title: Bundlebase for Backend Developers — Make API Data Self-Service
 description: Publish your API or database data as a versioned Bundlebase bundle. Data teams get pandas DataFrames in one line. Works from Python, Go, Java, or any stack via HTTP or Parquet export.
+seo_title: "Bundlebase for Backend Developers — Make API Data Self-Service"
 ---
 
 # Use Case: Backend Developer

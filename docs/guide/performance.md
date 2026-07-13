@@ -1,4 +1,10 @@
+---
+seo_title: "Performance: Streaming Queries on Larger-Than-RAM Data - Bundlebase"
+---
 
+# Performance
+
+Bundlebase executes queries as a stream, so a bundle can be larger than the memory on the machine querying it. This page covers how to keep it that way: which APIs stay bounded, which ones accumulate the whole result, and what to reach for when a dataset stops fitting in RAM.
 
 ## Working with Large Datasets
 

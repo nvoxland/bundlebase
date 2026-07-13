@@ -1,3 +1,7 @@
+---
+seo_title: "Generating PDF Reports with Charts - Bundlebase"
+---
+
 # PDF Reports
 
 Bundlebase can generate PDF reports from a markdown template. You write a normal markdown document, and wherever you want live data from a bundle (a chart, a table) you drop in a `bundlebase` fenced code block with a SQL query and chart type. Bundlebase runs the queries and compiles everything to PDF via [Typst](https://typst.app/).

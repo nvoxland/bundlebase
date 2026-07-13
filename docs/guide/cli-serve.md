@@ -1,3 +1,7 @@
+---
+seo_title: "Arrow Flight SQL Server for BI Tools (Metabase, DBeaver) - Bundlebase"
+---
+
 # SQL Server
 
 The Bundlebase CLI can run as an [SQL](https://arrow.apache.org/docs/format/FlightSql.html) server, providing remote access to bundles over the network. Any JDBC-compatible client (such as DBeaver) or ADBC client can connect and run queries.

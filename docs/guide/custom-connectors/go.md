@@ -1,3 +1,7 @@
+---
+seo_title: "Writing a Custom Connector in Go - Bundlebase"
+---
+
 # Go SDK
 
 Build custom Bundlebase connectors in Go.

@@ -1,6 +1,7 @@
 ---
 title: Python Install -- Bundlebase
 description: Install Bundlebase as a Python library for scripts, notebooks, and applications.
+seo_title: "Install Bundlebase for Python (pip) - Bundlebase"
 ---
 
 # Python Install

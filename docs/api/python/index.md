@@ -1,3 +1,7 @@
+---
+seo_title: "Python API Reference - Bundlebase"
+---
+
 # Python API Reference
 
 Bundlebase provides both async and sync Python APIs.

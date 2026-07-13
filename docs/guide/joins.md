@@ -1,3 +1,7 @@
+---
+seo_title: "Joining Bundles and External Data - Bundlebase"
+---
+
 # Joins
 
 You can create a bundle built up of data in different files joined together, even files of different types.

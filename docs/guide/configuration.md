@@ -1,3 +1,7 @@
+---
+seo_title: "Configuration: S3, GCS, Azure, and Credentials - Bundlebase"
+---
+
 # Configuration
 
 Bundlebase uses configuration to control how it connects to cloud storage providers, remote servers, and external services. 

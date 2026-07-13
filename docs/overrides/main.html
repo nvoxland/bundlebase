@@ -1,6 +1,56 @@
 {% extends "base.html" %}
 
+{#
+  Title handling.
+
+  A page can set `seo_title` in its front matter to control the <title> element
+  outright, without changing the nav label. mkdocs derives the nav label from
+  `title`/H1, so putting a long, search-friendly title there would bloat the
+  sidebar. Pages that don't set it fall back to "<Page title> - Bundlebase".
+#}
+{% block htmltitle %}
+  {% if page.meta and page.meta.seo_title %}
+    <title>{{ page.meta.seo_title }}</title>
+  {% elif page.meta and page.meta.title %}
+    <title>{{ page.meta.title }} - {{ config.site_name }}</title>
+  {% elif page.title and not page.is_homepage %}
+    <title>{{ page.title | striptags }} - {{ config.site_name }}</title>
+  {% else %}
+    <title>{{ config.site_name }}</title>
+  {% endif %}
+{% endblock %}
+
 {% block extrahead %}
   {{ super() }}
   <link rel="alternate" type="text/plain" title="LLM-optimized docs" href="{{ config.site_url }}llms.txt">
+
+  {#
+    Structured data, home page only. Repeating SoftwareApplication markup on
+    every docs page would be inaccurate, and boilerplate markup duplicated
+    site-wide gets discounted anyway.
+  #}
+  {% if page.is_homepage %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Bundlebase",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "url": "{{ config.site_url }}",
+    "description": {{ config.site_description | tojson }},
+    "author": {
+      "@type": "Person",
+      "name": "{{ config.site_author }}"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "codeRepository": "{{ config.repo_url }}",
+    "programmingLanguage": ["Python", "Rust", "SQL"]
+  }
+  </script>
+  {% endif %}
 {% endblock %}

@@ -1,6 +1,7 @@
 ---
 title: Use Cases — Bundlebase
 description: "Role-based use cases for Bundlebase: AI agents and assistants, data scientists, backend developers, data engineers, and analysts. Real-world scenarios end to end."
+seo_title: "Bundlebase Use Cases: AI Agents, Analysts, and Data Teams"
 ---
 
 # Use Cases

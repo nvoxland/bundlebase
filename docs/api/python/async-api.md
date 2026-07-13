@@ -1,3 +1,7 @@
+---
+seo_title: "Python Async API Reference - Bundlebase"
+---
+
 # Async API
 
 The async API provides an async/await interface for Bundlebase operations.

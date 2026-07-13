@@ -1,3 +1,7 @@
+---
+seo_title: "Views: Saved Queries Inside a Bundle - Bundlebase"
+---
+
 # Views
 
 Views are named, reusable query patterns stored within the bundle. They automatically inherit changes from their parent container -- when you add new data to the parent, views see it on next open.

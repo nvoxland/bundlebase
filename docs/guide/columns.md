@@ -1,3 +1,7 @@
+---
+seo_title: "Add, Rename, Drop, and Cast Columns - Bundlebase"
+---
+
 # Columns
 
 ## Identifiers and Case Sensitivity

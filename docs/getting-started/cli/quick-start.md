@@ -1,6 +1,7 @@
 ---
 title: CLI Quick Start -- Bundlebase
 description: Get started with the Bundlebase CLI. Create a bundle, attach data, and query it interactively from the REPL.
+seo_title: "CLI Quick Start: Query a Bundle from the Terminal - Bundlebase"
 ---
 
 # CLI Quick Start

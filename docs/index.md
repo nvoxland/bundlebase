@@ -1,6 +1,7 @@
 ---
 template: home.html
 title: Bundlebase -- Data Packaging for AI Agents
+seo_title: "Bundlebase — Data an AI Agent Can Query Correctly"
 description: Bundlebase packages data into a versioned, self-describing container an AI agent can query correctly. Column meanings, named metrics, provenance, and history, served over MCP. Also works from Python, the CLI, and any BI tool.
 hide:
   - navigation

@@ -47,6 +47,13 @@ theme:
 plugins:
   - search:
       separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  # Emits og:/twitter: meta tags and generates a preview image per page.
+  # Needs to fetch fonts on a cold cache, so allow CI to turn it off:
+  #   CARDS=false mkdocs build
+  - social:
+      cards: !ENV [CARDS, true]
+      cards_layout_options:
+        background_color: "#0e7490"
   - autorefs
   - blog:
       blog_dir: blog

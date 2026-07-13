@@ -1,3 +1,7 @@
+---
+seo_title: "Extending Bundlebase: Connectors and Custom Functions - Bundlebase"
+---
+
 # Extending
 
 Bundles can extend other bundles to build on previous versions.

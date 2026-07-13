@@ -1,6 +1,7 @@
 ---
 title: Bundlebase for Analysts — Self-Serve Analytics Without a Database
 description: Query shared datasets with SQL, export to pandas or polars, and generate PDF reports with charts — all from a single bb.open() call. No database credentials, no CSV exports, no setup.
+seo_title: "Bundlebase for Analysts — Self-Serve Analytics Without a Database"
 ---
 
 # Use Case: Analyst

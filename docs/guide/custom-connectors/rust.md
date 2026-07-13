@@ -1,3 +1,7 @@
+---
+seo_title: "Writing a Custom Connector in Rust - Bundlebase"
+---
+
 # Rust SDK
 
 Build custom Bundlebase connectors in Rust.

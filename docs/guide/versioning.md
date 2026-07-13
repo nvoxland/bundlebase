@@ -1,3 +1,7 @@
+---
+seo_title: "Versioning: Commits, History, and Rollback for Data - Bundlebase"
+---
+
 # Versioning
 
 Bundlebase has a built-in versioning system. Every time you call `commit()`, a new version is created with all your changes.

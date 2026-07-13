@@ -1,3 +1,7 @@
+---
+seo_title: "Full-Text Search with BM25 Ranking - Bundlebase"
+---
+
 # Text Search
 
 Bundlebase includes full-text search powered by [Tantivy](https://github.com/quickwit-oss/tantivy) with [BM25](https://en.wikipedia.org/wiki/Okapi_BM25) relevance ranking. Text indexes can span one or more columns, and search results include a `_score` column for ranking.

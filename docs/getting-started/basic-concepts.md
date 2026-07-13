@@ -1,6 +1,7 @@
 ---
 title: Basic Concepts -- Bundlebase
 description: "Core Bundlebase concepts: what a bundle is, read-only vs mutable, lazy evaluation, supported data formats, and the Git-like commit and versioning system."
+seo_title: "Bundlebase Basic Concepts: Bundles, Sources, and Versioning"
 ---
 
 # Basic Concepts
