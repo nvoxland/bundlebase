@@ -1,17 +1,81 @@
 ---
 template: home.html
-title: Bundlebase -- Data Packaging
-description: Bundlebase packages data into versioned, self-describing containers. Attach CSV, Parquet, or JSONL from S3, HTTP, or local files. Query with SQL via Python, CLI, or any BI tool. Share via a path. No database required.
+title: Bundlebase -- Data Packaging for AI Agents
+description: Bundlebase packages data into a versioned, self-describing container an AI agent can query correctly. Column meanings, named metrics, provenance, and history, served over MCP. Also works from Python, the CLI, and any BI tool.
 hide:
   - navigation
   - toc
 ---
 
-Your team wants the data you've been cleaning. Email a CSV and it's stale by Friday. Re-run the pipeline yourself, every time. Stand up a database, and that's a quarter of work.
+Hand an AI agent a CSV and it will write SQL that looks right. Whether the number comes back right is a separate question. A schema says a column is called `amt` and holds a number. It doesn't say the value is net of refunds, that the rows only cover Q1, or what your company means by "revenue".
 
-Bundlebase packages data into a versioned, self-describing container. Point anyone at the path and they get the data, the schema, the transformation history, and the provenance. Query with SQL, pull into pandas, connect Metabase. No server, no README, no repeating yourself.
+Bundlebase packages data into a versioned container that carries all of that: what each column means, how your metrics are defined, where every row came from, and every transformation applied along the way. Run it as an MCP server and an agent reads the whole thing in one call.
 
-## Share a dataset
+The same container works for people. Point anyone at the path and they get a DataFrame, a SQL connection, or Metabase.
+
+## Data an agent can query correctly
+
+Describe the columns and define the metrics once. Both live in the bundle, versioned like any other change, and travel with it.
+
+=== "SQL"
+
+    ```sql
+    DESCRIBE COLUMN amount AS 'order total in USD, net of refunds';
+    CREATE METRIC total_revenue AS 'SUM(amount)' DESCRIPTION 'gross revenue in USD';
+    ```
+
+=== "Python"
+
+    ```python
+    bundle.describe_column("amount", "order total in USD, net of refunds")
+    bundle.define_metric("total_revenue", "SUM(amount)", "gross revenue in USD")
+    ```
+
+Then serve the bundle:
+
+```bash
+bundlebase mcp --bundle s3://company-data/sales-q1
+```
+
+The agent calls `describe` once and gets the schema with those descriptions, the metric definitions, the source of every file, and the commit history. When it needs revenue it calls `metric(name="total_revenue")` and computes your definition instead of inventing its own `SUM`.
+
+A bundle will also refuse to answer wrongly. CSV and JSONL columns import as text, so `data_quality` reports which of them actually hold numbers or dates and what to cast them to. And comparing a text column against a number is rejected rather than compared as strings — the failure where `WHERE amount > 50` quietly matches `"9"` and drops `"100"`.
+
+[The agent use case ->](use-cases/llm-agent.md) · [Semantic layer ->](guide/semantic-layer.md)
+
+## Agents keep their context between sessions
+
+Agents lose context. A bundle doesn't. The next session opens the last committed state and reads what it already has, without re-fetching anything. If a run dies halfway through there is no partial data to clean up — the bundle sits at its last commit.
+
+=== "Python"
+
+    ```python
+    # New session -- reconstruct from the bundle itself
+    bundle = bb.open("s3://agent-workspace/product-reviews")
+    print(bundle.name)        # "Product Reviews"
+    print(bundle.num_rows())  # 14302
+    for e in bundle.history():
+        print(e)              # what ran, and when
+
+    results = bundle.query(
+        "SELECT * FROM bundle WHERE review_date >= '2026-01-01'"
+    ).to_pandas()
+    ```
+
+=== "MCP"
+
+    ```bash
+    bundlebase mcp --bundle s3://agent-workspace/product-reviews
+    ```
+
+    The agent gets `describe`, `analyze`, `query`, `metric`, `data_quality`,
+    `sample`, and `history` as native tools. `describe` is the one to call
+    first — it answers "what is this data, where did it come from, and what
+    has been done to it" in a single response.
+
+## Share a dataset with your team
+
+Email a CSV and it's stale by Friday. Re-run the pipeline yourself, every time. Stand up a database, and that's a quarter of work.
 
 === "Python"
 
@@ -52,48 +116,6 @@ Commit once. Share the path. The consumer gets a DataFrame, a SQL connection, or
 
 [What makes a bundle different from a Parquet file ->](getting-started/why-bundlebase.md)
 
-## Durable storage for LLM agents
-
-Agents lose context between sessions. A bundle doesn't. At startup the agent reads `name`, `num_rows`, `schema`, and `history()`, so it knows what it has without re-fetching anything. If a session crashes mid-run, the next one opens the last committed state.
-
-=== "Python"
-
-    ```python
-    # New session -- reconstruct from the bundle itself
-    bundle = bb.open("s3://agent-workspace/product-reviews")
-    print(bundle.name)        # "Product Reviews"
-    print(bundle.num_rows())  # 14302
-    for e in bundle.history():
-        print(e)            # what ran and when
-
-    results = bundle.query(
-        "SELECT * FROM bundle WHERE review_date >= '2026-01-01'"
-    ).to_pandas()
-    ```
-
-=== "SQL / MCP"
-
-    ```bash
-    # New session
-    bundlebase repl --bundle s3://agent-workspace/product-reviews
-    ```
-
-    ```sql
-    SHOW STATUS;    -- name, rows, version
-    SHOW HISTORY;   -- full commit log
-
-    SELECT * FROM bundle WHERE review_date >= '2026-01-01';
-    ```
-
-    Or expose as an MCP tool server. The agent gets `query`, `schema`,
-    `history`, and `sample` as native tools, no code required:
-
-    ```bash
-    bundlebase mcp --bundle s3://agent-workspace/product-reviews
-    ```
-
-[See the agent use case ->](getting-started/why-bundlebase.md#use-case-2-data-storage-for-llm-agents)
-
 ## Data hygiene rules that travel with the bundle
 
 Your source data is dirty. You clean it every time, until you forget. `always_delete` and `always_update` encode cleanup rules into the bundle itself. They fire on every future attach, regardless of who runs it.
@@ -133,10 +155,10 @@ No shared cleanup script. No "oops, I forgot the filter" incidents.
 %%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
 flowchart LR
     A["CSV · Parquet · JSONL\nHTTP · S3 · SFTP · Kaggle"] --> B["Bundle\nversioned · self-describing"]
-    B --> C1["Python -- bb.open()"]
-    B --> C2["CLI -- bundlebase REPL"]
-    B --> C3["SQL server -- Metabase · R · DBeaver"]
-    B --> C4["MCP server -- AI assistants"]
+    B --> C1["MCP server -- AI agents"]
+    B --> C2["Python -- bb.open()"]
+    B --> C3["CLI -- bundlebase REPL"]
+    B --> C4["SQL server -- Metabase · R · DBeaver"]
 
     classDef bundle fill:#0e7490,color:#fff,stroke:#22d3ee,stroke-width:1.5px
     classDef output fill:#1e293b,color:#cbd5e1,stroke:#334155,stroke-width:1px
@@ -151,9 +173,10 @@ flowchart LR
 
 | | |
 |---|---|
+| **AI agents** | MCP server -- Claude, Copilot, or any MCP-compatible assistant. `bundlebase setup-agent` writes the config for you |
 | **Python** | `pandas` · `polars` · `numpy` · `pyarrow`, sync + async |
 | **CLI** | Interactive REPL, scriptable commands -- no Python required |
-| **BI tools** | Metabase · DBeaver · R · Julia · Go -- anything with an Arrow Flight driver or native Arrow Flight support |
+| **BI tools** | Metabase · DBeaver · R · Julia · Go -- anything with an Arrow Flight driver or native Arrow Flight support. Column descriptions travel as Arrow field metadata |
 | **Storage** | S3 · GCS · Azure Blob · local paths |
 | **Formats** | Parquet · CSV · JSONL (newline-delimited JSON) -- mixed sources union automatically; other JSON shapes via [connectors](guide/sources.md#json-options) |
 | **Custom connectors** | Pull from any source (Salesforce, internal APIs, custom databases) by writing a connector in Python, Go, Java, or any IPC-compatible language |
@@ -164,6 +187,7 @@ flowchart LR
 
 ## Get started
 
-1. [Why Bundlebase?](getting-started/why-bundlebase.md) -- comparisons to DVC, Delta Lake, plain files, databases
-2. [Python](getting-started/python/install.md) -- pip install, then build your first bundle
-3. [CLI](getting-started/cli/install.md) -- download the binary, query interactively
+1. [Set up an AI assistant](use-cases/llm-agent.md) -- run `bundlebase setup-agent`, then ask questions about a bundle
+2. [Why Bundlebase?](getting-started/why-bundlebase.md) -- comparisons to DVC, Delta Lake, plain files, databases
+3. [Python](getting-started/python/install.md) -- pip install, then build your first bundle
+4. [CLI](getting-started/cli/install.md) -- download the binary, query interactively

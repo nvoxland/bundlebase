@@ -1,8 +1,10 @@
 # Bundlebase
 
-> Docker for data. Bundle, version, and query datasets without database infrastructure.
+> Docker for data — a versioned, self-describing bundle an AI agent can query correctly over MCP.
 
-Bundlebase packages data files (CSV, Parquet, JSON) from any source (local, S3, HTTP, SFTP) into versioned bundles with a built-in SQL query engine, persistent data hygiene rules, custom connectors, custom SQL functions, and Python/CLI/MCP interfaces. Consumers access bundles via Python, CLI REPL, Arrow Flight SQL server, or MCP tool server — no database required.
+Bundlebase packages data files (CSV, Parquet, JSONL) from any source (local, S3, HTTP, SFTP) into versioned bundles with a built-in SQL query engine, persistent data hygiene rules, custom connectors, custom SQL functions, and Python/CLI/MCP interfaces.
+
+A bundle is self-describing: it carries its schema, what each column *means* (`DESCRIBE COLUMN`), how the numbers are defined (`CREATE METRIC`), where every file came from, and the full transformation history. Over MCP an agent gets all of that from a single `describe` call, and computes a metric by name rather than inventing its own aggregate — which is what keeps generated SQL from returning plausible but wrong numbers. Consumers also access bundles via Python, the CLI REPL, or an Arrow Flight SQL server for BI tools. No database required.
 
 ## Docs
 

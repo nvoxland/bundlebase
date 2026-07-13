@@ -1,11 +1,13 @@
 ---
 title: Why Bundlebase? -- DVC vs Delta Lake vs Plain Files vs Databases
-description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases -- analytics dataset sharing and LLM agent data storage.
+description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases -- data an AI agent can query correctly, and analytics dataset sharing.
 ---
 
 # Why Bundlebase?
 
-If you know Docker, the mental model is the same: the artifact carries its own context, opening the bundle is the pull, and consumers don't need to know how it was built, whether they're using Python, the CLI, a BI tool, or an AI assistant. Whether that fits your situation is what this page covers.
+If you know Docker, the mental model is the same: the artifact carries its own context, opening the bundle is the pull, and consumers don't need to know how it was built, whether they're using Python, the CLI, a BI tool, or an AI agent. Whether that fits your situation is what this page covers.
+
+The context an artifact carries matters most to an agent, because an agent can't ask you what a column means. It will write SQL against whatever it's given, and a schema alone is not enough to make the answer right. That's the first use case below.
 
 ## The problem with plain files
 
@@ -23,7 +25,180 @@ Bundlebase's answer: bundle the data, transformation record, commit history, and
 
 ---
 
-## Use case 1: Shareable analytics datasets
+## Use case 1: Data an AI agent can query correctly
+
+### The scenario
+
+An agent is doing automated data analysis: scraping product reviews from an API, processing them, building up a dataset over multiple sessions. Two problems show up, and they're different from each other.
+
+**The agent forgets.** Between sessions, context resets. The agent needs to answer: what data do I already have? Where did it come from? What was the last thing I did? Without durable, self-describing storage it either re-fetches everything or relies on a sidecar file it wrote itself, which may be stale, incomplete, or missing entirely if the previous session crashed.
+
+**The agent guesses.** Given a bare schema, an agent writes SQL that parses, runs, and returns a number. Whether that number is the right one is unverified. A column called `amt` is a number; nothing in the schema says it excludes refunds, or that your company counts revenue net of returns. Two agents (or an agent and a human) will write two different `SUM`s and get two different answers, both of which look correct.
+
+A bundle answers both. It stores the data *and* what the data means — column descriptions, named metrics, provenance, and history — so the agent reads its own context back and computes numbers from your definitions rather than its own.
+
+### How you'd do it
+
+In each session, the agent updates the bundle:
+
+=== "Python"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bundle = (bb.open("s3://agent-workspace/product-reviews").extend()
+        .create_source("http", {
+            "url": "https://api.example.com/reviews",
+            "json_record_path": "data"
+        })
+        .set_description("Product reviews from example.com API"))
+    bundle.fetch("base", "add")
+
+    bundle.commit(f"Fetched batch {batch_id} -- {new_rows} new reviews")
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/reviews',
+        json_record_path = 'data'
+    );
+    FETCH base ADD;
+    COMMIT 'Fetched batch 3 -- 2,840 new reviews';
+    ```
+
+At the start of the next session, the agent reconstructs its context from the bundle:
+
+=== "Python"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bundle = bb.open("s3://agent-workspace/product-reviews")
+
+    # What do I have?
+    print(bundle.name)           # "Product Reviews"
+    print(bundle.num_rows())     # 14302
+    print(bundle.schema)         # column names and types
+
+    # What happened last time?
+    for entry in bundle.history():
+        print(entry)
+    # -> v1: Initial fetch -- 1,240 reviews
+    # -> v2: Fetched batch 2 -- 3,100 new reviews
+    # -> v3: Fetched batch 3 -- 2,840 new reviews
+
+    # Query without loading everything
+    recent = bundle.query(
+        "SELECT * FROM bundle WHERE review_date >= '2026-01-01'"
+    ).to_pandas()
+    ```
+
+=== "SQL"
+
+    ```sql
+    SHOW DETAILS;   -- name, version, row count
+    SHOW HISTORY;
+
+    -- v1: Initial fetch -- 1,240 reviews
+    -- v2: Fetched batch 2 -- 3,100 new reviews
+    -- v3: Fetched batch 3 -- 2,840 new reviews
+
+    SELECT * FROM bundle WHERE review_date >= '2026-01-01';
+    ```
+
+### Why this works for agents
+
+The manifest file stored with each commit is machine-readable and carries the full provenance:
+
+```yaml
+author: agent-process
+message: Fetched batch 3 -- 2,840 new reviews
+timestamp: 2026-03-15T14:22:09Z
+changes:
+  - description: Attach https://api.example.com/reviews
+    operations:
+      - type: attachBlock
+        source: https://api.example.com/reviews
+        version: 3f4a8b2-7d19c45e8ab21-2840
+```
+
+Three specific things this enables:
+
+- **Source provenance without a catalog.** The manifest stores the exact source URL and content hash for every attached file. The agent doesn't need an external system to answer "where did this come from."
+- **Machine-readable changelog.** `bundle.history()` returns structured entries. The agent can check whether data has changed since the last session without re-downloading anything.
+- **Structural metadata without a full scan.** `bundle.num_rows()` and `bundle.schema` are cheap reads, so the agent can understand what it has before deciding whether to query.
+
+### Why the agent's numbers come out right
+
+Durable context stops the agent re-fetching. It doesn't stop it guessing at what the columns mean. That's what the semantic layer is for:
+
+```sql
+DESCRIBE COLUMN amount AS 'order total in USD, net of refunds';
+CREATE METRIC total_revenue AS 'SUM(amount)' DESCRIPTION 'gross revenue in USD';
+```
+
+Both are recorded as operations, so they're versioned and travel inside the bundle. Over MCP the agent sees them without being told:
+
+- `describe` returns the schema **with** those column descriptions, plus every defined metric — so the agent knows `amt` is net of refunds before it writes a line of SQL.
+- `metric(name="total_revenue")` computes your definition, optionally grouped by dimensions. The agent asks for revenue by name instead of assembling its own aggregate.
+- `data_quality` reports which text columns actually hold numbers or dates, with a suggested cast. CSV and JSONL columns all import as text, and this is where an agent would otherwise go wrong.
+
+Bundlebase also refuses the silent failure. Comparing a text column against a number (`WHERE amount > 100` on a CSV column) is rejected rather than compared as strings — the case where `"9" > "50"` is true and the query quietly returns the wrong rows. See the [semantic layer guide](../guide/semantic-layer.md).
+
+### Session flow
+
+```mermaid
+sequenceDiagram
+    participant S1 as Agent Session 1
+    participant B as Bundle (S3)
+    participant S2 as Agent Session 2
+
+    S1->>B: create().fetch().commit("Initial fetch")
+    Note over B: v1 -- 1,240 rows
+
+    S1->>B: extend().fetch().commit("Batch 2")
+    Note over B: v2 -- 4,340 rows
+
+    Note over S2: New session -- context is empty
+
+    S2->>B: bb.open("s3://agent-workspace/product-reviews")
+    B-->>S2: name, schema, num_rows, version
+    S2->>B: bundle.history()
+    B-->>S2: [v1: Initial fetch, v2: Batch 2]
+    S2->>B: bundle.query("SELECT ...")
+    B-->>S2: DataFrame -- agent continues where it left off
+```
+
+### How it compares to alternatives
+
+#### vs. Plain JSON or Parquet files
+
+Plain files are the obvious baseline: write the fetched data to a file. The capability gap is what's attached. A plain Parquet file has column names and types. A bundle has column names, types, source URL, content hash, transformation history, commit timestamps, and a name/description. An agent working with plain files has to maintain its own sidecar metadata file; with a bundle, the data carries its context.
+
+#### vs. Vector databases
+
+Vector databases (Pinecone, Weaviate, Chroma) solve semantic search over unstructured text: find documents similar to this query by embedding distance. If your agent does retrieval-augmented generation over document chunks, use a vector database -- that's what they're built for.
+
+If your agent accumulates structured tabular data (review scores, prices, timestamps, event logs), a vector database is the wrong tool.
+
+| | Vector DB | Bundlebase |
+|---|---|---|
+| Semantic search | Yes | No |
+| Structured tabular data | Awkward | Yes |
+| SQL queries | No | Yes |
+| Data provenance | No | Yes |
+| pandas / polars export | No | Yes |
+| Schema + history metadata | No | Yes |
+
+#### vs. Regular databases
+
+A database works well for agents running on a persistent server with a stable connection. For agents that run as ephemeral processes -- serverless functions, CI jobs, scheduled scripts -- a database requires connection management and usually a separate server process. Bundlebase lives at a path and opens with one call. The trade-off: no concurrent writes, no row-level permissions.
+
+---
+
+## Use case 2: Shareable analytics datasets
 
 ### The scenario
 
@@ -182,160 +357,6 @@ A database is right when you need concurrent writes, long-lived operational stor
 
 ---
 
-## Use case 2: Data storage for LLM agents
-
-### The scenario
-
-An agent is doing automated data analysis: scraping product reviews from an API, processing them, building up a dataset over multiple sessions. Between sessions, context resets. The agent needs to answer: what data do I already have? Where did it come from? What was the last thing I did?
-
-Without durable, self-describing storage, the agent either re-fetches everything or relies on a sidecar file it wrote itself (which may be stale, incomplete, or missing entirely if the previous session crashed).
-
-### How you'd do it
-
-In each session, the agent updates the bundle:
-
-=== "Python"
-
-    ```python
-    import bundlebase.sync as bb
-
-    bundle = (bb.open("s3://agent-workspace/product-reviews").extend()
-        .create_source("http", {
-            "url": "https://api.example.com/reviews",
-            "json_record_path": "data"
-        })
-        .set_description("Product reviews from example.com API"))
-    bundle.fetch("base", "add")
-
-    bundle.commit(f"Fetched batch {batch_id} -- {new_rows} new reviews")
-    ```
-
-=== "SQL"
-
-    ```sql
-    CREATE SOURCE USING http WITH (
-        url = 'https://api.example.com/reviews',
-        json_record_path = 'data'
-    );
-    FETCH base ADD;
-    COMMIT 'Fetched batch 3 -- 2,840 new reviews';
-    ```
-
-At the start of the next session, the agent reconstructs its context from the bundle:
-
-=== "Python"
-
-    ```python
-    import bundlebase.sync as bb
-
-    bundle = bb.open("s3://agent-workspace/product-reviews")
-
-    # What do I have?
-    print(bundle.name)           # "Product Reviews"
-    print(bundle.num_rows())     # 14302
-    print(bundle.schema)         # column names and types
-
-    # What happened last time?
-    for entry in bundle.history():
-        print(entry)
-    # -> v1: Initial fetch -- 1,240 reviews
-    # -> v2: Fetched batch 2 -- 3,100 new reviews
-    # -> v3: Fetched batch 3 -- 2,840 new reviews
-
-    # Query without loading everything
-    recent = bundle.query(
-        "SELECT * FROM bundle WHERE review_date >= '2026-01-01'"
-    ).to_pandas()
-    ```
-
-=== "SQL"
-
-    ```sql
-    SHOW DETAILS;   -- name, version, row count
-    SHOW HISTORY;
-
-    -- v1: Initial fetch -- 1,240 reviews
-    -- v2: Fetched batch 2 -- 3,100 new reviews
-    -- v3: Fetched batch 3 -- 2,840 new reviews
-
-    SELECT * FROM bundle WHERE review_date >= '2026-01-01';
-    ```
-
-### Why this works for agents
-
-The manifest file stored with each commit is machine-readable and carries the full provenance:
-
-```yaml
-author: agent-process
-message: Fetched batch 3 -- 2,840 new reviews
-timestamp: 2026-03-15T14:22:09Z
-changes:
-  - description: Attach https://api.example.com/reviews
-    operations:
-      - type: attachBlock
-        source: https://api.example.com/reviews
-        version: 3f4a8b2-7d19c45e8ab21-2840
-```
-
-Three specific things this enables:
-
-- **Source provenance without a catalog.** The manifest stores the exact source URL and content hash for every attached file. The agent doesn't need an external system to answer "where did this come from."
-- **Machine-readable changelog.** `bundle.history()` returns structured entries. The agent can check whether data has changed since the last session without re-downloading anything.
-- **Structural metadata without a full scan.** `bundle.num_rows()` and `bundle.schema` are cheap reads, so the agent can understand what it has before deciding whether to query.
-
-### Session flow
-
-```mermaid
-sequenceDiagram
-    participant S1 as Agent Session 1
-    participant B as Bundle (S3)
-    participant S2 as Agent Session 2
-
-    S1->>B: create().fetch().commit("Initial fetch")
-    Note over B: v1 -- 1,240 rows
-
-    S1->>B: extend().fetch().commit("Batch 2")
-    Note over B: v2 -- 4,340 rows
-
-    Note over S2: New session -- context is empty
-
-    S2->>B: bb.open("s3://agent-workspace/product-reviews")
-    B-->>S2: name, schema, num_rows, version
-    S2->>B: bundle.history()
-    B-->>S2: [v1: Initial fetch, v2: Batch 2]
-    S2->>B: bundle.query("SELECT ...")
-    B-->>S2: DataFrame -- agent continues where it left off
-```
-
-### How it compares to alternatives
-
-#### vs. Plain JSON or Parquet files
-
-Plain files are the obvious baseline: write the fetched data to a file. The capability gap is what's attached. A plain Parquet file has column names and types. A bundle has column names, types, source URL, content hash, transformation history, commit timestamps, and a name/description. An agent working with plain files has to maintain its own sidecar metadata file; with a bundle, the data carries its context.
-
-#### vs. Vector databases
-
-Vector databases (Pinecone, Weaviate, Chroma) solve semantic search over unstructured text: find documents similar to this query by embedding distance. If your agent does retrieval-augmented generation over document chunks, use a vector database -- that's what they're built for.
-
-If your agent accumulates structured tabular data (review scores, prices, timestamps, event logs), a vector database is the wrong tool.
-
-| | Vector DB | Bundlebase |
-|---|---|---|
-| Semantic search | Yes | No |
-| Structured tabular data | Awkward | Yes |
-| SQL queries | No | Yes |
-| Data provenance | No | Yes |
-| pandas / polars export | No | Yes |
-| Schema + history metadata | No | Yes |
-
-#### vs. Regular databases
-
-A database works well for agents running on a persistent server with a stable connection. For agents that run as ephemeral processes -- serverless functions, CI jobs, scheduled scripts -- a database requires connection management and usually a separate server process. Bundlebase lives at a path and opens with one call. The trade-off: no concurrent writes, no row-level permissions.
-
----
-
----
-
 ## Persistent pipeline rules
 
 ### The scenario
@@ -435,19 +456,34 @@ For AI agents and assistants that support the Model Context Protocol:
 bundlebase mcp --bundle s3://agent-workspace/pricing-intel
 ```
 
-This exposes the bundle as a set of tools an AI assistant can call directly: `query`, `schema`, `sample`, `history`, `status`. The assistant can explore the dataset, run SQL, and check provenance without writing any code -- the bundle is the context.
+This exposes the bundle as a set of tools an AI assistant can call directly:
+
+| Tool | What it answers |
+|---|---|
+| `describe` | What is this data? Schema **with column descriptions**, named metrics, provenance, transformation record, history — in one call. The right first call. |
+| `analyze` | `describe` plus a sample of rows |
+| `data_quality` | Nulls, distincts, and a `suggested_cast` for text columns that really hold numbers or dates |
+| `metric` | Compute a bundle-defined metric by name, optionally grouped by dimensions |
+| `query`, `schema`, `count`, `sample`, `status`, `history` | The rest of the surface |
 
 ```
 > What data do I have in this bundle?
 
-[calls schema tool]
+[calls describe tool]
 Bundle: Competitive Pricing Intelligence
 Rows: 14,302
-Columns: product_id (Int64), vendor (Utf8), price (Float64), fetched_at (Timestamp)
+Columns:
+  product_id (Int64)
+  vendor     (Utf8)
+  price      (Float64)   -- "list price in USD, excluding shipping"
+  fetched_at (Timestamp)
+Metrics:
+  avg_price  = AVG(price)  -- "mean list price across vendors"
+Sources: https://api.example.com/pricing (daily)
 Last commit: "Daily refresh -- 2026-04-03"
 ```
 
-The combination of self-describing metadata and the MCP interface means an AI assistant can answer "what data do I have and where is it from" before deciding whether to query -- the same reconstruction that takes several tool calls with plain files happens in one.
+`describe` collapses into one call the reconstruction that takes several against plain files, and it carries something plain files don't have at all: what the columns mean and how the numbers are defined. That's the difference between an assistant that produces plausible SQL and one that produces correct SQL.
 
 ---
 
@@ -521,12 +557,13 @@ Use this as a quick filter, not a definitive answer.
 
 **Use Bundlebase if:**
 
+- You want an AI agent to query your data and get the numbers *right*, not just plausible
+- You're building an agent that accumulates structured data across sessions
+- You need self-describing data -- what the columns mean, how the metrics are defined, name, history, schema
 - You want to share a versioned dataset with no infrastructure setup
 - Consumers use Python, a BI tool, the CLI, or an AI assistant -- any or all of these
 - You have recurring dirty source data that needs consistent, automatic cleanup
-- You need self-describing data -- name, description, history, schema
 - You need a custom data source or custom SQL logic -- connectors and UDFs extend both
-- You're building an agent that accumulates structured data across sessions
 - Your dataset fits comfortably in a single directory (local or cloud)
 - SQL queries are useful but you don't need a full database
 

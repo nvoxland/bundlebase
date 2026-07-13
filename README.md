@@ -1,6 +1,10 @@
 # Bundlebase
 
-Like Docker, but for data.
+Like Docker, but for data — and built so an AI agent can query it correctly.
+
+Hand an agent a CSV and it writes SQL that looks right. A schema says a column is called `amt` and holds a number; it doesn't say the value is net of refunds, or what your company means by "revenue". A bundle carries that context with the data: what each column means, how your metrics are defined, where every row came from, and every transformation applied. Serve it over MCP and an agent reads all of it in one call.
+
+The same bundle works for people — Python, the CLI, or any BI tool over Arrow Flight SQL.
 
 **[Documentation](https://nvoxland.github.io/bundlebase/)** |
 [PyPI](https://pypi.org/project/bundlebase/) |
@@ -8,11 +12,13 @@ Like Docker, but for data.
 
 ## Features
 
-- **Multiple Formats**: Support for Parquet, CSV, JSON, and more
+- **Agent-native**: MCP server with `describe`, `analyze`, `data_quality`, and `metric` tools. `bundlebase setup-agent` writes the config
+- **Semantic layer**: Column descriptions and named metrics travel in the bundle, so everyone (and every agent) computes a number the same way
+- **Self-describing**: Schema, provenance, transformation record, and commit history live with the data
 - **Version Control**: Built-in commit system for data pipeline versioning
-- **Python Native**: Seamless async/sync Python API with type hints
-- **High Performance**: Rust-powered core with Apache Arrow columnar format
-- **Fluent API**: Chain operations with intuitive, readable syntax
+- **Multiple Formats**: Parquet, CSV, JSONL, and more, from local files, S3, HTTP, or SFTP
+- **Python Native**: Async and sync APIs with type hints
+- **High Performance**: Rust core with Apache Arrow columnar format, streaming execution
 
 ## Installation
 
