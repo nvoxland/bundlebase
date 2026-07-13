@@ -30,7 +30,7 @@ After setup, your assistant has these tools available whenever it works with a b
 | `open_bundle` / `create_bundle` / `close_bundle` | Open, create, or close a bundle by path |
 | `describe` | Full self-description: name, description, schema (with column descriptions), named metrics, data provenance, transformation record, lineage, and history -- the best first call so queries reflect what the data actually is |
 | `analyze` | One-shot orientation: `describe` plus a small data sample, together |
-| `data_quality` | Per-column null counts/rates and distinct counts, with all-null / constant flags |
+| `data_quality` | Per-column null counts/rates and distinct counts, with all-null / constant flags — plus a `suggested_cast` for text columns that really hold numbers or dates |
 | `metric` | Compute a bundle-defined named metric by name (optionally grouped by dimensions) using the author's canonical definition, so the number matches ground truth |
 | `status` | Bundle status including uncommitted changes |
 | `schema` | Column names and types |

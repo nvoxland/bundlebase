@@ -391,8 +391,12 @@ impl BundlebaseMcpServer {
 
     #[tool(
         name = "data_quality",
-        description = "Automated data-quality report: per-column null counts/rates and distinct \
-                       counts, with all-null and constant flags. Computed in a single scan."
+        description = "Automated data-quality report: per-column null counts/rates, distinct \
+                       counts, all-null/constant flags, and -- for text columns -- a \
+                       `suggested_cast` when every value is really a number or a date. \
+                       CSV/TSV/JSONL columns all import as text (Utf8), and comparing text \
+                       numerically compares lexicographically (\"9\" > \"50\") with NO error, so \
+                       call this before writing numeric or date SQL over a text column."
     )]
     async fn data_quality(
         &self,
@@ -433,7 +437,10 @@ impl BundlebaseMcpServer {
 
     #[tool(
         name = "schema",
-        description = "Get a bundle's column schema including column names, data types, and nullability."
+        description = "Get a bundle's column schema including column names, data types, and \
+                       nullability. Note: CSV/TSV/JSONL columns always import as text (Utf8) even \
+                       when they hold numbers or dates -- if you see Utf8 columns, call \
+                       `data_quality` for suggested casts before writing numeric or date SQL."
     )]
     async fn schema(
         &self,

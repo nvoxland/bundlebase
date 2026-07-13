@@ -1575,6 +1575,37 @@ impl Bundle {
     }
 }
 
+/// Augment a query error with a remedy when it's caused by the CSV/JSONL
+/// all-Utf8 footgun. Bundlebase imports CSV/TSV/JSONL columns as text (Utf8),
+/// so numeric/temporal functions and operators over such a column fail at plan
+/// time with a raw DataFusion type-signature error that offers no fix. When we
+/// recognize that shape, we keep the original error and append actionable CAST
+/// guidance; otherwise the error passes through unchanged.
+fn add_utf8_cast_hint(err: datafusion::error::DataFusionError) -> BundlebaseError {
+    let msg = err.to_string();
+    let mentions_text = msg.contains("Utf8") || msg.contains("received String");
+    // Only decorate genuine type-mismatch/coercion errors, not every error that
+    // happens to mention a text value (e.g. a "column not found" naming a Utf8 col).
+    let is_type_mismatch = msg.contains("signature")
+        || msg.contains("coerc")
+        || msg.contains("No function matches")
+        || msg.contains("argument types")
+        || msg.contains("explicit type cast")
+        || msg.contains("Cannot cast")
+        || msg.contains("arithmetic");
+    if mentions_text && is_type_mismatch {
+        BundlebaseError::from(format!(
+            "{msg}\n\nHint: Bundlebase imports CSV, TSV, and JSONL columns as text (Utf8), so \
+             numeric and date operations fail until the column is cast. If this column holds \
+             numbers or dates, cast it first:\n  \
+             • CAST COLUMN <name> TO <TYPE>   — changes the column in the bundle (e.g. CAST COLUMN amount TO DOUBLE)\n  \
+             • CAST(<expr> AS <TYPE>)         — a one-off cast inside this query"
+        ))
+    } else {
+        err.into()
+    }
+}
+
 #[async_trait]
 impl BundleFacade for Bundle {
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1739,20 +1770,30 @@ impl BundleFacade for Bundle {
         // pushdown via the BundleSchema; functions need this explicit pass
         // because DataFusion's analyzer sees them before our hooks fire.
         let sql = self.translate_function_names(sql);
-        let plan = ctx.state().create_logical_plan(&sql).await?;
+        let plan = ctx
+            .state()
+            .create_logical_plan(&sql)
+            .await
+            .map_err(add_utf8_cast_hint)?;
 
         // Apply parameter values using DataFusion's native binding
         let plan = plan.with_param_values(params)?;
 
         // Execute the parameterized plan
-        let mut result_df = ctx.execute_logical_plan(plan).await?;
+        let mut result_df = ctx
+            .execute_logical_plan(plan)
+            .await
+            .map_err(add_utf8_cast_hint)?;
 
         // Apply hard row limit if specified (DataFusion optimizes this in the physical plan)
         if let Some(n) = hard_limit {
             result_df = result_df.limit(0, Some(n))?;
         }
 
-        Ok(result_df.execute_stream().await?)
+        result_df
+            .execute_stream()
+            .await
+            .map_err(add_utf8_cast_hint)
     }
 
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {

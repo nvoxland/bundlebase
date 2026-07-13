@@ -173,22 +173,54 @@ pub async fn get_analyze(bundle: &Arc<dyn BundleFacade>, sample_limit: usize) ->
     serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
 }
 
+/// Where each column's aggregates land in the single-scan result row.
+struct ColSlots {
+    name: String,
+    is_text: bool,
+    non_null: usize,
+    distinct: usize,
+    /// Text-only probes: how many non-null values parse cleanly as each type,
+    /// plus a count of zero-padded values (e.g. "007") that must NOT be cast.
+    as_int: Option<usize>,
+    as_float: Option<usize>,
+    as_date: Option<usize>,
+    zero_padded: Option<usize>,
+}
+
 /// Automated data-quality report: per-column null counts/rates and distinct
-/// counts, with flags an agent can act on (all-null, constant). Computed in a
-/// single aggregate scan of the bundle.
+/// counts, with flags an agent can act on (all-null, constant).
+///
+/// For text columns this also answers the question the CSV/JSONL all-Utf8
+/// import raises: *is this text actually a number or a date?* Every CSV/TSV/
+/// JSONL column arrives as Utf8, and a numeric comparison on text compares
+/// lexicographically ("9" > "50") — wrong, and silently so, with no error to
+/// catch it. We probe each text column with TRY_CAST over the same scan (so it
+/// costs nothing extra) and, when *every* non-null value parses as one type,
+/// report a `suggested_cast` so an agent casts before it filters or aggregates.
+///
+/// Zero-padded values ("007", zip codes) are detected and suppress a numeric
+/// suggestion: casting them to a number silently destroys the padding.
 pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     use futures::StreamExt;
 
     let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
-    // Real column names, skipping the empty-bundle sentinel.
-    let col_names: Vec<String> = schema
+    // Real columns (name, is_text), skipping the empty-bundle sentinel.
+    let cols: Vec<(String, bool)> = schema
         .fields()
         .iter()
-        .map(|f| f.name().to_string())
-        .filter(|n| n != "no_data")
+        .filter(|f| f.name() != "no_data")
+        .map(|f| {
+            let is_text = matches!(
+                f.data_type(),
+                arrow::datatypes::DataType::Utf8
+                    | arrow::datatypes::DataType::LargeUtf8
+                    | arrow::datatypes::DataType::Utf8View
+            );
+            (f.name().to_string(), is_text)
+        })
         .collect();
 
-    if col_names.is_empty() {
+    if cols.is_empty() {
         return serde_json::to_string_pretty(&json!({
             "total_rows": 0,
             "columns": [],
@@ -198,13 +230,58 @@ pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, 
 
     // Quote a column name for SQL (double-quote, escape internal quotes).
     let q = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
-    // Position-indexed aliases avoid any collision with real column names.
+
+    // DataFusion's expression naming is transparent to casts: COUNT(TRY_CAST(x AS t))
+    // and COUNT(x) both auto-name to `count(x)`, so several probes over one column
+    // collide as "duplicate unqualified field name". Project the casts into a
+    // subquery as distinctly *aliased* columns and aggregate those instead.
+    let mut inner: Vec<String> = Vec::new();
     let mut selects = vec!["COUNT(*) AS c_total".to_string()];
-    for (i, name) in col_names.iter().enumerate() {
-        selects.push(format!("COUNT({}) AS c{}_nn", q(name), i));
-        selects.push(format!("COUNT(DISTINCT {}) AS c{}_dc", q(name), i));
+    let mut slot = 1usize;
+    let mut next = |selects: &mut Vec<String>, expr: String| -> usize {
+        selects.push(expr);
+        let s = slot;
+        slot += 1;
+        s
+    };
+
+    let mut layout: Vec<ColSlots> = Vec::with_capacity(cols.len());
+    for (i, (name, is_text)) in cols.iter().enumerate() {
+        inner.push(format!("{} AS c{}", q(name), i));
+        let non_null = next(&mut selects, format!("COUNT(c{}) AS c{}_nn", i, i));
+        let distinct = next(&mut selects, format!("COUNT(DISTINCT c{}) AS c{}_dc", i, i));
+        let (mut as_int, mut as_float, mut as_date, mut zero_padded) = (None, None, None, None);
+        if *is_text {
+            inner.push(format!("TRY_CAST({} AS BIGINT) AS c{}_i", q(name), i));
+            inner.push(format!("TRY_CAST({} AS DOUBLE) AS c{}_f", q(name), i));
+            inner.push(format!("TRY_CAST({} AS DATE) AS c{}_d", q(name), i));
+            // '0' followed by a digit — "007", "01234". Not "0.5", a real number.
+            inner.push(format!(
+                "CASE WHEN regexp_like({}, '^0[0-9]') THEN 1 END AS c{}_z",
+                q(name),
+                i
+            ));
+            as_int = Some(next(&mut selects, format!("COUNT(c{}_i) AS c{}_ci", i, i)));
+            as_float = Some(next(&mut selects, format!("COUNT(c{}_f) AS c{}_cf", i, i)));
+            as_date = Some(next(&mut selects, format!("COUNT(c{}_d) AS c{}_cd", i, i)));
+            zero_padded = Some(next(&mut selects, format!("COUNT(c{}_z) AS c{}_cz", i, i)));
+        }
+        layout.push(ColSlots {
+            name: name.clone(),
+            is_text: *is_text,
+            non_null,
+            distinct,
+            as_int,
+            as_float,
+            as_date,
+            zero_padded,
+        });
     }
-    let sql = format!("SELECT {} FROM bundle", selects.join(", "));
+    let sql = format!(
+        "SELECT {} FROM (SELECT {} FROM bundle)",
+        selects.join(", "),
+        inner.join(", ")
+    );
 
     let mut stream = bundle
         .query(&sql, vec![], None)
@@ -230,26 +307,51 @@ pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, 
     };
     let total = read_i64(0);
 
-    let columns: Vec<serde_json::Value> = col_names
+    let columns: Vec<serde_json::Value> = layout
         .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            let non_null = read_i64(1 + i * 2);
-            let distinct = read_i64(2 + i * 2);
+        .map(|c| {
+            let non_null = read_i64(c.non_null);
+            let distinct = read_i64(c.distinct);
             let null_count = total - non_null;
             let null_rate = if total > 0 {
                 Some((null_count as f64) / (total as f64))
             } else {
                 None
             };
+
+            // Suggest a cast only when EVERY non-null value parses as that type.
+            let suggested_cast: Option<&str> = if c.is_text && non_null > 0 {
+                let all = |slot: Option<usize>| slot.map(read_i64).unwrap_or(0) == non_null;
+                let padded = c.zero_padded.map(read_i64).unwrap_or(0) > 0;
+                if !padded && all(c.as_int) {
+                    Some("BIGINT")
+                } else if !padded && all(c.as_float) {
+                    Some("DOUBLE")
+                } else if all(c.as_date) {
+                    Some("DATE")
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             json!({
-                "name": name,
+                "name": c.name,
                 "non_null": non_null,
                 "null_count": null_count,
                 "null_rate": null_rate,
                 "distinct": distinct,
                 "all_null": non_null == 0 && total > 0,
                 "constant": non_null > 0 && distinct == 1,
+                "suggested_cast": suggested_cast,
+                "cast_hint": suggested_cast.map(|t| format!(
+                    "Stored as text, but every value parses as {t}. Comparing text \
+                     numerically compares lexicographically (\"9\" > \"50\"), which is \
+                     silently wrong, and aggregates like SUM fail outright. Cast before \
+                     filtering or aggregating: CAST COLUMN {} TO {t}",
+                    q(&c.name)
+                )),
             })
         })
         .collect();
@@ -729,6 +831,76 @@ mod tests {
             serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
         assert_eq!(json["total_rows"], 0);
         assert!(json["columns"].as_array().expect("columns").is_empty());
+    }
+
+    /// Every CSV column imports as text. data_quality must tell an agent which
+    /// of those text columns are really numbers/dates, so it casts instead of
+    /// silently comparing lexicographically.
+    #[tokio::test]
+    async fn test_data_quality_suggests_casts_for_text_columns() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(
+                bundlebase::test_utils::test_datafile("customers-0-100.csv"),
+                None,
+            )
+            .await
+            .expect("attach");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
+        let cols = json["columns"].as_array().expect("columns");
+        let col = |n: &str| cols.iter().find(|c| c["name"] == n).expect("column present");
+
+        // Numeric-looking text -> suggest an integer cast, with an actionable hint.
+        assert_eq!(col("Index")["suggested_cast"], "BIGINT");
+        assert!(
+            col("Index")["cast_hint"]
+                .as_str()
+                .expect("hint")
+                .contains("CAST COLUMN"),
+            "hint must give the remedy"
+        );
+
+        // ISO dates -> suggest DATE.
+        assert_eq!(col("Subscription Date")["suggested_cast"], "DATE");
+
+        // Genuinely-textual columns get no suggestion.
+        assert!(col("Customer Id")["suggested_cast"].is_null());
+        assert!(col("First Name")["suggested_cast"].is_null());
+    }
+
+    /// Zero-padded values ("007") parse as integers but must NOT be suggested for
+    /// a numeric cast -- casting would silently destroy the padding.
+    #[tokio::test]
+    async fn test_data_quality_does_not_suggest_cast_for_zero_padded() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(
+                bundlebase::test_utils::test_datafile("zero-padded.csv"),
+                None,
+            )
+            .await
+            .expect("attach");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
+        let cols = json["columns"].as_array().expect("columns");
+        let col = |n: &str| cols.iter().find(|c| c["name"] == n).expect("column present");
+
+        // "007"/"012" would cast cleanly to BIGINT -- but the padding is meaningful.
+        assert!(
+            col("code")["suggested_cast"].is_null(),
+            "zero-padded identifiers must not be suggested for a numeric cast"
+        );
+        // A genuine decimal column is still suggested.
+        assert_eq!(col("amount")["suggested_cast"], "DOUBLE");
     }
 
     #[tokio::test]

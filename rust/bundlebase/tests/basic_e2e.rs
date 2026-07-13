@@ -602,3 +602,37 @@ async fn test_upgrade_bundle_fixes_too_old_bundle() -> Result<(), BundlebaseErro
     assert!(loaded.num_rows().await? > 0);
     Ok(())
 }
+
+/// The CSV/JSONL all-Utf8 footgun: aggregating a numeric-looking text column
+/// fails at planning. The raw DataFusion signature error is cryptic and gives
+/// no remedy, so we augment it to point the user/agent at CAST COLUMN.
+#[tokio::test]
+async fn test_utf8_aggregate_error_suggests_cast() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    // "Index" is a numeric-looking column, imported as text (Utf8) like all CSV columns.
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+
+    // Not expect_err: the Ok type (a stream) isn't Debug.
+    let err = match bundle
+        .query(r#"SELECT SUM("Index") AS s FROM bundle"#, vec![], None)
+        .await
+    {
+        Ok(_) => panic!("SUM over a Utf8 column must fail"),
+        Err(e) => e,
+    };
+
+    let msg = err.to_string();
+    // The original type error is preserved...
+    assert!(
+        msg.contains("Utf8") || msg.contains("String"),
+        "original type error should be preserved, got: {msg}"
+    );
+    // ...and an actionable remedy is appended.
+    assert!(
+        msg.contains("CAST COLUMN"),
+        "error must point at CAST COLUMN, got: {msg}"
+    );
+    Ok(())
+}

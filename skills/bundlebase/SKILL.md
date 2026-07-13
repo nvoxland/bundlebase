@@ -465,6 +465,25 @@ mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price 
 
 ## Data Quality Checks
 
+### CSV/TSV/JSONL columns are ALWAYS text — check before doing math on them
+
+Bundlebase imports every CSV, TSV, and JSONL column as text (`Utf8`), even when it holds numbers or dates. It does not infer types, because inferring from a sample silently corrupts the later rows that don't match. Two consequences you must plan for:
+
+- `SUM(amount)` on a text column **fails loudly** with a type error.
+- `WHERE amount > 100` **does not fail** — it compares *lexicographically* (`"9" > "50"` is true), silently returning the wrong rows. There is no error to catch this.
+
+So before writing any numeric or date SQL over a text column, find out which text columns are really numbers or dates:
+
+```
+# Reports a suggested_cast for each text column whose values ALL parse as a number/date
+mcp__bundlebase__data_quality(bundle="data")
+
+# Then persist the cast, so every future query on this bundle is correct
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN amount TO DOUBLE")
+```
+
+`data_quality` deliberately suggests no cast for zero-padded values like `007` — casting those to a number would destroy the padding.
+
 **Always profile columns before casting them.** This reveals dirty data, sentinel values, NULLs, and type mismatches that would cause CAST failures.
 
 ```
