@@ -1,6 +1,6 @@
 ---
 title: Bundlebase for AI Assistant Users — Query Bundles in Natural Language
-description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Set up the MCP server and your assistant gets schema, history, sample, and query as native tools.
+description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Set up the MCP server and your assistant gets describe, schema, history, sample, and query as native tools.
 ---
 
 # Use Case: AI Assistant User
@@ -28,6 +28,7 @@ After setup, your assistant has these tools available whenever it works with a b
 | Tool | What it does |
 |------|-------------|
 | `open_bundle` / `create_bundle` / `close_bundle` | Open, create, or close a bundle by path |
+| `describe` | Full self-description: name, description, schema, data provenance, transformation record, lineage, and history -- the best first call so queries reflect what the data actually is |
 | `status` | Bundle status including uncommitted changes |
 | `schema` | Column names and types |
 | `count` | Total row count |

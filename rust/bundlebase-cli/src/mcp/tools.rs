@@ -60,6 +60,73 @@ pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
     serde_json::to_string_pretty(&columns).map_err(|e| format!("JSON error: {}", e))
 }
 
+/// Assemble a bundle's full self-description into one agent-facing JSON blob:
+/// name, description, lineage, provenance (sources), the transformation record,
+/// commit history, and the column schema. An agent that reads this before
+/// writing SQL is far less likely to hallucinate — it sees what the data *is*,
+/// where it came from, and how it was shaped, not just column names/types.
+pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
+    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
+    let columns: Vec<serde_json::Value> = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            json!({
+                "name": f.name(),
+                "type": format!("{}", f.data_type()),
+                "nullable": f.is_nullable(),
+            })
+        })
+        .collect();
+
+    let row_count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
+
+    // Provenance: where each source's data came from.
+    let sources: Vec<serde_json::Value> = bundle
+        .sources()
+        .values()
+        .map(|s| {
+            json!({
+                "connector": s.connector(),
+                "args": s.args(),
+                "file_count": s.attached_files().len(),
+            })
+        })
+        .collect();
+
+    // The transformation record — how the data was shaped, in order.
+    let transformations: Vec<String> =
+        bundle.operations().iter().map(|op| op.to_string()).collect();
+
+    let history = bundle.history();
+    let latest_commit = history.last().map(|c| {
+        json!({
+            "message": c.message,
+            "author": c.author,
+            "timestamp": c.timestamp,
+        })
+    });
+
+    let result = json!({
+        "id": bundle.id(),
+        "name": bundle.name(),
+        "description": bundle.description(),
+        "version": bundle.version(),
+        "url": bundle.url().to_string(),
+        "extended_from": bundle.from().map(|u| u.to_string()),
+        "row_count": row_count,
+        "columns": columns,
+        "sources": sources,
+        "transformations": transformations,
+        "history": {
+            "commit_count": history.len(),
+            "latest_commit": latest_commit,
+        },
+    });
+
+    serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
+}
+
 /// Get the row count as a JSON string.
 pub async fn get_count(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
@@ -255,6 +322,62 @@ mod tests {
         // Empty bundle has a sentinel no_data field
         assert_eq!(json.len(), 1);
         assert_eq!(json[0]["name"], "no_data");
+    }
+
+    #[tokio::test]
+    async fn test_get_describe_assembles_self_description() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        // Downcast to the builder so we can set name/description + attach data.
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("test bundle is a builder");
+        builder.set_name("Sales").await.expect("set name");
+        builder
+            .set_description("Monthly sales extract")
+            .await
+            .expect("set description");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &get_describe(&bundle).await.expect("describe should succeed"),
+        )
+        .expect("valid JSON");
+
+        assert_eq!(json["name"], "Sales");
+        assert_eq!(json["description"], "Monthly sales extract");
+        assert!(json["version"].is_string());
+        assert!(
+            json["row_count"].as_u64().expect("row_count") > 0,
+            "attached data should be counted"
+        );
+        assert!(
+            json["columns"].as_array().expect("columns").len() > 1,
+            "schema columns must be listed"
+        );
+        // The ATTACH is part of the transformation record.
+        let transforms = json["transformations"].as_array().expect("transformations");
+        assert!(
+            transforms.iter().any(|t| t.as_str().unwrap_or("").contains("ATTACH")),
+            "transformation record must include the ATTACH, got: {transforms:?}"
+        );
+        assert!(json["history"]["commit_count"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_get_describe_empty_bundle() {
+        let bundle = create_test_bundle().await;
+        let json: serde_json::Value =
+            serde_json::from_str(&get_describe(&bundle).await.expect("describe")).expect("json");
+        // Empty bundle: no name/description, no sources, zero rows — but valid.
+        assert_eq!(json["row_count"], 0);
+        assert!(json["sources"].as_array().expect("sources").is_empty());
+        assert!(json["name"].is_null());
     }
 
     #[tokio::test]

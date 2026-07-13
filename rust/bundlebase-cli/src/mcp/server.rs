@@ -324,6 +324,27 @@ impl BundlebaseMcpServer {
     }
 
     #[tool(
+        name = "describe",
+        description = "Get a bundle's full self-description: name, description, column schema, \
+                       data provenance (where each source came from), the transformation record \
+                       (how the data was shaped), lineage, and commit history. Call this before \
+                       writing SQL so queries reflect what the data actually is."
+    )]
+    async fn describe(
+        &self,
+        Parameters(params): Parameters<BundleKeyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(b) => b,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        match tools::get_describe(&bundle).await {
+            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+        }
+    }
+
+    #[tool(
         name = "schema",
         description = "Get a bundle's column schema including column names, data types, and nullability."
     )]
