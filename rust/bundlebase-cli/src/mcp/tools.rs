@@ -45,14 +45,21 @@ pub async fn execute_query(bundle: &Arc<dyn BundleFacade>, sql: &str) -> Result<
 pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
 
+    let descriptions = bundle.column_descriptions();
     let columns: Vec<serde_json::Value> = schema
         .fields()
         .iter()
         .map(|f| {
+            // Column descriptions (from DESCRIBE COLUMN) give an agent the
+            // semantic context that makes its SQL trustworthy.
+            let description = bundle
+                .column_id(f.name())
+                .and_then(|id| descriptions.get(&id).cloned());
             json!({
                 "name": f.name(),
                 "type": format!("{}", f.data_type()),
                 "nullable": f.is_nullable(),
+                "description": description,
             })
         })
         .collect();
@@ -67,14 +74,21 @@ pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
 /// where it came from, and how it was shaped, not just column names/types.
 pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
+    let descriptions = bundle.column_descriptions();
     let columns: Vec<serde_json::Value> = schema
         .fields()
         .iter()
         .map(|f| {
+            // Column descriptions (from DESCRIBE COLUMN) give an agent the
+            // semantic context that makes its SQL trustworthy.
+            let description = bundle
+                .column_id(f.name())
+                .and_then(|id| descriptions.get(&id).cloned());
             json!({
                 "name": f.name(),
                 "type": format!("{}", f.data_type()),
                 "nullable": f.is_nullable(),
+                "description": description,
             })
         })
         .collect();
@@ -367,6 +381,53 @@ mod tests {
             "transformation record must include the ATTACH, got: {transforms:?}"
         );
         assert!(json["history"]["commit_count"].is_number());
+    }
+
+    #[tokio::test]
+    async fn test_column_descriptions_surface_in_schema_and_describe() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+
+        // Set a column description via the SQL command through the MCP query path.
+        execute_query(&bundle, "DESCRIBE COLUMN salary AS 'annual gross pay in USD'")
+            .await
+            .expect("describe column");
+
+        // schema tool surfaces it.
+        let schema: Vec<serde_json::Value> =
+            serde_json::from_str(&get_schema(&bundle).await.expect("schema")).expect("json");
+        let salary = schema
+            .iter()
+            .find(|c| c["name"] == "salary")
+            .expect("salary column");
+        assert_eq!(salary["description"], "annual gross pay in USD");
+
+        // describe tool surfaces it too.
+        let desc: serde_json::Value =
+            serde_json::from_str(&get_describe(&bundle).await.expect("describe")).expect("json");
+        let salary_d = desc["columns"]
+            .as_array()
+            .expect("columns")
+            .iter()
+            .find(|c| c["name"] == "salary")
+            .expect("salary");
+        assert_eq!(salary_d["description"], "annual gross pay in USD");
+
+        // A column with no description reports null.
+        let other = schema
+            .iter()
+            .find(|c| c["name"] != "salary")
+            .expect("another column");
+        assert!(other["description"].is_null());
     }
 
     #[tokio::test]

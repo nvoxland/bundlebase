@@ -62,6 +62,19 @@ pub trait BundleFacade: Send + Sync {
         self.bundle_schema().column_name(id)
     }
 
+    /// Resolve column descriptions (from `DescribeColumn` operations) keyed by
+    /// `ColumnId`, last-write-wins. Descriptions are metadata replayed from the
+    /// operation list, so this reflects the current committed + in-session state.
+    fn column_descriptions(&self) -> HashMap<ColumnId, String> {
+        let mut out = HashMap::new();
+        for op in self.operations() {
+            if let AnyOperation::DescribeColumn(d) = op {
+                out.insert(d.id, d.description);
+            }
+        }
+        out
+    }
+
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
 
     /// Returns the schema with internal column names instead of user-visible names.

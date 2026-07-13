@@ -358,6 +358,19 @@ RENAME COLUMN <old_name> TO <new_name>
 
 See [Columns](../guide/columns.md) for details.
 
+### DESCRIBE COLUMN
+
+Attaches a human/agent-readable description to a column. The description is
+metadata — it travels with the bundle (persisted in the manifest, keyed to the
+column so it survives renames) and is surfaced to AI assistants via the MCP
+`describe`/`schema` tools, giving an agent the semantic context that makes its
+SQL trustworthy. A later `DESCRIBE COLUMN` on the same column replaces the
+earlier description.
+
+```sql
+DESCRIBE COLUMN <name> AS '<description>'
+```
+
 ### ADD COLUMN
 
 Adds a computed column defined by a SQL expression. The expression can reference existing columns.

@@ -20,6 +20,7 @@ impl PyOperation {
             AnyOperation::CreateView(_) => "CreateView".to_string(),
             AnyOperation::DropColumn(_) => "dropColumn".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
+            AnyOperation::DescribeColumn(_) => "describeColumn".to_string(),
             AnyOperation::RenameJoin(_) => "renameJoin".to_string(),
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),

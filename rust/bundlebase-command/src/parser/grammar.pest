@@ -73,6 +73,7 @@ schema_stmt = {
     | drop_join_stmt
     | rename_join_stmt
     | drop_column_stmt
+    | describe_column_stmt
     | rename_column_stmt
     | drop_cast_column_stmt
     | cast_column_stmt
@@ -886,6 +887,10 @@ drop_column_stmt = {
 
 rename_column_stmt = {
     ^"rename" ~ ^"column" ~ identifier ~ ^"to" ~ identifier
+}
+
+describe_column_stmt = {
+    ^"describe" ~ ^"column" ~ identifier ~ ^"as" ~ quoted_string
 }
 
 // ============================================================================
