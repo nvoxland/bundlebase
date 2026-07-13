@@ -72,3 +72,38 @@ async fn test_column_description_last_write_wins() -> Result<(), BundlebaseError
     );
     Ok(())
 }
+
+/// Metrics (CREATE METRIC) are durable, manifest-carried semantic definitions:
+/// they must survive commit + reopen and resolve last-write-wins by name.
+#[tokio::test]
+async fn test_metric_persists_across_commit_reopen() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder
+        .as_ref()
+        .execute(
+            "CREATE METRIC total_salary AS 'SUM(salary)' DESCRIPTION 'gross payroll'",
+            vec![],
+        )
+        .await?;
+    // Redefine to prove last-write-wins.
+    builder
+        .as_ref()
+        .execute("CREATE METRIC total_salary AS 'SUM(salary) / 1000'", vec![])
+        .await?;
+
+    builder.commit("define metric").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    let metrics = reopened.metrics();
+    let m = metrics
+        .iter()
+        .find(|m| m.name == "total_salary")
+        .expect("metric after reopen");
+    assert_eq!(m.expression, "SUM(salary) / 1000", "last definition must win");
+    // The redefinition dropped the description (a fresh CREATE METRIC).
+    assert_eq!(m.description, None);
+    Ok(())
+}

@@ -108,6 +108,20 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
         })
         .collect();
 
+    // Named metrics — the canonical way to compute the bundle's numbers, so an
+    // agent uses the shared definition rather than inventing its own SUM.
+    let metrics: Vec<serde_json::Value> = bundle
+        .metrics()
+        .into_iter()
+        .map(|m| {
+            json!({
+                "name": m.name,
+                "expression": m.expression,
+                "description": m.description,
+            })
+        })
+        .collect();
+
     // The transformation record — how the data was shaped, in order.
     let transformations: Vec<String> =
         bundle.operations().iter().map(|op| op.to_string()).collect();
@@ -130,6 +144,7 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
         "extended_from": bundle.from().map(|u| u.to_string()),
         "row_count": row_count,
         "columns": columns,
+        "metrics": metrics,
         "sources": sources,
         "transformations": transformations,
         "history": {
@@ -428,6 +443,35 @@ mod tests {
             .find(|c| c["name"] != "salary")
             .expect("another column");
         assert!(other["description"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_metrics_surface_in_describe() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+
+        execute_query(
+            &bundle,
+            "CREATE METRIC avg_salary AS 'AVG(salary)' DESCRIPTION 'mean salary in USD'",
+        )
+        .await
+        .expect("create metric");
+
+        let desc: serde_json::Value =
+            serde_json::from_str(&get_describe(&bundle).await.expect("describe")).expect("json");
+        let metrics = desc["metrics"].as_array().expect("metrics array");
+        let m = metrics
+            .iter()
+            .find(|m| m["name"] == "avg_salary")
+            .expect("avg_salary metric");
+        assert_eq!(m["expression"], "AVG(salary)");
+        assert_eq!(m["description"], "mean salary in USD");
     }
 
     #[tokio::test]

@@ -79,6 +79,7 @@ schema_stmt = {
     | cast_column_stmt
     | add_column_stmt
     | normalize_column_names_stmt
+    | create_metric_stmt
     | create_view_stmt
     | drop_view_stmt
     | rename_view_stmt
@@ -854,6 +855,10 @@ drop_view_stmt = {
 
 create_view_stmt = {
     ^"create" ~ ^"view" ~ identifier ~ ^"as" ~ view_sql
+}
+
+create_metric_stmt = {
+    ^"create" ~ ^"metric" ~ identifier ~ ^"as" ~ quoted_string ~ (^"description" ~ quoted_string)?
 }
 
 view_sql = @{

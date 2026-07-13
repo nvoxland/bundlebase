@@ -429,6 +429,27 @@ CREATE VIEW <name> AS <sql>
 
 See [Views](../guide/views.md) for details.
 
+### CREATE METRIC
+
+Defines a named metric -- a canonical, reusable aggregate expression (a
+*measure*) with an optional description. Unlike a view (a full query), a metric
+is a single expression meant to be composed with different dimensions
+(`GROUP BY region`, `GROUP BY month`, ...). Metrics travel in the bundle and are
+surfaced to AI assistants via the MCP `describe` tool, so an agent computes
+"revenue" from the shared definition instead of inventing its own `SUM`. A later
+`CREATE METRIC` with the same name replaces the earlier one.
+
+```sql
+CREATE METRIC <name> AS '<expression>' [DESCRIPTION '<text>']
+```
+
+Example:
+
+```sql
+CREATE METRIC total_revenue AS 'SUM(amount)' DESCRIPTION 'gross revenue in USD'
+CREATE METRIC avg_order_value AS 'SUM(amount) / COUNT(DISTINCT order_id)'
+```
+
 ### DROP VIEW
 
 Removes a view from the bundle.

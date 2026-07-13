@@ -25,6 +25,7 @@ mod import_connector;
 mod import_function;
 mod index_blocks;
 mod parameter_value;
+mod define_metric;
 mod describe_column;
 mod rename_column;
 mod rename_connector;
@@ -70,6 +71,7 @@ pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::import_connector::ImportConnectorOp;
 pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
+pub use crate::bundle::operation::define_metric::{DefineMetricOp, MetricDefinition};
 pub use crate::bundle::operation::describe_column::DescribeColumnOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_connector::RenameConnectorOp;
@@ -290,6 +292,7 @@ define_any_operation! {
     UpdateData(UpdateDataOp),
     ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),
+    DefineMetric(DefineMetricOp),
     DescribeColumn(DescribeColumnOp),
     DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),

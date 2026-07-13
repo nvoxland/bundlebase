@@ -62,6 +62,36 @@ pub trait BundleFacade: Send + Sync {
         self.bundle_schema().column_name(id)
     }
 
+    /// Resolve the bundle's metrics (from `DefineMetric` operations),
+    /// last-write-wins by name, in definition order. Metrics are metadata
+    /// replayed from the operation list, so this reflects committed +
+    /// in-session state.
+    fn metrics(&self) -> Vec<super::operation::MetricDefinition> {
+        use super::operation::MetricDefinition;
+        let mut by_name: std::collections::HashMap<String, MetricDefinition> =
+            std::collections::HashMap::new();
+        let mut order: Vec<String> = Vec::new();
+        for op in self.operations() {
+            if let AnyOperation::DefineMetric(m) = op {
+                if !by_name.contains_key(&m.name) {
+                    order.push(m.name.clone());
+                }
+                by_name.insert(
+                    m.name.clone(),
+                    MetricDefinition {
+                        name: m.name,
+                        expression: m.expression,
+                        description: m.description,
+                    },
+                );
+            }
+        }
+        order
+            .into_iter()
+            .filter_map(|n| by_name.remove(&n))
+            .collect()
+    }
+
     /// Resolve column descriptions (from `DescribeColumn` operations) keyed by
     /// `ColumnId`, last-write-wins. Descriptions are metadata replayed from the
     /// operation list, so this reflects the current committed + in-session state.
