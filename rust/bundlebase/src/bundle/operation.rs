@@ -18,6 +18,7 @@ mod drop_connector;
 mod drop_function;
 mod drop_index;
 mod drop_join;
+mod drop_metric;
 mod drop_report;
 mod drop_view;
 mod filter;
@@ -73,6 +74,7 @@ pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::define_metric::{DefineMetricOp, MetricDefinition};
 pub use crate::bundle::operation::describe_column::DescribeColumnOp;
+pub use crate::bundle::operation::drop_metric::DropMetricOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_connector::RenameConnectorOp;
 pub use crate::bundle::operation::rename_function::RenameFunctionOp;
@@ -293,6 +295,7 @@ define_any_operation! {
     ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),
     DefineMetric(DefineMetricOp),
+    DropMetric(DropMetricOp),
     DescribeColumn(DescribeColumnOp),
     DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),

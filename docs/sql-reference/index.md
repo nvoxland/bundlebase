@@ -450,6 +450,15 @@ CREATE METRIC total_revenue AS 'SUM(amount)' DESCRIPTION 'gross revenue in USD'
 CREATE METRIC avg_order_value AS 'SUM(amount) / COUNT(DISTINCT order_id)'
 ```
 
+### DROP METRIC
+
+Removes a named metric so it no longer resolves. Dropping a name that was never
+defined is a harmless no-op; a later `CREATE METRIC` with the same name re-adds it.
+
+```sql
+DROP METRIC <name>
+```
+
 ### DROP VIEW
 
 Removes a view from the bundle.

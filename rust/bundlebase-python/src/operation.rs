@@ -22,6 +22,7 @@ impl PyOperation {
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
             AnyOperation::DescribeColumn(_) => "describeColumn".to_string(),
             AnyOperation::DefineMetric(_) => "defineMetric".to_string(),
+            AnyOperation::DropMetric(_) => "dropMetric".to_string(),
             AnyOperation::RenameJoin(_) => "renameJoin".to_string(),
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),

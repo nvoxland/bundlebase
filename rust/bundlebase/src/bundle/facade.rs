@@ -10,7 +10,7 @@ use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
 use crate::object_id::ColumnId;
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
-use arrow_schema::SchemaRef;
+use arrow_schema::{Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use datafusion::dataframe::DataFrame;
@@ -72,18 +72,26 @@ pub trait BundleFacade: Send + Sync {
             std::collections::HashMap::new();
         let mut order: Vec<String> = Vec::new();
         for op in self.operations() {
-            if let AnyOperation::DefineMetric(m) = op {
-                if !by_name.contains_key(&m.name) {
-                    order.push(m.name.clone());
+            match op {
+                AnyOperation::DefineMetric(m) => {
+                    if !by_name.contains_key(&m.name) {
+                        order.push(m.name.clone());
+                    }
+                    by_name.insert(
+                        m.name.clone(),
+                        MetricDefinition {
+                            name: m.name,
+                            expression: m.expression,
+                            description: m.description,
+                        },
+                    );
                 }
-                by_name.insert(
-                    m.name.clone(),
-                    MetricDefinition {
-                        name: m.name,
-                        expression: m.expression,
-                        description: m.description,
-                    },
-                );
+                // A DROP removes the name; a later DEFINE can re-add it (the
+                // trailing filter_map drops any `order` entry no longer present).
+                AnyOperation::DropMetric(d) => {
+                    by_name.remove(&d.name);
+                }
+                _ => {}
             }
         }
         order
@@ -106,6 +114,41 @@ pub trait BundleFacade: Send + Sync {
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
+
+    /// The user-visible schema with column descriptions (from `DescribeColumn`)
+    /// attached as Arrow field metadata under the key `"description"`. This is
+    /// how the semantic layer reaches Arrow/Flight/BI consumers that read field
+    /// metadata — not just MCP agents that read `describe`. When a bundle has no
+    /// column descriptions the schema is returned unchanged (same `Arc`), so
+    /// there is no cost or metadata drift on the common path.
+    async fn described_schema(&self) -> Result<SchemaRef, BundlebaseError> {
+        let schema = self.schema().await?;
+        let descriptions = self.column_descriptions();
+        if descriptions.is_empty() {
+            return Ok(schema);
+        }
+        let fields: Vec<Arc<Field>> = schema
+            .fields()
+            .iter()
+            .map(|f| {
+                match self
+                    .column_id(f.name())
+                    .and_then(|id| descriptions.get(&id))
+                {
+                    Some(desc) => {
+                        let mut metadata = f.metadata().clone();
+                        metadata.insert("description".to_string(), desc.clone());
+                        Arc::new(f.as_ref().clone().with_metadata(metadata))
+                    }
+                    None => f.clone(),
+                }
+            })
+            .collect();
+        Ok(Arc::new(Schema::new_with_metadata(
+            fields,
+            schema.metadata().clone(),
+        )))
+    }
 
     /// Returns the schema with internal column names instead of user-visible names.
     ///

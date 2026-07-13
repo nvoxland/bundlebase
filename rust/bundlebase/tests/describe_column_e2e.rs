@@ -107,3 +107,100 @@ async fn test_metric_persists_across_commit_reopen() -> Result<(), BundlebaseErr
     assert_eq!(m.description, None);
     Ok(())
 }
+
+/// DROP METRIC removes a metric from resolution and the removal persists.
+#[tokio::test]
+async fn test_drop_metric_removes_and_persists() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder
+        .as_ref()
+        .execute("CREATE METRIC total_salary AS 'SUM(salary)'", vec![])
+        .await?;
+    assert_eq!(builder.metrics().len(), 1, "metric defined");
+
+    builder
+        .as_ref()
+        .execute("DROP METRIC total_salary", vec![])
+        .await?;
+    assert!(
+        builder.metrics().is_empty(),
+        "dropped metric must not resolve in-session"
+    );
+
+    builder.commit("define then drop metric").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    assert!(
+        reopened.metrics().is_empty(),
+        "the drop must persist across commit + reopen"
+    );
+    Ok(())
+}
+
+/// A DROP followed by a later DEFINE of the same name re-adds the metric.
+#[tokio::test]
+async fn test_drop_then_redefine_metric() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder
+        .as_ref()
+        .execute("CREATE METRIC total_salary AS 'SUM(salary)'", vec![])
+        .await?;
+    builder
+        .as_ref()
+        .execute("DROP METRIC total_salary", vec![])
+        .await?;
+    builder
+        .as_ref()
+        .execute("CREATE METRIC total_salary AS 'SUM(salary) * 2'", vec![])
+        .await?;
+
+    let metrics = builder.metrics();
+    assert_eq!(metrics.len(), 1, "the re-definition must resolve exactly once");
+    assert_eq!(metrics[0].expression, "SUM(salary) * 2");
+    Ok(())
+}
+
+/// Column descriptions surface as Arrow field metadata via `described_schema`,
+/// so Flight/BI consumers see them, not just MCP agents.
+#[tokio::test]
+async fn test_described_schema_carries_column_descriptions() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .as_ref()
+        .execute("DESCRIBE COLUMN salary AS 'annual gross pay in USD'", vec![])
+        .await?;
+
+    let schema = builder.described_schema().await?;
+    let salary = schema
+        .fields()
+        .iter()
+        .find(|f| f.name() == "salary")
+        .expect("salary field");
+    assert_eq!(
+        salary.metadata().get("description").map(|s| s.as_str()),
+        Some("annual gross pay in USD"),
+        "described_schema must attach the description as field metadata"
+    );
+
+    // A column with no description carries no such metadata key.
+    let other = schema
+        .fields()
+        .iter()
+        .find(|f| f.name() != "salary")
+        .expect("another field");
+    assert!(
+        !other.metadata().contains_key("description"),
+        "undescribed columns must not gain a description key"
+    );
+    Ok(())
+}

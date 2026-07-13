@@ -253,8 +253,10 @@ impl BundlebaseFlightSqlService {
                 .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?
         };
 
-        // Try to get initial bundle schema (may be empty for new bundles)
-        let bundle_schema = state.schema().await.ok().map(|s| (*s).clone().into());
+        // Try to get initial bundle schema (may be empty for new bundles).
+        // described_schema carries column descriptions as Arrow field metadata,
+        // so Flight/BI clients see the semantic layer, not just MCP agents.
+        let bundle_schema = state.described_schema().await.ok().map(|s| (*s).clone().into());
 
         Ok(Session {
             bundle: state,
@@ -288,7 +290,7 @@ impl BundlebaseFlightSqlService {
     /// Refresh the cached bundle schema for a session.
     /// Called after mutations (ATTACH, etc.) that may change the schema.
     async fn refresh_schema_cache(&self, token: &str, bundle: &Arc<dyn BundleFacade>) {
-        if let Ok(schema) = bundle.schema().await {
+        if let Ok(schema) = bundle.described_schema().await {
             if let Some(session) = self.sessions.write().get_mut(token) {
                 session.bundle_schema = Some((*schema).clone().into());
             }
