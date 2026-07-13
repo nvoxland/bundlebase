@@ -228,6 +228,7 @@ mod tests {
             format: bundlebase_cli::OutputFormat::Table,
             message: None,
             config: None,
+            exists_ok: false,
         })
         .await
         .unwrap_err();
@@ -262,12 +263,95 @@ mod tests {
             format: bundlebase_cli::OutputFormat::Table,
             message: None,
             config: None,
+            exists_ok: false,
         })
         .await;
 
         assert!(
             result.is_ok(),
             "Expected create to succeed, got: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_exists_ok_opens_existing() {
+        init();
+        let url = format!(
+            "memory:///create_exists_ok_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+        let datafile = bundlebase::test_utils::test_datafile("userdata.parquet");
+
+        // First create: attach data and auto-commit, so a committed bundle exists.
+        create_cmd::run(create_cmd::CreateArgs {
+            bundle: url.clone(),
+            sql: Some(format!("ATTACH '{}'", datafile)),
+            format: bundlebase_cli::OutputFormat::Table,
+            message: None,
+            config: None,
+            exists_ok: false,
+        })
+        .await
+        .expect("initial create should succeed");
+
+        // Second create WITH --exists-ok against the same path: must not error, and
+        // must apply its command to the *existing* bundle (create-or-open), not a
+        // fresh one. This is the idempotency an agent relies on across CLI calls.
+        create_cmd::run(create_cmd::CreateArgs {
+            bundle: url.clone(),
+            sql: Some("DESCRIBE COLUMN salary AS 'annual pay'".to_string()),
+            format: bundlebase_cli::OutputFormat::Table,
+            message: None,
+            config: None,
+            exists_ok: true,
+        })
+        .await
+        .expect("create --exists-ok on an existing bundle should open it, not error");
+
+        // The bundle still has the attached data (proving it was opened, not
+        // recreated empty) and carries the second command's effect.
+        let bundle = Bundle::open(&url, None).await.expect("reopen");
+        let salary_id = bundle
+            .column_id("salary")
+            .expect("salary column present — bundle was opened, not recreated empty");
+        assert_eq!(
+            bundle
+                .column_descriptions()
+                .get(&salary_id)
+                .map(|s| s.as_str()),
+            Some("annual pay"),
+            "the --exists-ok command must apply to the existing bundle"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_exists_ok_creates_when_absent() {
+        init();
+        let url = format!(
+            "memory:///create_exists_ok_absent_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+
+        // --exists-ok on a path with no bundle behaves like a plain create.
+        let result = create_cmd::run(create_cmd::CreateArgs {
+            bundle: url,
+            sql: None,
+            format: bundlebase_cli::OutputFormat::Table,
+            message: None,
+            config: None,
+            exists_ok: true,
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "create --exists-ok on an absent bundle should create it, got: {:?}",
             result.err()
         );
     }

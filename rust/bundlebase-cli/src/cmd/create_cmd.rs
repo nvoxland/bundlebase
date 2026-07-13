@@ -4,7 +4,7 @@
 //! commands (like ATTACH) and auto-commits.
 
 use super::{auto_commit_message, load_config};
-use bundlebase::{BundleBuilder, BundleFacade};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade};
 use bundlebase_cli::OutputFormat;
 use bundlebase_common::BundlebaseError;
 use clap::Args;
@@ -32,21 +32,38 @@ pub struct CreateArgs {
     /// Path to a YAML or JSON config file
     #[arg(long)]
     pub config: Option<String>,
+
+    /// Don't error if a bundle already exists at the path — open and extend it
+    /// instead. Makes `create` idempotent, so an agent can run it on every step
+    /// of a multi-call workflow without tracking whether the bundle exists yet.
+    #[arg(long)]
+    pub exists_ok: bool,
 }
 
 pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
-    let state: Arc<dyn BundleFacade> = match BundleBuilder::create(&args.bundle, config).await {
+    let state: Arc<dyn BundleFacade> = match BundleBuilder::create(&args.bundle, config.clone()).await
+    {
         Ok(builder) => builder,
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("A bundle already exists") {
-                return Err(format!(
-                    "A bundle already exists at '{}'. To modify an existing bundle, use 'bundlebase extend' instead.",
-                    args.bundle
-                ).into());
+                if args.exists_ok {
+                    // Create-or-open: the bundle is already there, so open and
+                    // extend it in place and apply the command against it.
+                    Bundle::open(&args.bundle, config)
+                        .await?
+                        .extend(None)
+                        .await?
+                } else {
+                    return Err(format!(
+                        "A bundle already exists at '{}'. To modify an existing bundle, use 'bundlebase extend' instead, or pass --exists-ok to open it here.",
+                        args.bundle
+                    ).into());
+                }
+            } else {
+                return Err(e);
             }
-            return Err(e);
         }
     };
 

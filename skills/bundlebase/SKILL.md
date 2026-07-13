@@ -153,8 +153,17 @@ bundlebase create --bundle ./analysis -m "Loaded sales data" "SET NAME 'Sales An
 |------|---------|
 | `--bundle <path>` | Path for the new bundle (local path or `s3://...`) |
 | `-m, --message` | Commit message (auto-generated if omitted) |
+| `--exists-ok` | If a bundle already exists at the path, open and extend it instead of erroring |
 | `--format json` | JSON output (default: `table`) |
 | `--config <path>` | YAML/JSON config file |
+
+**Idempotent create-or-open (`--exists-ok`):** By default `create` errors if a bundle already exists, so you don't silently append to the wrong one. When you're scripting a multi-step workflow and don't want to track whether the bundle exists yet, add `--exists-ok`: the first call creates it, and later calls open and extend it. Each call still auto-commits its changes.
+
+```bash
+# Safe to run on every step — creates the first time, extends thereafter:
+bundlebase create --bundle ./sales --exists-ok "SET NAME 'Sales'; CREATE SOURCE ..."
+bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"
+```
 
 ### `bundlebase extend` — Mutating commands (auto-commits)
 
