@@ -139,13 +139,26 @@ The same `NO INDEX` flag is available on `FETCH` and `FETCH ALL`.
 
 **Parquet files** retain their native types since the schema is embedded in the file.
 
-!!! warning "Text columns compare lexicographically"
-    Until you cast, predicates on numeric-looking text columns compare as
-    strings: `WHERE id >= 0 AND id < 10` on a text `id` column matches only
-    `'0'` and `'1'` (the strings that sort between `'0'` and `'10'`), not
-    the numbers 0 through 9. Cast first, and use
-    `PROFILE COLUMN id FOR CAST TO integer` to check that every value
-    converts cleanly.
+!!! warning "Doing math on a text column fails until you cast"
+    A text column that holds numbers will not behave like a number, and
+    bundlebase does not let it fail silently:
+
+    - **Aggregates fail.** `SUM(amount)` on a text column raises a type
+      error telling you to cast.
+    - **Ordering comparisons are rejected.** `WHERE amount > 100` is refused,
+      because SQL would otherwise compare the values *lexicographically*
+      (`'9' > '50'` is true) and quietly return the wrong rows. Cast to
+      compare numerically (`WHERE CAST(amount AS DOUBLE) > 100`), or quote
+      the value to compare as text on purpose (`WHERE amount > '100'`).
+    - **Equality still works.** `WHERE amount = 100` compares against the
+      literal's text form, which behaves sensibly.
+
+    To find out *which* text columns are really numbers or dates, ask for a
+    data-quality report — it reports a `suggested_cast` for every text column
+    whose values all parse as one type (and deliberately suggests none for
+    zero-padded values like `007`, where casting would destroy the padding).
+    Then use `PROFILE COLUMN id FOR CAST TO integer` to confirm every value
+    converts cleanly before casting.
 
 To convert text columns to specific types after attaching CSV or JSONL data, use `cast_column`:
 

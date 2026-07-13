@@ -31,6 +31,10 @@ bundlebase query --bundle ./sales --format json "SHOW COUNT"
 # Create a new bundle
 bundlebase create --bundle ./sales "ATTACH 'raw_sales.csv'"
 
+# Create-or-open: safe to run on every step of a scripted workflow
+bundlebase create --bundle ./sales --exists-ok "CREATE SOURCE ..."
+bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"
+
 # Mutating commands on existing bundles (auto-commits after each call)
 bundlebase extend --bundle ./sales "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
 bundlebase extend --bundle ./sales -m "Cleaned sales data" "RENAME COLUMN amt TO amount"
@@ -64,7 +68,7 @@ MCP mode keeps bundles open across calls — use for multi-step workflows. Start
 bundlebase mcp
 ```
 
-MCP tools (all per-bundle tools require a `bundle` parameter): `create_bundle`, `open_bundle`, `close_bundle`, `list_bundles`, `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`. Multiple bundles can be open simultaneously.
+MCP tools (all per-bundle tools require a `bundle` parameter): `create_bundle`, `open_bundle`, `close_bundle`, `list_bundles`, `query` (any SQL/command), `describe` (full self-description: schema + column descriptions + metrics + provenance + history — the best first call), `analyze` (describe + a sample), `data_quality` (nulls/distincts + `suggested_cast` for text columns holding numbers/dates), `metric` (compute a bundle-defined metric by name, optionally `dimensions`), `schema`, `count`, `sample`, `status`, `history`, `generate_report`, `upgrade_bundle`. Multiple bundles can be open simultaneously.
 
 Prefer CLI (`bundlebase query`) for one-shot queries. Prefer MCP for building bundles or multi-step exploration.
 
@@ -87,6 +91,7 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 **Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX (indexes are auto-refreshed after every ATTACH/REPLACE/FETCH unless `NO INDEX` is given; run REINDEX explicitly when bulk-loading with NO INDEX)
 **Version Control**: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
 **Metadata**: SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG
+**Semantic layer**: DESCRIBE COLUMN <name> AS '<text>' (what a column means), CREATE METRIC <name> AS '<expression>' [DESCRIPTION '<text>'] (canonical measure, e.g. `SUM(amount)`), DROP METRIC <name>. Both travel in the bundle and are surfaced to agents via `describe`/`metric`; column descriptions also reach BI tools as Arrow field metadata.
 **Export**: EXPORT DATA TO '<path>' <sql> (formats: .csv, .jsonl) | EXPORT EMPTY TO '<path>' (structure only, no data)
 **Introspection**: SHOW (DETAILS, HISTORY, STATUS, VIEWS, INDEXES, PACKS, BLOCKS, CONFIG, CONNECTORS, FUNCTIONS), SYNTAX
 
@@ -98,3 +103,11 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 Standard SQL (SELECT, WITH, etc.) uses Apache DataFusion syntax. The table name is always `bundle`.
 
 **Case sensitivity**: All identifiers are case-sensitive. `Revenue` and `revenue` are different columns. Use double quotes for names with special characters: `RENAME COLUMN "Result/Value" TO result_value`.
+
+**Column types (important)**: CSV, TSV, and JSONL columns are ALWAYS imported as text (`Utf8`), even when they hold numbers or dates — there is no type inference. Consequences:
+
+- `SUM(amount)` on a text column fails with a type error.
+- `WHERE amount > 100` is **rejected** (ordering a text column against a number would compare lexicographically — `'9' > '50'` — and silently return wrong rows). Cast to compare numerically: `WHERE CAST(amount AS DOUBLE) > 100`. Quote the value to compare as text on purpose: `WHERE amount > '100'`.
+- `WHERE amount = 100` is allowed (equality against the literal's text form behaves sensibly).
+
+Run `data_quality` to see a `suggested_cast` for each text column that really holds numbers/dates, then persist it: `CAST COLUMN amount TO DOUBLE`. Parquet keeps its native types.

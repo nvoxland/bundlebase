@@ -223,6 +223,10 @@ Multiple bundles can be open simultaneously, each identified by a unique `bundle
 | `mcp__bundlebase__close_bundle` | `bundle` (string) | Close a bundle by its identifier |
 | `mcp__bundlebase__list_bundles` | (none) | List all open bundles with their identifier, path, name, and description |
 | `mcp__bundlebase__query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
+| `mcp__bundlebase__describe` | `bundle` (string) | **Best first call.** Full self-description: name, description, schema with column descriptions, named metrics, provenance, transformation record, history — so your SQL reflects what the data actually is |
+| `mcp__bundlebase__analyze` | `bundle` (string), `limit` (optional, default 10) | `describe` plus a small sample of rows, in one call |
+| `mcp__bundlebase__data_quality` | `bundle` (string) | Null counts/rates, distinct counts, all-null/constant flags, and a `suggested_cast` for text columns holding numbers/dates |
+| `mcp__bundlebase__metric` | `bundle` (string), `name` (string), `dimensions` (optional list), `limit` (optional) | Compute a bundle-defined metric by name using the author's canonical definition, optionally grouped by dimensions |
 | `mcp__bundlebase__schema` | `bundle` (string) | Get column names, data types, and nullability |
 | `mcp__bundlebase__count` | `bundle` (string) | Get total row count |
 | `mcp__bundlebase__sample` | `bundle` (string), `limit` (optional, default 10) | Preview sample rows as JSON |
@@ -429,6 +433,32 @@ bundlebase extend --bundle ./lakes "CREATE SOURCE USING http WITH (url = 'https:
 ```
 
 If a download times out, scope it with URL query parameters (date range, geographic filter, row limit).
+
+## Semantic Layer: Column Descriptions and Metrics
+
+A bundle can carry what its data *means*, not just its shape. This travels with the bundle (it's in the manifest, versioned like any other change) and is what makes your SQL trustworthy instead of merely plausible.
+
+**When reading a bundle:** call `describe` first. It returns column descriptions and named metrics alongside the schema.
+
+- If a column has a description, trust it over the column name. `amt` might mean "net of refunds, in cents".
+- **If a metric exists, use it — do not write your own aggregate.** A metric is the bundle author's canonical definition of a number. Re-inventing `SUM(...)` is how you get a plausible answer that disagrees with everyone else's.
+
+```
+# Compute the author's definition of "revenue", optionally grouped
+mcp__bundlebase__metric(bundle="sales", name="total_revenue")
+mcp__bundlebase__metric(bundle="sales", name="total_revenue", dimensions=["region"])
+```
+
+**When building a bundle:** describe the non-obvious columns and define the metrics people will ask for. This is the difference between a bundle that gets used correctly and one that gets misread.
+
+```sql
+DESCRIBE COLUMN amount AS 'order total in USD, net of refunds'
+CREATE METRIC total_revenue AS 'SUM(amount)' DESCRIPTION 'gross revenue in USD'
+CREATE METRIC avg_order_value AS 'SUM(amount) / COUNT(DISTINCT order_id)'
+DROP METRIC old_metric
+```
+
+Column descriptions are also exported as Arrow field metadata, so BI tools connected over the Flight SQL server see them too.
 
 ## Identifiers and Case Sensitivity
 

@@ -145,6 +145,11 @@ ADD COLUMN <name> AS <expr>
 CREATE VIEW <name> AS <sql>
 DROP VIEW <name>
 
+-- Semantic layer (travels in the bundle; surfaced to AI agents and BI tools)
+DESCRIBE COLUMN <name> AS '<what the column means>'
+CREATE METRIC <name> AS '<expression>' [DESCRIPTION '<text>']
+DROP METRIC <name>
+
 -- Persistent hygiene rules
 ALWAYS DELETE WHERE <condition>
 ALWAYS UPDATE SET <col> = <expr> [WHERE <condition>]
@@ -203,10 +208,11 @@ bundlebase setup-agent --scope global      # Claude-only user-level install
 bundlebase repl --bundle ./my-bundle
 bundlebase repl --bundle s3://bucket/path
 
-# Non-interactive (agent/script friendly)
-bundlebase query --bundle ./sales --sql "SELECT * FROM bundle LIMIT 5" --format json
-bundlebase create --bundle ./sales
-bundlebase extend --bundle ./sales --execute "ATTACH 'data.csv'" --execute "COMMIT 'load'"
+# Non-interactive (agent/script friendly) — SQL is a positional argument
+bundlebase query --bundle ./sales --format json "SELECT * FROM bundle LIMIT 5"
+bundlebase create --bundle ./sales "ATTACH 'data.csv'"
+bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"   # idempotent create-or-open
+bundlebase extend --bundle ./sales -m "load" "ATTACH 'data.csv'"  # auto-commits
 
 # SQL server (Arrow Flight — connect from Metabase, DBeaver, R, Julia, Go)
 bundlebase serve --bundle s3://bucket/path --port 32010
@@ -217,6 +223,27 @@ bundlebase mcp --bundle s3://bucket/path
 # Report generation
 bundlebase generate-report --input report.md --output report.pdf
 ```
+
+### MCP Tools (for AI assistants)
+
+All per-bundle tools take a `bundle` identifier.
+
+- `create_bundle`, `open_bundle`, `close_bundle`, `list_bundles`, `upgrade_bundle` — lifecycle
+- `describe` — **best first call.** Full self-description: name, description, schema *with column descriptions*, named metrics, data provenance, transformation record, history. Call it before writing SQL so queries reflect what the data actually is.
+- `analyze` — `describe` plus a small sample of rows, in one call
+- `data_quality` — per-column nulls/distincts, all-null/constant flags, and a `suggested_cast` for text columns that really hold numbers or dates
+- `metric` — compute a bundle-defined metric by name using the author's canonical definition, optionally grouped by `dimensions`
+- `query` — any SQL or bundlebase command; `schema`, `count`, `sample`, `status`, `history`, `generate_report`
+
+### Column Types (important)
+
+CSV, TSV, and JSONL columns are **always imported as text (`Utf8`)** — there is no type inference, because inferring from sampled rows silently corrupts later rows that don't match. Parquet keeps its native types.
+
+- `SUM(amount)` on a text column fails with a type error.
+- `WHERE amount > 100` is **rejected**: ordering a text column against a number would compare lexicographically (`'9' > '50'`) and silently return wrong rows. Cast to compare numerically (`WHERE CAST(amount AS DOUBLE) > 100`), or quote the value to compare as text (`WHERE amount > '100'`).
+- `WHERE amount = 100` is allowed (equality against the literal's text form behaves sensibly).
+
+Call `data_quality` for a `suggested_cast` per text column, then persist it: `CAST COLUMN amount TO DOUBLE`.
 
 ### Custom Connector (Python)
 

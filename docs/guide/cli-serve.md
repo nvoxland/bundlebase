@@ -72,6 +72,7 @@ The SQL server supports the full set of Bundlebase SQL commands:
 - **Schema changes**: `JOIN`, `DROP JOIN`, `DROP COLUMN`, `RENAME COLUMN`, `CREATE VIEW`, etc.
 - **Version control**: `COMMIT`, `RESET`, `UNDO`, `VERIFY DATA`
 - **Metadata**: `SET NAME`, `SET DESCRIPTION`, `SAVE CONFIG`, `SET CONFIG`
+- **Semantic layer**: `DESCRIBE COLUMN`, `CREATE METRIC`, `DROP METRIC`
 - **Introspection**: `SHOW HISTORY`, `SHOW STATUS`, `SHOW CONFIG`, etc.
 - **Help**: `SYNTAX` to list all commands, `SYNTAX <command>` for detailed syntax
 - **Prepared statements**: Create, execute, and close prepared statements
@@ -79,6 +80,16 @@ The SQL server supports the full set of Bundlebase SQL commands:
 In read-only mode (`--read-only`), only `SELECT`, `EXPLAIN`, and `SET CONFIG` are allowed.
 
 See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
+
+## Column Descriptions in BI Tools
+
+Column descriptions set with [`DESCRIBE COLUMN`](../sql-reference/index.md#describe-column) are exported as **Arrow field metadata** (under the key `description`) on the schema the server serves. BI and Arrow clients that read field metadata will show them alongside the column, so the meaning of a column travels with the data instead of living in a separate wiki.
+
+```sql
+DESCRIBE COLUMN amount AS 'order total in USD, net of refunds'
+```
+
+Bundles with no column descriptions serve exactly the schema they did before — no metadata is added.
 
 ## Connecting from DBeaver
 

@@ -578,7 +578,7 @@ class SyncBundle:
         )
         return _loop_manager.run_sync(coro)
 
-    def verify_data(self):
+    def verify_data(self) -> Any:
         """Verify the integrity of all files in the bundle (SHA256 hashes).
 
         Returns:
@@ -1336,7 +1336,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def verify_data(self, update_versions: bool = False):
+    def verify_data(self, update_versions: bool = False) -> Any:
         """Verify the integrity of all files in the bundle (SHA256 hashes).
 
         Args:

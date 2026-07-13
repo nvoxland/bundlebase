@@ -71,6 +71,8 @@ Mutable bundle class returned by `create()` and transformation methods.
         - drop_column
         - rename_column
         - normalize_column_names
+        - describe_column
+        - define_metric
         - update
         - delete
         - always_delete

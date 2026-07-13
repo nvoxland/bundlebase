@@ -43,6 +43,10 @@ The MCP server exposes the following tools to AI assistants. All per-bundle tool
 | `close_bundle` | `bundle` (string) | Close an open bundle by its identifier |
 | `list_bundles` | *(none)* | List all open bundles with their identifier, path, name, and description |
 | `query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command |
+| `describe` | `bundle` (string) | Full self-description: name, description, schema with column descriptions, named metrics, data provenance, transformation record, and history. The best first call — it tells the assistant what the data actually *is* before it writes SQL |
+| `analyze` | `bundle` (string), `limit` (integer, optional, default 10) | One-shot orientation: `describe` plus a small sample of rows, together |
+| `data_quality` | `bundle` (string) | Per-column null counts/rates, distinct counts, all-null/constant flags, and a `suggested_cast` for text columns that really hold numbers or dates |
+| `metric` | `bundle` (string), `name` (string), `dimensions` (list, optional), `limit` (integer, optional) | Compute a bundle-defined named metric using the author's canonical definition, optionally grouped by dimension columns |
 | `schema` | `bundle` (string) | Get column names, data types, and nullability |
 | `count` | `bundle` (string) | Get total row count |
 | `sample` | `bundle` (string), `limit` (integer, optional, default 10) | Preview sample rows as JSON |

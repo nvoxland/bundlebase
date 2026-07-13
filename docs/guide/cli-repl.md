@@ -50,6 +50,16 @@ For one-shot operations without the interactive REPL:
 - **`bundlebase extend`** -- Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
 - **`bundlebase list-bundles`** -- Discover all bundles in a directory
 
+### Idempotent create-or-open
+
+By default `create` errors if a bundle already exists at the path, so you can't silently append to the wrong one. When you're scripting a multi-step workflow and don't want to track whether the bundle exists yet, add `--exists-ok`: the first call creates the bundle, and later calls open and extend it. Each call still auto-commits its changes.
+
+```bash
+# Safe to run on every step — creates the first time, extends thereafter
+bundlebase create --bundle ./sales --exists-ok "CREATE SOURCE ..."
+bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"
+```
+
 ```bash
 # Read-only query
 bundlebase query --bundle <path> "SELECT * FROM bundle"
