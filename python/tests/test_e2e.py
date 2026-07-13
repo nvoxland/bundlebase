@@ -2302,10 +2302,12 @@ async def test_delete_csv():
         initial_count = await c.num_rows()
         assert initial_count == 100
 
-        # Delete rows where Index > 90
-        c = await c.delete('"Index" > 90')
+        # Delete rows where Index > 90. "Index" is text (CSV), so the numeric
+        # bound needs an explicit cast -- without it the comparison would be
+        # lexicographic and would miss row 100.
+        c = await c.delete('CAST("Index" AS BIGINT) > 90')
         deleted_count = await c.num_rows()
-        assert deleted_count < initial_count
+        assert deleted_count == 90, "rows 91-100 (ten rows) should be deleted"
 
         await c.commit("Delete high index rows")
 
@@ -2313,7 +2315,7 @@ async def test_delete_csv():
         c2 = await bundlebase.open(temp_dir)
         assert await c2.num_rows() == deleted_count
 
-        result = await c2.query('SELECT "Index" FROM bundle WHERE "Index" > 90')
+        result = await c2.query('SELECT "Index" FROM bundle WHERE CAST("Index" AS BIGINT) > 90')
         df = await result.to_pandas()
         assert len(df) == 0
 
@@ -2531,13 +2533,14 @@ async def test_always_delete_csv():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
 
-    c = await c.always_delete('"Index" > 90')
+    # "Index" is text (CSV) -- cast, or the bound compares lexicographically.
+    c = await c.always_delete('CAST("Index" AS BIGINT) > 90')
     count_after = await c.num_rows()
-    assert count_after < 100
+    assert count_after == 90, "rows 91-100 (ten rows) should be removed"
 
     # Attach again — rule should auto-apply
     c = await c.attach(datafile("customers-0-100.csv"))
-    result = await c.query('SELECT "Index" FROM bundle WHERE "Index" > 90')
+    result = await c.query('SELECT "Index" FROM bundle WHERE CAST("Index" AS BIGINT) > 90')
     df = await result.to_pandas()
     assert len(df) == 0
 

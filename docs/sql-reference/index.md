@@ -39,7 +39,7 @@ Commands that change bundle data content.
 
 Adds a data file to the bundle. Supports CSV, TSV, Parquet, JSONL (newline-delimited JSON) files, and `bundle://` URLs to reference other bundles.
 
-CSV, TSV, and JSONL columns are imported as text (`Utf8`) — numeric predicates compare lexicographically until you [`CAST COLUMN`](#cast-column). See [Column Types](../guide/attaching.md#column-types).
+CSV, TSV, and JSONL columns are imported as text (`Utf8`). Ordering a text column against a number (`WHERE amount > 100`) is rejected rather than compared lexicographically — cast the column with [`CAST COLUMN`](#cast-column), or quote the value to compare as text on purpose. See [Column Types](../guide/attaching.md#column-types).
 
 ```sql
 ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)] [NO INDEX]

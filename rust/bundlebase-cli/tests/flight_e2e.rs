@@ -179,10 +179,14 @@ async fn test_filter_command() {
     let data = TestData::with_content("id,name\n1,Alice\n2,Bob\n3,Carol\n");
     data.attach(&mut server).await;
 
-    // Filter to only rows where id > 1
-    execute_query(&mut server, "FILTER WITH SELECT * FROM bundle WHERE id > 1")
-        .await
-        .expect("FILTER should succeed");
+    // Filter to only rows where id > 1. `id` comes from a CSV, so it is text --
+    // cast it, or the comparison would be lexicographic (and is now rejected).
+    execute_query(
+        &mut server,
+        "FILTER WITH SELECT * FROM bundle WHERE CAST(id AS BIGINT) > 1",
+    )
+    .await
+    .expect("FILTER should succeed");
 
     // Verify filter command was applied by querying after
     let batches = execute_query(&mut server, "SELECT * FROM bundle")
@@ -518,9 +522,13 @@ async fn test_direct_filter_and_select() {
         .await
         .expect("Direct ATTACH should succeed");
 
-    execute_query_direct(&mut server, "FILTER WITH SELECT * FROM bundle WHERE id > 1")
-        .await
-        .expect("Direct FILTER should succeed");
+    // `id` is text (CSV), so the numeric bound needs an explicit cast.
+    execute_query_direct(
+        &mut server,
+        "FILTER WITH SELECT * FROM bundle WHERE CAST(id AS BIGINT) > 1",
+    )
+    .await
+    .expect("Direct FILTER should succeed");
 
     let batches = execute_query_direct(&mut server, "SELECT * FROM bundle")
         .await

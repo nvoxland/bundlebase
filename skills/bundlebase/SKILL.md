@@ -467,12 +467,13 @@ mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price 
 
 ### CSV/TSV/JSONL columns are ALWAYS text — check before doing math on them
 
-Bundlebase imports every CSV, TSV, and JSONL column as text (`Utf8`), even when it holds numbers or dates. It does not infer types, because inferring from a sample silently corrupts the later rows that don't match. Two consequences you must plan for:
+Bundlebase imports every CSV, TSV, and JSONL column as text (`Utf8`), even when it holds numbers or dates. It does not infer types, because inferring from a sample silently corrupts the later rows that don't match. So doing math on a text column will fail, and both failures tell you to cast:
 
-- `SUM(amount)` on a text column **fails loudly** with a type error.
-- `WHERE amount > 100` **does not fail** — it compares *lexicographically* (`"9" > "50"` is true), silently returning the wrong rows. There is no error to catch this.
+- `SUM(amount)` on a text column fails with a type error.
+- `WHERE amount > 100` is **rejected**. Bundlebase refuses ordering comparisons (`>`, `>=`, `<`, `<=`) between a text column and a number, because SQL would otherwise compare them *lexicographically* (`"9" > "50"` is true) and silently return the wrong rows. To compare numerically, cast: `WHERE CAST(amount AS DOUBLE) > 100`. To compare as text on purpose, quote the value: `WHERE amount > '100'`.
+- Equality (`amount = 100`) is still allowed — it compares against the literal's text form, which behaves sensibly.
 
-So before writing any numeric or date SQL over a text column, find out which text columns are really numbers or dates:
+Before writing any numeric or date SQL over a text column, find out which text columns are really numbers or dates:
 
 ```
 # Reports a suggested_cast for each text column whose values ALL parse as a number/date

@@ -636,3 +636,61 @@ async fn test_utf8_aggregate_error_suggests_cast() -> Result<(), BundlebaseError
     );
     Ok(())
 }
+
+/// The *silent* half of the all-Utf8 footgun. `WHERE "Index" > 50` does not
+/// error in DataFusion: it coerces 50 to "50" and compares lexicographically,
+/// so "9" > "50" and the query quietly returns the wrong rows. We fail instead,
+/// and say how to fix it -- while leaving the legitimate spellings alone.
+#[tokio::test]
+async fn test_text_ordering_comparison_fails_with_cast_hint() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+
+    let err = match bundle
+        .query(r#"SELECT * FROM bundle WHERE "Index" > 50"#, vec![], None)
+        .await
+    {
+        Ok(_) => panic!("numeric ordering over a text column must fail, not silently mis-compare"),
+        Err(e) => e,
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("CAST COLUMN"), "must give the remedy, got: {msg}");
+    assert!(
+        msg.contains("lexicographic"),
+        "must explain why it's wrong, got: {msg}"
+    );
+    assert!(msg.contains("Index"), "must name the column, got: {msg}");
+
+    // Escape hatch 1: comparing as text on purpose (quoted literal) is allowed.
+    bundle
+        .query(r#"SELECT * FROM bundle WHERE "Index" > '50'"#, vec![], None)
+        .await?;
+
+    // Escape hatch 2: an explicit cast is the intended fix, and must work.
+    bundle
+        .query(
+            r#"SELECT * FROM bundle WHERE CAST("Index" AS BIGINT) > 50"#,
+            vec![],
+            None,
+        )
+        .await?;
+
+    // Equality is deliberately NOT flagged -- it compares against the literal's
+    // text form, which behaves sensibly.
+    bundle
+        .query(r#"SELECT * FROM bundle WHERE "Index" = 50"#, vec![], None)
+        .await?;
+
+    // A pre-cast subquery resolves to a numeric column, so it must pass through.
+    bundle
+        .query(
+            r#"SELECT * FROM (SELECT CAST("Index" AS BIGINT) AS idx FROM bundle) WHERE idx > 50"#,
+            vec![],
+            None,
+        )
+        .await?;
+
+    Ok(())
+}
