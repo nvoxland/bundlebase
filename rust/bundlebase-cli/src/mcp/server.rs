@@ -345,6 +345,46 @@ impl BundlebaseMcpServer {
     }
 
     #[tool(
+        name = "analyze",
+        description = "One-shot orientation for a bundle: its full self-description (from describe) \
+                       plus a small data sample, together. The best first call after opening a \
+                       bundle."
+    )]
+    async fn analyze(
+        &self,
+        Parameters(params): Parameters<SampleParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(b) => b,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        let limit = params.limit.unwrap_or(10).min(1000);
+        match tools::get_analyze(&bundle, limit).await {
+            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+        }
+    }
+
+    #[tool(
+        name = "data_quality",
+        description = "Automated data-quality report: per-column null counts/rates and distinct \
+                       counts, with all-null and constant flags. Computed in a single scan."
+    )]
+    async fn data_quality(
+        &self,
+        Parameters(params): Parameters<BundleKeyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(b) => b,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        match tools::get_data_quality(&bundle).await {
+            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+        }
+    }
+
+    #[tool(
         name = "schema",
         description = "Get a bundle's column schema including column names, data types, and nullability."
     )]

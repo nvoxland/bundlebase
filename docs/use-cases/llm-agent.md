@@ -29,6 +29,8 @@ After setup, your assistant has these tools available whenever it works with a b
 |------|-------------|
 | `open_bundle` / `create_bundle` / `close_bundle` | Open, create, or close a bundle by path |
 | `describe` | Full self-description: name, description, schema (with column descriptions), named metrics, data provenance, transformation record, lineage, and history -- the best first call so queries reflect what the data actually is |
+| `analyze` | One-shot orientation: `describe` plus a small data sample, together |
+| `data_quality` | Per-column null counts/rates and distinct counts, with all-null / constant flags |
 | `status` | Bundle status including uncommitted changes |
 | `schema` | Column names and types |
 | `count` | Total row count |

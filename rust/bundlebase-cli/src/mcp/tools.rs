@@ -156,6 +156,111 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
     serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
 }
 
+/// One-shot orientation for an agent: the full self-description plus a small
+/// data sample, in one call. This is the ideal first thing an agent reads
+/// after opening a bundle — it gets what the data is (describe) and what it
+/// looks like (sample) together.
+pub async fn get_analyze(bundle: &Arc<dyn BundleFacade>, sample_limit: usize) -> Result<String, String> {
+    let describe: serde_json::Value = serde_json::from_str(&get_describe(bundle).await?)
+        .map_err(|e| format!("JSON error: {}", e))?;
+    let sample: serde_json::Value = serde_json::from_str(&get_sample(bundle, sample_limit).await?)
+        .map_err(|e| format!("JSON error: {}", e))?;
+
+    let result = json!({
+        "describe": describe,
+        "sample": sample,
+    });
+    serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
+}
+
+/// Automated data-quality report: per-column null counts/rates and distinct
+/// counts, with flags an agent can act on (all-null, constant). Computed in a
+/// single aggregate scan of the bundle.
+pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
+    use futures::StreamExt;
+
+    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
+    // Real column names, skipping the empty-bundle sentinel.
+    let col_names: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .filter(|n| n != "no_data")
+        .collect();
+
+    if col_names.is_empty() {
+        return serde_json::to_string_pretty(&json!({
+            "total_rows": 0,
+            "columns": [],
+        }))
+        .map_err(|e| format!("JSON error: {}", e));
+    }
+
+    // Quote a column name for SQL (double-quote, escape internal quotes).
+    let q = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
+    // Position-indexed aliases avoid any collision with real column names.
+    let mut selects = vec!["COUNT(*) AS c_total".to_string()];
+    for (i, name) in col_names.iter().enumerate() {
+        selects.push(format!("COUNT({}) AS c{}_nn", q(name), i));
+        selects.push(format!("COUNT(DISTINCT {}) AS c{}_dc", q(name), i));
+    }
+    let sql = format!("SELECT {} FROM bundle", selects.join(", "));
+
+    let mut stream = bundle
+        .query(&sql, vec![], None)
+        .await
+        .map_err(|e| format!("{}", e))?;
+    let mut batch = None;
+    while let Some(b) = stream.next().await {
+        let b = b.map_err(|e| format!("{}", e))?;
+        if b.num_rows() > 0 {
+            batch = Some(b);
+            break;
+        }
+    }
+    let batch = batch.ok_or_else(|| "data-quality query returned no rows".to_string())?;
+
+    let read_i64 = |col: usize| -> i64 {
+        batch
+            .column(col)
+            .as_any()
+            .downcast_ref::<arrow::array::Int64Array>()
+            .map(|a| a.value(0))
+            .unwrap_or(0)
+    };
+    let total = read_i64(0);
+
+    let columns: Vec<serde_json::Value> = col_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let non_null = read_i64(1 + i * 2);
+            let distinct = read_i64(2 + i * 2);
+            let null_count = total - non_null;
+            let null_rate = if total > 0 {
+                Some((null_count as f64) / (total as f64))
+            } else {
+                None
+            };
+            json!({
+                "name": name,
+                "non_null": non_null,
+                "null_count": null_count,
+                "null_rate": null_rate,
+                "distinct": distinct,
+                "all_null": non_null == 0 && total > 0,
+                "constant": non_null > 0 && distinct == 1,
+            })
+        })
+        .collect();
+
+    serde_json::to_string_pretty(&json!({
+        "total_rows": total,
+        "columns": columns,
+    }))
+    .map_err(|e| format!("JSON error: {}", e))
+}
+
 /// Get the row count as a JSON string.
 pub async fn get_count(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
@@ -483,6 +588,63 @@ mod tests {
         assert_eq!(json["row_count"], 0);
         assert!(json["sources"].as_array().expect("sources").is_empty());
         assert!(json["name"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_analyze_combines_describe_and_sample() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&get_analyze(&bundle, 3).await.expect("analyze")).expect("json");
+        // Has both the describe blob and a bounded sample.
+        assert!(json["describe"]["columns"].as_array().expect("columns").len() > 1);
+        let sample = json["sample"].as_array().expect("sample");
+        assert!(sample.len() <= 3 && !sample.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_data_quality_reports_nulls_and_distincts() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &get_data_quality(&bundle).await.expect("data_quality"),
+        )
+        .expect("json");
+
+        let total = json["total_rows"].as_i64().expect("total");
+        assert!(total > 0);
+        let cols = json["columns"].as_array().expect("columns");
+        assert!(!cols.is_empty());
+
+        // id is unique and non-null: distinct == total, null_count == 0.
+        let id = cols.iter().find(|c| c["name"] == "id").expect("id column");
+        assert_eq!(id["null_count"], 0);
+        assert_eq!(id["distinct"].as_i64().expect("distinct"), total);
+        assert_eq!(id["constant"], false);
+        assert_eq!(id["all_null"], false);
+    }
+
+    #[tokio::test]
+    async fn test_data_quality_empty_bundle() {
+        let bundle = create_test_bundle().await;
+        let json: serde_json::Value =
+            serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
+        assert_eq!(json["total_rows"], 0);
+        assert!(json["columns"].as_array().expect("columns").is_empty());
     }
 
     #[tokio::test]
