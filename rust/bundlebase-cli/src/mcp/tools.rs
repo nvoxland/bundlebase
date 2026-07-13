@@ -261,6 +261,90 @@ pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, 
     .map_err(|e| format!("JSON error: {}", e))
 }
 
+/// Compute a bundle-defined named metric by name, optionally grouped by one or
+/// more dimension columns. This is the *executable* half of the semantic layer:
+/// the agent asks for a metric by name and gets the bundle author's canonical
+/// computation, rather than hand-writing an aggregate that may quietly diverge
+/// from the intended definition.
+pub async fn get_metric(
+    bundle: &Arc<dyn BundleFacade>,
+    name: &str,
+    dimensions: &[String],
+    limit: usize,
+) -> Result<String, String> {
+    // Resolve the metric definition (metrics() already applies last-write-wins).
+    let metrics = bundle.metrics();
+    let metric = metrics.iter().find(|m| m.name == name).ok_or_else(|| {
+        let available: Vec<&str> = metrics.iter().map(|m| m.name.as_str()).collect();
+        if available.is_empty() {
+            format!(
+                "No metric named '{}'. This bundle defines no metrics; create one with \
+                 CREATE METRIC <name> AS '<expression>'.",
+                name
+            )
+        } else {
+            format!(
+                "No metric named '{}'. Available metrics: {}.",
+                name,
+                available.join(", ")
+            )
+        }
+    })?;
+
+    // Validate dimensions against the real schema: an agent may only group by
+    // columns that exist. This guards the generated SQL and yields a clear,
+    // self-correcting error instead of an opaque query failure.
+    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
+    let valid_cols: std::collections::HashSet<&str> =
+        schema.fields().iter().map(|f| f.name().as_str()).collect();
+    for d in dimensions {
+        if !valid_cols.contains(d.as_str()) {
+            let mut cols: Vec<&str> = valid_cols.iter().copied().collect();
+            cols.sort_unstable();
+            return Err(format!(
+                "Unknown dimension column '{}'. Available columns: {}.",
+                d,
+                cols.join(", ")
+            ));
+        }
+    }
+
+    // Quote an identifier for SQL (double-quote, escape internal quotes).
+    let q = |ident: &str| format!("\"{}\"", ident.replace('"', "\"\""));
+
+    let mut select_parts: Vec<String> = dimensions.iter().map(|d| q(d)).collect();
+    // The metric expression is bundle-author-defined (trusted, same provenance
+    // as any recorded operation); parenthesize and alias it with the metric name.
+    select_parts.push(format!("({}) AS {}", metric.expression, q(name)));
+
+    let mut sql = format!("SELECT {} FROM bundle", select_parts.join(", "));
+    if !dimensions.is_empty() {
+        let dims_sql = dimensions.iter().map(|d| q(d)).collect::<Vec<_>>().join(", ");
+        // GROUP BY the dimensions; ORDER BY them for stable, readable output.
+        sql.push_str(&format!(" GROUP BY {} ORDER BY {}", dims_sql, dims_sql));
+    }
+    sql.push_str(&format!(" LIMIT {}", limit));
+
+    let stream = bundle
+        .query(&sql, vec![], Some(limit))
+        .await
+        .map_err(|e| format!("{}", e))?;
+    let rows = format_stream_json(stream, Some(OutputShape::Table), Some(limit))
+        .await
+        .map_err(|e| format!("{}", e))?;
+    let rows_json: serde_json::Value =
+        serde_json::from_str(&rows).map_err(|e| format!("JSON error: {}", e))?;
+
+    let result = json!({
+        "metric": name,
+        "expression": metric.expression,
+        "description": metric.description,
+        "dimensions": dimensions,
+        "rows": rows_json,
+    });
+    serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
+}
+
 /// Get the row count as a JSON string.
 pub async fn get_count(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
@@ -645,6 +729,116 @@ mod tests {
             serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
         assert_eq!(json["total_rows"], 0);
         assert!(json["columns"].as_array().expect("columns").is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_metric_computes_ungrouped() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        execute_query(
+            &bundle,
+            "CREATE METRIC avg_salary AS 'AVG(salary)' DESCRIPTION 'mean salary in USD'",
+        )
+        .await
+        .expect("create metric");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &get_metric(&bundle, "avg_salary", &[], 10).await.expect("metric"),
+        )
+        .expect("json");
+
+        // Echoes the canonical definition so the agent sees what it computed.
+        assert_eq!(json["metric"], "avg_salary");
+        assert_eq!(json["expression"], "AVG(salary)");
+        assert_eq!(json["description"], "mean salary in USD");
+        // An ungrouped aggregate yields exactly one row carrying the metric value.
+        let rows = json["rows"].as_array().expect("rows");
+        assert_eq!(rows.len(), 1, "ungrouped metric returns a single row");
+        assert!(
+            rows[0]["avg_salary"].is_number(),
+            "metric column must hold the computed number, got: {}",
+            rows[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metric_grouped_by_dimension() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        execute_query(&bundle, "CREATE METRIC headcount AS 'COUNT(*)'")
+            .await
+            .expect("create metric");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &get_metric(&bundle, "headcount", &["gender".to_string()], 50)
+                .await
+                .expect("metric"),
+        )
+        .expect("json");
+
+        let rows = json["rows"].as_array().expect("rows");
+        assert!(rows.len() >= 2, "grouping by gender yields multiple groups");
+        // Each row carries the dimension value plus the metric.
+        for row in rows {
+            assert!(row.get("gender").is_some(), "dimension column present: {row}");
+            assert!(row["headcount"].is_number(), "metric present: {row}");
+        }
+        assert_eq!(json["dimensions"][0], "gender");
+    }
+
+    #[tokio::test]
+    async fn test_metric_unknown_name_lists_available() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        execute_query(&bundle, "CREATE METRIC avg_salary AS 'AVG(salary)'")
+            .await
+            .expect("create metric");
+
+        let err = get_metric(&bundle, "nonexistent", &[], 10)
+            .await
+            .expect_err("unknown metric must error");
+        // The error names the missing metric and lists what is available so the
+        // agent can self-correct without another round-trip.
+        assert!(err.contains("nonexistent"), "names the miss: {err}");
+        assert!(err.contains("avg_salary"), "lists available metrics: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_metric_unknown_dimension_rejected() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        execute_query(&bundle, "CREATE METRIC headcount AS 'COUNT(*)'")
+            .await
+            .expect("create metric");
+
+        let err = get_metric(&bundle, "headcount", &["not_a_column".to_string()], 10)
+            .await
+            .expect_err("unknown dimension must error");
+        assert!(err.contains("not_a_column"), "names the bad dimension: {err}");
     }
 
     #[tokio::test]

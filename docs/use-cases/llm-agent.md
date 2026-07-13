@@ -31,6 +31,7 @@ After setup, your assistant has these tools available whenever it works with a b
 | `describe` | Full self-description: name, description, schema (with column descriptions), named metrics, data provenance, transformation record, lineage, and history -- the best first call so queries reflect what the data actually is |
 | `analyze` | One-shot orientation: `describe` plus a small data sample, together |
 | `data_quality` | Per-column null counts/rates and distinct counts, with all-null / constant flags |
+| `metric` | Compute a bundle-defined named metric by name (optionally grouped by dimensions) using the author's canonical definition, so the number matches ground truth |
 | `status` | Bundle status including uncommitted changes |
 | `schema` | Column names and types |
 | `count` | Total row count |

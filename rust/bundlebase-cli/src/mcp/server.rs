@@ -47,6 +47,30 @@ pub struct SampleParams {
     pub limit: Option<usize>,
 }
 
+/// Parameter struct for the `metric` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MetricParams {
+    /// Identifier of the open bundle
+    #[schemars(description = "Bundle identifier (as provided when opening/creating)")]
+    pub bundle: String,
+
+    /// Name of the metric to compute (see the metrics listed by `describe`)
+    #[schemars(
+        description = "Name of the bundle-defined metric to compute (see the metrics listed by `describe`)"
+    )]
+    pub name: String,
+
+    /// Optional dimension columns to group the metric by
+    #[schemars(
+        description = "Optional column names to group the metric by (e.g. [\"region\"]). Omit for a single overall value."
+    )]
+    pub dimensions: Option<Vec<String>>,
+
+    /// Maximum number of grouped rows to return (default: 100)
+    #[schemars(description = "Maximum grouped rows to return (default: 100, max: 1000)")]
+    pub limit: Option<usize>,
+}
+
 /// Parameter struct for bundle lifecycle tools that create/open a bundle.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct BundlePathParams {
@@ -379,6 +403,29 @@ impl BundlebaseMcpServer {
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         match tools::get_data_quality(&bundle).await {
+            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+        }
+    }
+
+    #[tool(
+        name = "metric",
+        description = "Compute a bundle-defined named metric by name, optionally grouped by \
+                       dimension columns. Use this instead of hand-writing an aggregate: it runs \
+                       the bundle author's canonical definition, so the number matches ground \
+                       truth. See the metrics listed by `describe`."
+    )]
+    async fn metric(
+        &self,
+        Parameters(params): Parameters<MetricParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(b) => b,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        let dimensions = params.dimensions.unwrap_or_default();
+        let limit = params.limit.unwrap_or(100).min(1000);
+        match tools::get_metric(&bundle, &params.name, &dimensions, limit).await {
             Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
             Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
         }
