@@ -189,7 +189,9 @@ impl AggregateUDFImpl for AggregateFunction {
         acc_args: datafusion::logical_expr::function::AccumulatorArgs,
     ) -> DFResult<Box<dyn Accumulator>> {
         if let Some(reason) = &self.gated {
-            return Err(datafusion::common::DataFusionError::Execution(reason.clone()));
+            return Err(datafusion::common::DataFusionError::Execution(
+                reason.clone(),
+            ));
         }
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]

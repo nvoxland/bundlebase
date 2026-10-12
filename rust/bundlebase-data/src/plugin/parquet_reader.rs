@@ -941,7 +941,12 @@ mod tests {
                 1,
                 "projection [4] must yield a 1-column batch, got {} columns ({:?})",
                 batch.num_columns(),
-                batch.schema().fields().iter().map(|f| f.name()).collect::<Vec<_>>()
+                batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|f| f.name())
+                    .collect::<Vec<_>>()
             );
         }
 

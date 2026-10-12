@@ -55,11 +55,7 @@ impl DataSource for MockMultiPartitionSource {
         partition: usize,
         _context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
-        let batches = self
-            .partitions
-            .get(partition)
-            .cloned()
-            .unwrap_or_default();
+        let batches = self.partitions.get(partition).cloned().unwrap_or_default();
         Ok(Box::pin(VecStream {
             batches: batches.into_iter(),
             schema: self.schema.clone(),

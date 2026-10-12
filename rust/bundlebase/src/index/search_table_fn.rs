@@ -178,12 +178,11 @@ impl TableFunctionImpl for SearchTableFunction {
         // operation surfaces as a planning error instead of being silently
         // swallowed by a fallback to the wrong (physical) schema.
         let physical_output_schema = physical_output_schema(&bundle_schema);
-        let output_schema =
-            run_async_blocking(compute_logical_output_schema(
-                physical_output_schema.clone(),
-                operations.clone(),
-                ctx.clone(),
-            ))?;
+        let output_schema = run_async_blocking(compute_logical_output_schema(
+            physical_output_schema.clone(),
+            operations.clone(),
+            ctx.clone(),
+        ))?;
 
         Ok(Arc::new(SearchResultTableProvider {
             index_name,
@@ -293,9 +292,7 @@ where
             })
             .join()
             .map_err(|_| {
-                DataFusionError::Execution(
-                    "Schema computation thread panicked".to_string(),
-                )
+                DataFusionError::Execution("Schema computation thread panicked".to_string())
             })?
     })
 }
@@ -462,9 +459,9 @@ impl TableProvider for SearchResultTableProvider {
             // gets exactly one, regardless of how many entries cover it).
             let unified_ref = *block_id_to_ref.entry(*block_id).or_insert_with(|| {
                 let r = next_unified_ref;
-                next_unified_ref = next_unified_ref.checked_add(1).expect(
-                    "block_ref namespace exhausted (>65535 active blocks per index)",
-                );
+                next_unified_ref = next_unified_ref
+                    .checked_add(1)
+                    .expect("block_ref namespace exhausted (>65535 active blocks per index)");
                 r
             });
 
@@ -476,7 +473,9 @@ impl TableProvider for SearchResultTableProvider {
                 });
                 per_entry.len() - 1
             });
-            per_entry[idx].local_to_unified.insert(local_ref, unified_ref);
+            per_entry[idx]
+                .local_to_unified
+                .insert(local_ref, unified_ref);
         }
 
         if per_entry.is_empty() {
@@ -888,12 +887,8 @@ impl DataSource for SearchDataSource {
                             // from the underlying batch.
                             let opts = arrow::record_batch::RecordBatchOptions::new()
                                 .with_row_count(Some(batch.num_rows()));
-                            RecordBatch::try_new_with_options(
-                                proj_schema,
-                                projected_columns,
-                                &opts,
-                            )
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
+                            RecordBatch::try_new_with_options(proj_schema, projected_columns, &opts)
+                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
                         } else {
                             RecordBatch::try_new(proj_schema, projected_columns)
                                 .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())

@@ -70,11 +70,8 @@ impl PackTable {
                         if existing.data_type() != field.data_type() {
                             let widened = widen_type(existing.data_type(), field.data_type());
                             let nullable = existing.is_nullable() || field.is_nullable();
-                            merged_fields[idx] = Arc::new(Field::new(
-                                existing.name(),
-                                widened,
-                                nullable,
-                            ));
+                            merged_fields[idx] =
+                                Arc::new(Field::new(existing.name(), widened, nullable));
                         }
                     }
                 }

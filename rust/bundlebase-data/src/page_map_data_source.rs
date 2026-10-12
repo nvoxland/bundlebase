@@ -518,8 +518,7 @@ impl DataSource for PageMapDataSource {
                         let reached_eof = bytes.len() < requested_len;
                         let buffer_end = batch_start + bytes.len() as u64;
 
-                        let slots =
-                            Self::extract_line_slots(&bytes, batch_start, &batch_offsets);
+                        let slots = Self::extract_line_slots(&bytes, batch_start, &batch_offsets);
                         let mut lines = Vec::with_capacity(slots.len());
                         for slot in slots {
                             match slot {

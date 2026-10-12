@@ -65,33 +65,32 @@ use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::function::VersionFunction;
 use crate::index::IndexDefinition;
 use crate::index::SearchTableFunction;
+use crate::io::readable_file_from_path;
 use crate::io::{
     read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage,
     IOReadWriteDir, EMPTY_URL,
 };
-use crate::io::readable_file_from_path;
 use crate::object_id::ColumnId;
 use crate::source::ConnectorRegistry;
 use crate::ConfigProvider;
 use crate::{BundleConfig, BundlebaseError};
-use bundlebase_io::IOReadFile;
-use futures::future::BoxFuture;
-use std::any::Any;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+use bundlebase_io::IOReadFile;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{LogicalPlan, ScalarUDF};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
+use futures::future::BoxFuture;
 use log::{debug, info};
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
+use std::any::Any;
 use std::sync::{Arc, Weak};
 use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
-
 
 pub(crate) fn register_config_hooks() {
     bundlebase_common::config::change_hook::add(
@@ -1913,10 +1912,7 @@ impl BundleFacade for Bundle {
             result_df = result_df.limit(0, Some(n))?;
         }
 
-        result_df
-            .execute_stream()
-            .await
-            .map_err(add_utf8_cast_hint)
+        result_df.execute_stream().await.map_err(add_utf8_cast_hint)
     }
 
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
@@ -1978,7 +1974,10 @@ impl BundleFacade for Bundle {
         // and explicitly `finish()`-ed so any final compressed block lands on
         // disk before we report success.
         let mut builder = if gzip {
-            Builder::new(WriteEither::Gz(GzEncoder::new(tar_file, Compression::default())))
+            Builder::new(WriteEither::Gz(GzEncoder::new(
+                tar_file,
+                Compression::default(),
+            )))
         } else {
             Builder::new(WriteEither::Plain(tar_file))
         };
@@ -2080,9 +2079,8 @@ impl BundleFacade for Bundle {
 
                 // Bridge the async byte stream -> AsyncRead -> sync Read.
                 // Errors are mapped into io::Error for the Read interface.
-                let io_stream = stream.map(|chunk| {
-                    chunk.map_err(|e| std::io::Error::other(e.to_string()))
-                });
+                let io_stream =
+                    stream.map(|chunk| chunk.map_err(|e| std::io::Error::other(e.to_string())));
                 let async_reader = tokio_util::io::StreamReader::new(io_stream);
                 let sync_reader =
                     tokio_util::io::SyncIoBridge::new_with_handle(async_reader, handle.clone());

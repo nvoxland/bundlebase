@@ -207,7 +207,11 @@ impl TarObjectStore {
     /// Reads `range` bytes of an entry's data using the indexed offset for
     /// O(1) seeking. `range` is relative to the start of the entry's data,
     /// which begins at byte `offset` within the tar file.
-    fn read_entry_range(&self, offset: u64, range: std::ops::Range<u64>) -> ObjectStoreResult<Bytes> {
+    fn read_entry_range(
+        &self,
+        offset: u64,
+        range: std::ops::Range<u64>,
+    ) -> ObjectStoreResult<Bytes> {
         // Open file and seek directly to the requested slice of the data
         let mut file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
             store: "TarObjectStore",
@@ -221,12 +225,11 @@ impl TarObjectStore {
             })?;
 
         // Read exactly the requested number of bytes
-        let len = usize::try_from(range.end - range.start).map_err(|e| {
-            object_store::Error::Generic {
+        let len =
+            usize::try_from(range.end - range.start).map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
                 source: Box::new(e),
-            }
-        })?;
+            })?;
         let mut buffer = vec![0u8; len];
         file.read_exact(&mut buffer)
             .map_err(|e| object_store::Error::Generic {
@@ -455,9 +458,7 @@ impl ObjectStore for TarObjectStore {
             object_store::GetResultPayload::Stream(Box::pin(stream::empty()))
         } else {
             let bytes = self.read_entry_range(entry.offset, range.clone())?;
-            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
-                Ok(bytes)
-            })))
+            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move { Ok(bytes) })))
         };
 
         Ok(GetResult {
@@ -829,9 +830,7 @@ impl ObjectStore for ReadOnlyTarObjectStore {
                     entry.offset + range.start..entry.offset + range.end,
                 )
                 .await?;
-            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
-                Ok(bytes)
-            })))
+            object_store::GetResultPayload::Stream(Box::pin(stream::once(async move { Ok(bytes) })))
         };
 
         Ok(GetResult {
@@ -1536,10 +1535,7 @@ mod tests {
         assert!(!tar_path.exists());
 
         let store = TarObjectStore::new(tar_path).unwrap();
-        let err = store
-            .head(&ObjectPath::from("anything"))
-            .await
-            .unwrap_err();
+        let err = store.head(&ObjectPath::from("anything")).await.unwrap_err();
         assert!(
             matches!(err, object_store::Error::NotFound { .. }),
             "expected NotFound, got {:?}",
@@ -1600,7 +1596,10 @@ mod tests {
         for i in 0..5 {
             let path = ObjectPath::from(format!("file{}.txt", i));
             store
-                .put(&path, PutPayload::from_bytes(Bytes::from(format!("data{}", i))))
+                .put(
+                    &path,
+                    PutPayload::from_bytes(Bytes::from(format!("data{}", i))),
+                )
                 .await
                 .unwrap();
         }
@@ -2330,10 +2329,8 @@ mod tests {
 
     /// Build a ReadOnlyTarObjectStore over a two-entry manifest archive,
     /// recording all range requests made against the backing store.
-    async fn readonly_store_with_recorder() -> (
-        ReadOnlyTarObjectStore,
-        Arc<RwLock<Vec<Option<GetRange>>>>,
-    ) {
+    async fn readonly_store_with_recorder(
+    ) -> (ReadOnlyTarObjectStore, Arc<RwLock<Vec<Option<GetRange>>>>) {
         let tar_buffer = build_manifest_tar(&[
             ("hello.txt", b"hello"),
             ("data/alpha.bin", b"abcdefghijklmnopqrstuvwxyz"),

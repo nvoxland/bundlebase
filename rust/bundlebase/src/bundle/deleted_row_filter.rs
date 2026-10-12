@@ -219,11 +219,7 @@ mod tests {
     }
 
     fn vals(b: &RecordBatch) -> Vec<i64> {
-        let arr = b
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .unwrap();
+        let arr = b.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
         (0..arr.len()).map(|i| arr.value(i)).collect()
     }
 

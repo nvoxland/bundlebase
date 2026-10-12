@@ -165,10 +165,7 @@ impl UpdateOverlay {
                 }
             };
             let values = &values;
-            let any_set = overlay_pos
-                .iter()
-                .flatten()
-                .any(|&idx| is_set.value(idx));
+            let any_set = overlay_pos.iter().flatten().any(|&idx| is_set.value(idx));
             if !any_set {
                 new_columns.push(base_col.clone());
                 continue;

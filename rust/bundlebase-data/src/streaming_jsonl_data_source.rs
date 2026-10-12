@@ -212,9 +212,8 @@ impl ScanState {
             .map(|b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
             .collect();
         let options = RecordBatchOptions::new().with_row_count(Some(self.rows));
-        let batch =
-            RecordBatch::try_new_with_options(self.output_schema.clone(), arrays, &options)
-                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+        let batch = RecordBatch::try_new_with_options(self.output_schema.clone(), arrays, &options)
+            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
         self.rows = 0;
         Ok(batch)
     }
@@ -222,7 +221,9 @@ impl ScanState {
 
 /// Advance the scan: pull chunks until a full batch is ready, the stream
 /// ends, or an error surfaces.
-async fn next_batch(mut state: ScanState) -> Option<(datafusion::common::Result<RecordBatch>, ScanState)> {
+async fn next_batch(
+    mut state: ScanState,
+) -> Option<(datafusion::common::Result<RecordBatch>, ScanState)> {
     loop {
         // Drain buffered complete lines first — a full batch may already be
         // sitting in `pending` without any further IO.
@@ -307,9 +308,7 @@ impl DataSource for StreamingJsonlDataSource {
             .iter()
             .map(|f| f.name().clone())
             .collect();
-        let builders = (0..col_names.len())
-            .map(|_| StringBuilder::new())
-            .collect();
+        let builders = (0..col_names.len()).map(|_| StringBuilder::new()).collect();
 
         log::debug!(
             "StreamingJsonlDataSource: full scan of {} ({} projected columns)",

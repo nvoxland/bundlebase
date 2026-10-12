@@ -208,17 +208,14 @@ pub async fn read_http_head_info(
     for (name, value) in headers.iter().chain(secret_headers.iter()) {
         request = request.header(name.as_str(), value.as_str());
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| {
-            BundlebaseError::from(format!(
-                "HEAD request failed for '{}': {}. \
+    let response = request.send().await.map_err(|e| {
+        BundlebaseError::from(format!(
+            "HEAD request failed for '{}': {}. \
              If this server doesn't support HEAD requests, retry with: \
              head_supported = 'false'",
-                url, e
-            ))
-        })?;
+            url, e
+        ))
+    })?;
 
     if !response.status().is_success() {
         let status = response.status();

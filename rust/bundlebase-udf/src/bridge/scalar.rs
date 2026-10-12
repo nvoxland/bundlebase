@@ -189,7 +189,9 @@ impl ScalarUDFImpl for ScalarFunction {
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::common::Result<ColumnarValue> {
         if let Some(reason) = &self.gated {
-            return Err(datafusion::common::DataFusionError::Execution(reason.clone()));
+            return Err(datafusion::common::DataFusionError::Execution(
+                reason.clone(),
+            ));
         }
         if self.overloads.len() == 1 {
             return invoke_entry(
