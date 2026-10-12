@@ -49,3 +49,5 @@ ideas
 .dolt/
 *.db
 .beads-credential-key
+
+.claude/scheduled_tasks.lock
