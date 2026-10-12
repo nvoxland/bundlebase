@@ -35,11 +35,11 @@ pub fn join_path(base: &Path, append: &str) -> Result<Path, BundlebaseError> {
                 None => "/".to_string(),
             })?;
         } else {
-            obj_path = obj_path.child(segment);
+            obj_path = obj_path.join(segment);
         }
     }
     if append.ends_with('/') {
-        obj_path = obj_path.child("");
+        obj_path = obj_path.join("");
     }
     Ok(obj_path)
 }

@@ -124,10 +124,6 @@ impl BundleInfoSchemaProvider {
 
 #[async_trait]
 impl SchemaProvider for BundleInfoSchemaProvider {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn table_names(&self) -> Vec<String> {
         self.tables.keys().map(|k| k.to_string()).collect()
     }

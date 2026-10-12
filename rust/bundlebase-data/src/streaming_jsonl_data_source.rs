@@ -10,18 +10,19 @@ use arrow::datatypes::SchemaRef;
 use arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadFile;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::{project_schema, DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use object_store::{GetOptions, ObjectStore};
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -91,7 +92,7 @@ impl StreamingJsonlDataSource {
         projection
             .iter()
             .map(|expr| {
-                let column = expr.expr.as_any().downcast_ref::<Column>()?;
+                let column = expr.expr.downcast_ref::<Column>()?;
                 if column.name() != expr.alias {
                     return None;
                 }
@@ -336,10 +337,6 @@ impl DataSource for StreamingJsonlDataSource {
         )))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self)
     }
@@ -355,8 +352,16 @@ impl DataSource for StreamingJsonlDataSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.projected_schema))
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        Ok(Arc::new(Statistics::new_unknown(&self.projected_schema)))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Projection is index-based and no filters are pushed down, so there are no expressions.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {

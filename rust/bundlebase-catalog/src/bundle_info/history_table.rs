@@ -8,7 +8,6 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle commit history dynamically from the BundleFacade.
@@ -38,10 +37,6 @@ impl BundleHistoryTable {
 
 #[async_trait]
 impl TableProvider for BundleHistoryTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         CommitHistory::schema()
     }

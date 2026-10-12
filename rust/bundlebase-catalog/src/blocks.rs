@@ -6,7 +6,6 @@ use bundlebase::bundle::{BundleFacade, DataBlock};
 use bundlebase_common::object_id::BlockId;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// SchemaProvider that exposes individual DataBlock tables.
@@ -64,10 +63,6 @@ impl BlockSchemaProvider {
 
 #[async_trait]
 impl SchemaProvider for BlockSchemaProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn table_names(&self) -> Vec<String> {
         let Some(facade) = self.facade() else {
             return vec![];

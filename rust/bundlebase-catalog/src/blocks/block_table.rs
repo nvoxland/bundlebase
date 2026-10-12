@@ -6,7 +6,6 @@ use datafusion::datasource::TableType;
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::sync::Arc;
 
 /// TableProvider wrapper for DataBlock.
@@ -33,10 +32,6 @@ impl std::fmt::Debug for BlockTable {
 
 #[async_trait]
 impl TableProvider for BlockTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.block.schema()
     }

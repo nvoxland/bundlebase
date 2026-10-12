@@ -9,7 +9,6 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that exposes bundle configuration entries from all layers.
@@ -39,10 +38,6 @@ impl BundleConfigTable {
 
 #[async_trait]
 impl TableProvider for BundleConfigTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         ConfigEntries::schema()
     }

@@ -28,9 +28,8 @@ sha2 = { workspace = true }
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 tar = { workspace = true }
-russh = "0.57"
-russh-sftp = "2.1"
-russh-keys = "0.49"
+russh = "0.64"
+russh-sftp = "3.0"
 suppaftp = { version = "8.0", features = ["tokio"] }
 tempfile = { workspace = true }
 shellexpand = "3.1"

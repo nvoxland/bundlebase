@@ -1431,9 +1431,9 @@ impl PyBundleBuilder {
         let mut col_specs: Vec<(String, Option<String>)> = Vec::new();
         for col in &columns {
             let col_ref = col.bind(py);
-            if let Ok(s) = col_ref.downcast::<PyString>() {
+            if let Ok(s) = col_ref.cast::<PyString>() {
                 col_specs.push((s.to_string(), None));
-            } else if let Ok(t) = col_ref.downcast::<PyTuple>() {
+            } else if let Ok(t) = col_ref.cast::<PyTuple>() {
                 let name = t.get_item(0)?.extract::<String>()?;
                 let expected_type = if t.len() > 1 {
                     Some(t.get_item(1)?.extract::<String>()?)

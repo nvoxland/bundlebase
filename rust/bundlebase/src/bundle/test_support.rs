@@ -5,14 +5,15 @@
 
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::Statistics;
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
 use futures::stream::{Stream, StreamExt};
-use std::any::Any;
 use std::fmt::{self, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -62,10 +63,6 @@ impl DataSource for MockMultiPartitionSource {
         }))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
         write!(f, "MockMultiPartitionSource")
     }
@@ -81,8 +78,16 @@ impl DataSource for MockMultiPartitionSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.schema))
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        Ok(Arc::new(Statistics::new_unknown(&self.schema)))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Test source holds no expressions.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn fetch(&self) -> Option<usize> {

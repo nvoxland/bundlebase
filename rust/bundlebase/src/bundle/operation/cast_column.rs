@@ -52,10 +52,10 @@ impl Operation for CastColumnOp {
         for field in schema.fields() {
             let field_name = field.name();
             if field_name == &internal_name {
-                let cast_expr = Expr::Cast(Cast {
-                    expr: Box::new(Expr::Column(Column::new_unqualified(field_name))),
-                    data_type: self.new_type.clone(),
-                });
+                let cast_expr = Expr::Cast(Cast::new(
+                    Box::new(Expr::Column(Column::new_unqualified(field_name))),
+                    self.new_type.clone(),
+                ));
                 select_exprs.push(cast_expr.alias(field_name.as_str()));
             } else {
                 select_exprs.push(Expr::Column(Column::new_unqualified(field_name)));

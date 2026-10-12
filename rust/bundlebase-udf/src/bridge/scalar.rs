@@ -11,7 +11,6 @@ use bundlebase_common::BundlebaseError;
 use datafusion::logical_expr::{
     ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
-use std::any::Any;
 use std::hash::{Hash, Hasher};
 
 /// Invoke a scalar function entry with the given args.
@@ -141,10 +140,6 @@ impl ScalarFunction {
 }
 
 impl ScalarUDFImpl for ScalarFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         &self.name
     }

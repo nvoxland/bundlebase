@@ -12,7 +12,7 @@ use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use russh::client::{self, AuthResult, Handle};
-use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
+use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh_sftp::client::SftpSession;
 use std::fmt::Debug;
 use std::path::Path;
@@ -36,7 +36,7 @@ impl client::Handler for SshHandler {
 
     fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        _server_public_key: &PublicKeyOrCertificate,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
         // Accept all host keys for now
         // TODO: Add known_hosts verification support

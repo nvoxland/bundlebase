@@ -8,15 +8,16 @@ use bundlebase_data::plugin::ReaderPlugin;
 use bundlebase_data::DataContext;
 use bundlebase_data::RowId;
 use bundlebase_data::{BlockId, DataReader};
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::{DisplayFormatType, ExecutionPlan};
-use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use url::Url;
@@ -185,10 +186,6 @@ impl DataSource for BundlebaseDataSource {
         self.physical_plan.execute(partition, context)
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "BundlebaseDataSource")
     }
@@ -204,8 +201,16 @@ impl DataSource for BundlebaseDataSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.schema))
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        Ok(Arc::new(Statistics::new_unknown(&self.schema)))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // The wrapped physical plan is opaque here; its own nodes report their expressions.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {

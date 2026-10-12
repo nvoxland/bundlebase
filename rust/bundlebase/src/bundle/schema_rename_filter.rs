@@ -4,14 +4,15 @@
 use crate::bundle::bundle_schema;
 use crate::object_id::ColumnId;
 use arrow::datatypes::SchemaRef;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::Statistics;
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
 use futures::stream::Stream;
-use std::any::Any;
 use std::fmt::{self, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -62,10 +63,6 @@ impl DataSource for SchemaRenameDataSource {
         }))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
         // Show the wrapped source too — EXPLAIN output is otherwise opaque
         // about which underlying read strategy (page-filtered, row-id seek,
@@ -106,8 +103,16 @@ impl DataSource for SchemaRenameDataSource {
     fn partition_statistics(
         &self,
         partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
+    ) -> datafusion::common::Result<Arc<Statistics>> {
         self.inner.partition_statistics(partition)
+    }
+
+    fn apply_expressions(
+        &self,
+        f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // This wrapper adds no expressions of its own.
+        self.inner.apply_expressions(f)
     }
 
     fn fetch(&self) -> Option<usize> {

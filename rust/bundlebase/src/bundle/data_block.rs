@@ -25,7 +25,6 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use std::any::Any;
 use std::sync::Arc;
 
 /// Rewrite filter expressions from internal `col_<id>` column names to the
@@ -748,10 +747,6 @@ impl DataBlock {
 
 #[async_trait]
 impl TableProvider for DataBlock {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.read().clone()
     }
@@ -1299,7 +1294,7 @@ impl TableProvider for DataBlock {
                             &overlays,
                             &projected_col_ids,
                             &projected_schema,
-                        );
+                        )?;
                     if overlay_source.has_updates() {
                         source = Arc::new(overlay_source);
                     }
@@ -1424,12 +1419,13 @@ impl TableProvider for DataBlock {
                 }
                 None => current_schema,
             };
-            let overlay_source = crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
-                source.clone(),
-                &overlays,
-                &projected_col_ids,
-                &projected_schema,
-            );
+            let overlay_source =
+                crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
+                    source.clone(),
+                    &overlays,
+                    &projected_col_ids,
+                    &projected_schema,
+                )?;
             if overlay_source.has_updates() {
                 source = Arc::new(overlay_source);
             }

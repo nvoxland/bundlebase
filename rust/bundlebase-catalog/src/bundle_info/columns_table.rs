@@ -9,7 +9,6 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that queries the bundle's columns dynamically from the BundleFacade.
@@ -48,10 +47,6 @@ impl BundleColumnsTable {
 
 #[async_trait]
 impl TableProvider for BundleColumnsTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Self::output_schema()
     }

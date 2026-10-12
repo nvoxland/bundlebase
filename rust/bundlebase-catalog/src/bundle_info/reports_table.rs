@@ -7,7 +7,6 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that exposes stored reports from the BundleFacade.
@@ -77,10 +76,6 @@ impl BundleReportsTable {
 
 #[async_trait]
 impl TableProvider for BundleReportsTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

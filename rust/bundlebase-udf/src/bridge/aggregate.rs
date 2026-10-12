@@ -13,7 +13,6 @@ use datafusion::logical_expr::{
     Accumulator, AggregateUDFImpl, Signature, TypeSignature, Volatility,
 };
 use datafusion::scalar::ScalarValue;
-use std::any::Any;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -130,10 +129,6 @@ impl AggregateFunction {
 }
 
 impl AggregateUDFImpl for AggregateFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         &self.name
     }

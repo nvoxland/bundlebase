@@ -6,14 +6,15 @@
 use arrow::array::BooleanArray;
 use arrow::compute::filter_record_batch;
 use arrow::datatypes::SchemaRef;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::Statistics;
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
 use futures::stream::Stream;
-use std::any::Any;
 use std::fmt::{self, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -66,10 +67,6 @@ impl DataSource for DeletedRowFilterDataSource {
         }))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
@@ -93,7 +90,7 @@ impl DataSource for DeletedRowFilterDataSource {
     fn partition_statistics(
         &self,
         partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
+    ) -> datafusion::common::Result<Arc<Statistics>> {
         // The inner statistics describe the RAW row set. Passing them through
         // unadjusted lets DataFusion's AggregateStatistics rule rewrite
         // COUNT(*) to the raw count — the deleted rows would be counted
@@ -103,7 +100,7 @@ impl DataSource for DeletedRowFilterDataSource {
         // may no longer be tight once rows are removed — degrade to inexact.
         use datafusion::common::stats::Precision;
         let deleted = self.deleted_rows.len();
-        let mut stats = self.inner.partition_statistics(partition)?;
+        let mut stats = Arc::unwrap_or_clone(self.inner.partition_statistics(partition)?);
         stats.num_rows = match stats.num_rows {
             Precision::Exact(n) => Precision::Exact(n.saturating_sub(deleted)),
             Precision::Inexact(n) => Precision::Inexact(n.saturating_sub(deleted)),
@@ -115,7 +112,15 @@ impl DataSource for DeletedRowFilterDataSource {
             .into_iter()
             .map(|c| c.to_inexact())
             .collect();
-        Ok(stats)
+        Ok(Arc::new(stats))
+    }
+
+    fn apply_expressions(
+        &self,
+        f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // This wrapper adds no expressions of its own.
+        self.inner.apply_expressions(f)
     }
 
     fn fetch(&self) -> Option<usize> {

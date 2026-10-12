@@ -7,7 +7,6 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::sync::Arc;
 
 /// TableProvider that lists all registered bundlebase SQL commands.
@@ -63,10 +62,6 @@ impl CommandsTable {
 
 #[async_trait]
 impl TableProvider for CommandsTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

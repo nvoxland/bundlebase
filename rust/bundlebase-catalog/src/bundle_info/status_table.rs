@@ -8,7 +8,6 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle status (uncommitted changes) dynamically from the BundleFacade.
@@ -38,10 +37,6 @@ impl BundleStatusTable {
 
 #[async_trait]
 impl TableProvider for BundleStatusTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         BundleStatus::schema()
     }

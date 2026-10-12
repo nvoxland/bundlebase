@@ -142,6 +142,7 @@ impl BundleFacadeCommand for ExplainPlanCommand {
             verbose: self.verbose,
             analyze: self.analyze,
             format: self.to_explain_format(),
+            ..Default::default()
         })?;
         Ok(plan_df.execute_stream().await?)
     }

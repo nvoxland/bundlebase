@@ -120,7 +120,7 @@ impl UpdateOverlay {
             .into());
         }
 
-        let merged = Self::merge(overlays);
+        let merged = Self::merge(overlays)?;
         if merged.row_numbers.is_empty() {
             return Ok(batch.clone());
         }
@@ -184,15 +184,15 @@ impl UpdateOverlay {
                 if let Some(idx) = pos {
                     if is_set.value(*idx) {
                         if base_run_start < i {
-                            builder.extend(0, base_run_start, i);
+                            builder.try_extend(0, base_run_start, i)?;
                         }
-                        builder.extend(1, *idx, *idx + 1);
+                        builder.try_extend(1, *idx, *idx + 1)?;
                         base_run_start = i + 1;
                     }
                 }
             }
             if base_run_start < batch.num_rows() {
-                builder.extend(0, base_run_start, batch.num_rows());
+                builder.try_extend(0, base_run_start, batch.num_rows())?;
             }
             new_columns.push(arrow::array::make_array(builder.freeze()));
         }
@@ -204,16 +204,17 @@ impl UpdateOverlay {
     /// Merge multiple overlays into one. Later overlays override earlier ones per-cell.
     ///
     /// Uses MutableArrayData to copy directly from source overlay arrays,
-    /// avoiding Arrow->ScalarValue->Arrow round-trips.
-    pub fn merge(overlays: &[Self]) -> Self {
+    /// avoiding Arrow->ScalarValue->Arrow round-trips. Errors if a merged
+    /// column would overflow its Arrow offsets.
+    pub fn merge(overlays: &[Self]) -> Result<Self, arrow::error::ArrowError> {
         if overlays.is_empty() {
-            return Self {
+            return Ok(Self {
                 row_numbers: Vec::new(),
                 columns: HashMap::new(),
-            };
+            });
         }
         if overlays.len() == 1 {
-            return overlays[0].clone();
+            return Ok(overlays[0].clone());
         }
 
         // Pass 1: determine which overlay wins for each (row_number, column_id).
@@ -275,10 +276,10 @@ impl UpdateOverlay {
             for &row_num in &row_numbers {
                 if let Some(&(ov_idx, src_pos)) = winners.get(&row_num).and_then(|m| m.get(&col_id))
                 {
-                    builder.extend(ov_idx, src_pos, src_pos + 1);
+                    builder.try_extend(ov_idx, src_pos, src_pos + 1)?;
                     is_set_vec.push(true);
                 } else {
-                    builder.extend_nulls(1);
+                    builder.try_extend_nulls(1)?;
                     is_set_vec.push(false);
                 }
             }
@@ -288,10 +289,10 @@ impl UpdateOverlay {
             columns.insert(col_id, (array, mask));
         }
 
-        Self {
+        Ok(Self {
             row_numbers,
             columns,
-        }
+        })
     }
 }
 
@@ -881,7 +882,7 @@ mod tests {
             },
         };
 
-        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        let merged = UpdateOverlay::merge(&[ov1, ov2]).expect("merge");
         assert_eq!(merged.row_numbers, vec![5, 10]);
 
         let (values, is_set) = merged.columns.get(&col_id).expect("column missing");
@@ -934,7 +935,7 @@ mod tests {
             },
         };
 
-        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        let merged = UpdateOverlay::merge(&[ov1, ov2]).expect("merge");
         assert_eq!(merged.row_numbers, vec![3]);
 
         let (val_a, set_a) = merged.columns.get(&col_a).expect("col_a missing");
@@ -985,7 +986,7 @@ mod tests {
             },
         };
 
-        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        let merged = UpdateOverlay::merge(&[ov1, ov2]).expect("merge");
         assert_eq!(merged.row_numbers, vec![1, 2, 3, 4]);
 
         let (values, is_set) = merged.columns.get(&col_id).expect("column missing");

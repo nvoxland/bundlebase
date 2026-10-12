@@ -8,7 +8,6 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle blocks dynamically from the BundleFacade.
@@ -156,10 +155,6 @@ impl BundleBlocksTable {
 
 #[async_trait]
 impl TableProvider for BundleBlocksTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

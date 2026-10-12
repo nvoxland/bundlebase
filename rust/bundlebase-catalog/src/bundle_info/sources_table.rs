@@ -9,7 +9,6 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
@@ -149,10 +148,6 @@ impl BundleSourcesTable {
 
 #[async_trait]
 impl TableProvider for BundleSourcesTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }

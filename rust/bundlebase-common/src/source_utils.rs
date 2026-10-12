@@ -384,7 +384,7 @@ pub async fn record_batch_stream_to_parquet(
                 parquet::basic::ZstdLevel::try_new(3)
                     .unwrap_or(parquet::basic::ZstdLevel::default()),
             ))
-            .set_max_row_group_size(128 * 1024) // 128K rows per row group
+            .set_max_row_group_row_count(Some(128 * 1024)) // 128K rows per row group
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_bloom_filter_enabled(true)
             .build();
@@ -503,7 +503,7 @@ pub fn json_to_parquet_with_options(
                 parquet::basic::ZstdLevel::try_new(3)
                     .unwrap_or(parquet::basic::ZstdLevel::default()),
             ))
-            .set_max_row_group_size(128 * 1024)
+            .set_max_row_group_row_count(Some(128 * 1024))
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_bloom_filter_enabled(true)
             .build();

@@ -32,10 +32,6 @@ impl DefaultSchemaProvider {
 
 #[async_trait]
 impl SchemaProvider for DefaultSchemaProvider {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn table_names(&self) -> Vec<String> {
         vec![BUNDLE_TABLE.to_string()]
     }

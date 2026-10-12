@@ -7,7 +7,6 @@ use bundlebase::bundle::{BundleFacade, Pack};
 use bundlebase_common::object_id::ObjectId;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
-use std::any::Any;
 use std::sync::{Arc, Weak};
 
 /// SchemaProvider that exposes Pack tables.
@@ -51,10 +50,6 @@ impl PackSchemaProvider {
 
 #[async_trait]
 impl SchemaProvider for PackSchemaProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn table_names(&self) -> Vec<String> {
         let Some(facade) = self.facade() else {
             return vec![];

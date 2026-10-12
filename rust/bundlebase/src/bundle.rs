@@ -2446,9 +2446,6 @@ mod tests {
         }
         #[async_trait]
         impl datafusion::catalog::SchemaProvider for TestDefaultSchemaProvider {
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
             fn table_names(&self) -> Vec<String> {
                 vec![BUNDLE_TABLE.to_string()]
             }

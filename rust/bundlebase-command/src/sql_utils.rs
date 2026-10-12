@@ -12,10 +12,10 @@ pub fn build_try_cast_sql(col_sql: &str, data_type: &DataType) -> Result<String,
     use datafusion::prelude::col;
     use datafusion::sql::unparser::expr_to_sql;
 
-    expr_to_sql(&Expr::TryCast(TryCast {
-        expr: Box::new(col(col_sql)),
-        data_type: data_type.clone(),
-    }))
+    expr_to_sql(&Expr::TryCast(TryCast::new(
+        Box::new(col(col_sql)),
+        data_type.clone(),
+    )))
     .map(|e| e.to_string())
     .map_err(|e| BundlebaseError::from(format!("Cannot build cast expression: {}", e)))
 }

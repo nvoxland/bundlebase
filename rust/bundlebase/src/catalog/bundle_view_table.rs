@@ -7,7 +7,6 @@ use datafusion::logical_expr::{
     Expr, LogicalPlan, LogicalPlanBuilder, TableProviderFilterPushDown,
 };
 use datafusion::physical_plan::ExecutionPlan;
-use std::any::Any;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -43,10 +42,6 @@ impl BundleViewTable {
 
 #[async_trait]
 impl TableProvider for BundleViewTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn get_logical_plan(&self) -> Option<Cow<'_, LogicalPlan>> {
         Some(Cow::Borrowed(&self.plan))
     }

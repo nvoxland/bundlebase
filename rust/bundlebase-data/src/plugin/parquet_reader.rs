@@ -110,7 +110,7 @@ impl ParquetDataReader {
     pub fn new(
         inner: FileReader<ParquetFormatConfig>,
         block_id: BlockId,
-        metadata_cache: Arc<dyn FileMetadataCache>,
+        metadata_cache: Arc<FileMetadataCache>,
         layout: Option<ObjectStoreFile>,
     ) -> Self {
         let store = inner.file().store();

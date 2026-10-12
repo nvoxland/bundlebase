@@ -26,6 +26,7 @@ use arrow::compute;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableFunctionImpl, TableProvider};
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::{project_schema, Statistics};
 use datafusion::datasource::source::{DataSource, DataSourceExec};
 use datafusion::datasource::MemTable;
@@ -34,6 +35,7 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::ExecutionPlan;
@@ -359,10 +361,6 @@ impl SearchResultTableProvider {
 
 #[async_trait]
 impl TableProvider for SearchResultTableProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.output_schema.clone()
     }
@@ -912,10 +910,6 @@ impl DataSource for SearchDataSource {
         )))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(
         &self,
         _t: datafusion::physical_plan::DisplayFormatType,
@@ -935,8 +929,16 @@ impl DataSource for SearchDataSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.projected_schema))
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        Ok(Arc::new(Statistics::new_unknown(&self.projected_schema)))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Search results are fixed at scan time; no filters are pushed into this source.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
@@ -984,10 +986,6 @@ impl DataSource for EmptySearchDataSource {
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, empty)))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(
         &self,
         _t: datafusion::physical_plan::DisplayFormatType,
@@ -1007,8 +1005,16 @@ impl DataSource for EmptySearchDataSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.projected_schema))
+    ) -> datafusion::common::Result<Arc<Statistics>> {
+        Ok(Arc::new(Statistics::new_unknown(&self.projected_schema)))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Search results are fixed at scan time; no filters are pushed into this source.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {

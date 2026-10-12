@@ -19,7 +19,6 @@ use datafusion::logical_expr::{
     ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, TypeSignature,
     Volatility,
 };
-use std::any::Any;
 use std::sync::Arc;
 
 /// The version() scalar function implementation.
@@ -65,10 +64,6 @@ impl VersionFunction {
 }
 
 impl ScalarUDFImpl for VersionFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         "version"
     }

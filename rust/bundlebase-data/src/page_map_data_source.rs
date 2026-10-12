@@ -3,17 +3,18 @@ use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadFile;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::{project_schema, DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_expr::EquivalenceProperties;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
 use futures::stream::{self, StreamExt};
 use object_store::{GetOptions, GetRange, ObjectStore, ObjectStoreExt};
-use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -324,7 +325,7 @@ impl PageMapDataSource {
         projection
             .iter()
             .map(|expr| {
-                let column = expr.expr.as_any().downcast_ref::<Column>()?;
+                let column = expr.expr.downcast_ref::<Column>()?;
                 // An aliased column must keep its Projection node — swapping
                 // drops the alias and collapses duplicate source columns
                 // (DataFusion's all_alias_free_columns rule).
@@ -606,10 +607,6 @@ impl DataSource for PageMapDataSource {
         )))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self)
     }
@@ -627,11 +624,19 @@ impl DataSource for PageMapDataSource {
     fn partition_statistics(
         &self,
         _partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
+    ) -> datafusion::common::Result<Arc<Statistics>> {
         // Return statistics based on the row IDs we'll read
         let mut stats = Statistics::new_unknown(&self.schema);
         stats.num_rows = datafusion::common::stats::Precision::Exact(self.num_rows);
-        Ok(stats)
+        Ok(Arc::new(stats))
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // Projection is index-based and no filters are pushed down, so there are no expressions.
+        Ok(TreeNodeRecursion::Continue)
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
@@ -1104,7 +1109,6 @@ mod tests {
 
         let limited = source.with_fetch(Some(2)).expect("supports fetch");
         let limited = limited
-            .as_any()
             .downcast_ref::<PageMapDataSource>()
             .expect("page map datasource");
 
@@ -1139,7 +1143,6 @@ mod tests {
             .expect("projection swap result")
             .expect("projection swap supported");
         let swapped = swapped
-            .as_any()
             .downcast_ref::<PageMapDataSource>()
             .expect("page map datasource");
 

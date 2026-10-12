@@ -1309,7 +1309,7 @@ impl IOReadDir for TarDir {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
-            self.path.child(name.trim_start_matches('/'))
+            self.path.clone().join(name.trim_start_matches('/'))
         };
 
         let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
@@ -1327,7 +1327,7 @@ impl IOReadDir for TarDir {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
-            self.path.child(name.trim_start_matches('/'))
+            self.path.clone().join(name.trim_start_matches('/'))
         };
 
         let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
@@ -1347,7 +1347,7 @@ impl IOReadWriteDir for TarDir {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
-            self.path.child(name.trim_start_matches('/'))
+            self.path.clone().join(name.trim_start_matches('/'))
         };
 
         let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;
@@ -1365,7 +1365,7 @@ impl IOReadWriteDir for TarDir {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
-            self.path.child(name.trim_start_matches('/'))
+            self.path.clone().join(name.trim_start_matches('/'))
         };
 
         let new_url = Url::parse(&format!("{}/{}", self.base_tar_url, new_path.as_ref()))?;

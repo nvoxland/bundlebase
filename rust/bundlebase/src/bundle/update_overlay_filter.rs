@@ -8,14 +8,15 @@ use crate::bundle::update_overlay::UpdateOverlay;
 use crate::object_id::ColumnId;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow::datatypes::SchemaRef;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::Statistics;
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
 use futures::stream::Stream;
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{self, Formatter};
 use std::pin::Pin;
@@ -53,7 +54,7 @@ impl UpdateOverlayDataSource {
         overlays: &[UpdateOverlay],
         column_ids: &[ColumnId],
         schema: &SchemaRef,
-    ) -> Self {
+    ) -> Result<Self, arrow::error::ArrowError> {
         // Build ColumnId → schema column index mapping
         let col_id_to_idx: HashMap<ColumnId, usize> = column_ids
             .iter()
@@ -68,7 +69,7 @@ impl UpdateOverlayDataSource {
             .collect();
 
         // Merge all overlays, converting ColumnId keys to schema column indices
-        let merged_overlay = UpdateOverlay::merge(overlays);
+        let merged_overlay = UpdateOverlay::merge(overlays)?;
         let mut columns: HashMap<usize, (ArrayRef, BooleanArray)> = HashMap::new();
         for (col_id, (values, is_set)) in &merged_overlay.columns {
             if let Some(&col_idx) = col_id_to_idx.get(col_id) {
@@ -83,14 +84,14 @@ impl UpdateOverlayDataSource {
 
         let updated_row_count = merged_overlay.row_numbers.len();
 
-        Self {
+        Ok(Self {
             inner,
             overlay: Arc::new(MergedOverlay {
                 row_numbers: merged_overlay.row_numbers,
                 columns,
             }),
             updated_row_count,
-        }
+        })
     }
 
     pub fn has_updates(&self) -> bool {
@@ -140,10 +141,6 @@ impl DataSource for UpdateOverlayDataSource {
         }))
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
@@ -167,18 +164,26 @@ impl DataSource for UpdateOverlayDataSource {
     fn partition_statistics(
         &self,
         partition: Option<usize>,
-    ) -> datafusion::common::Result<Statistics> {
+    ) -> datafusion::common::Result<Arc<Statistics>> {
         // Overlays change cell VALUES (not row counts), so the inner
         // min/max/null-count column statistics may no longer be tight —
         // degrade them to inexact so the optimizer doesn't plan (or prune)
         // against pre-update values. Row count passes through unchanged.
-        let mut stats = self.inner.partition_statistics(partition)?;
+        let mut stats = Arc::unwrap_or_clone(self.inner.partition_statistics(partition)?);
         stats.column_statistics = stats
             .column_statistics
             .into_iter()
             .map(|c| c.to_inexact())
             .collect();
-        Ok(stats)
+        Ok(Arc::new(stats))
+    }
+
+    fn apply_expressions(
+        &self,
+        f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> datafusion::common::Result<TreeNodeRecursion>,
+    ) -> datafusion::common::Result<TreeNodeRecursion> {
+        // This wrapper adds no expressions of its own.
+        self.inner.apply_expressions(f)
     }
 
     fn fetch(&self) -> Option<usize> {
@@ -311,16 +316,16 @@ impl UpdateOverlayStream {
                 {
                     // Flush any pending base rows
                     if base_run_start < i {
-                        builder.extend(0, base_run_start, i);
+                        builder.try_extend(0, base_run_start, i)?;
                     }
                     // Copy one row from overlay (source 1)
-                    builder.extend(1, overlay_pos, overlay_pos + 1);
+                    builder.try_extend(1, overlay_pos, overlay_pos + 1)?;
                     base_run_start = i + 1;
                 }
             }
             // Flush remaining base rows
             if base_run_start < num_rows as usize {
-                builder.extend(0, base_run_start, num_rows as usize);
+                builder.try_extend(0, base_run_start, num_rows as usize)?;
             }
 
             let new_col = arrow::array::make_array(builder.freeze());
@@ -382,7 +387,7 @@ mod tests {
         let schema: SchemaRef =
             Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
         // No overlays — exercising partition/fetch invariants only.
-        UpdateOverlayDataSource::new(inner, &[], &[], &schema)
+        UpdateOverlayDataSource::new(inner, &[], &[], &schema).expect("overlay source")
     }
 
     #[tokio::test]
