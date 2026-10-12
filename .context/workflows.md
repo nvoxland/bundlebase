@@ -266,7 +266,7 @@ poetry run pytest -k deduplicate
 
 **All tests**:
 ```bash
-# Rust tests (use the test profile — see CLAUDE.md build guidance)
+# Rust tests (use the test profile — see AGENTS.md build guidance)
 cargo test --profile test
 
 # Python tests

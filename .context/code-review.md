@@ -258,7 +258,7 @@ If PR modifies data processing:
 
 - [ ] Relevant `.context/` files updated (if architectural change)
 - [ ] ADR created if major decision (see [decisions/README.md](decisions/README.md))
-- [ ] CLAUDE.md updated if new feature changes workflow
+- [ ] AGENTS.md updated if new feature changes workflow
 - [ ] Examples in docs are runnable and current
 
 ---

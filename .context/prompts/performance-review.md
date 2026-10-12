@@ -18,7 +18,7 @@ Before starting, read:
 1. **[decisions/003-streaming-only.md](../decisions/003-streaming-only.md)** - Why streaming is critical
 2. **[architecture.md](../architecture.md#streaming-execution-architecture)** - How streaming works
 3. **[python-api.md](../python-api.md#streaming-api-for-large-datasets)** - Python streaming patterns
-4. **CLAUDE.md Performance Guidelines** section
+4. **AGENTS.md Performance Guidelines** section
 
 ## Critical Performance Rules
 

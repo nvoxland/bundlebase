@@ -269,7 +269,7 @@ Each domain documentation file follows a consistent structure:
 1. Create file in `.context/` directory with descriptive name
 2. Follow the standard file structure (see Documentation Standards above)
 3. Add entry to this README.md navigation section
-4. Update CLAUDE.md with reference to new file
+4. Update AGENTS.md with reference to new file
 5. Include practical code examples adapted to bundlebase's tech stack
 
 ### Maintaining Documentation Quality

@@ -67,7 +67,7 @@ See [ai-rules.md](../ai-rules.md) for full list.
 
 - [ ] Add docstrings to all public Rust items (`///` comments)
 - [ ] Add Python docstrings with examples
-- [ ] Update [CLAUDE.md](../../CLAUDE.md) if feature changes development workflow
+- [ ] Update [AGENTS.md](../../AGENTS.md) if feature changes development workflow
 - [ ] Consider creating new ADR in [decisions/](../decisions/) if architectural
 - [ ] Update [README.md](../README.md) navigation if new major section
 
