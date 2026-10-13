@@ -11,15 +11,15 @@ use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::file_format::FileFormat;
+use datafusion::datasource::listing::PartitionedFile;
 use datafusion::datasource::physical_plan::{
     parquet::CachedParquetFileReaderFactory, FileSource, ParquetFileReaderFactory, ParquetSource,
 };
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::cache::cache_manager::FileMetadataCache;
 use datafusion::logical_expr::Expr;
-use datafusion::parquet::arrow::async_reader::{
-    ParquetObjectReader, ParquetRecordBatchStreamBuilder,
-};
+use datafusion::parquet::arrow::async_reader::{AsyncFileReader, ParquetRecordBatchStreamBuilder};
+use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::prelude::SessionContext;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -125,6 +125,33 @@ impl ParquetDataReader {
 }
 
 impl ParquetDataReader {
+    /// Open an async reader for this file through the cached reader factory,
+    /// so footer metadata is shared with DataFusion scans of the same file.
+    fn file_reader(
+        &self,
+        object_meta: object_store::ObjectMeta,
+    ) -> Result<Box<dyn AsyncFileReader>, BundlebaseError> {
+        // `AsyncFileReader: Send`, and parquet implements the trait for
+        // `Box<dyn AsyncFileReader>` (not `+ Send`), so drop the redundant bound.
+        Ok(self.reader_factory.create_reader(
+            0,
+            PartitionedFile::from(object_meta),
+            None,
+            &ExecutionPlanMetricsSet::new(),
+        )?)
+    }
+
+    /// Like [`Self::file_reader`], fetching the object metadata first.
+    async fn open_file_reader(&self) -> Result<Box<dyn AsyncFileReader>, BundlebaseError> {
+        let object_meta = self.inner.file().object_meta().await?.ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Parquet file not found: {}",
+                self.inner.file().url()
+            ))
+        })?;
+        self.file_reader(object_meta)
+    }
+
     /// Extract basic min/max/null_count/distinct_count from the Parquet footer.
     /// Does not scan row data — only reads the file footer.
     async fn column_stats_from_footer(
@@ -133,10 +160,7 @@ impl ParquetDataReader {
         use crate::page_map::ColumnStats;
 
         // Read Parquet metadata (only fetches footer, no row data)
-        let store = self.inner.file().store();
-        let path = self.inner.file().store_path().clone();
-        let object_reader = ParquetObjectReader::new(store, path);
-        let builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+        let builder = ParquetRecordBatchStreamBuilder::new(self.open_file_reader().await?)
             .await
             .map_err(|e| {
                 BundlebaseError::from(format!("Failed to read Parquet metadata: {}", e))
@@ -252,7 +276,6 @@ impl DataReader for ParquetDataReader {
         limit: Option<usize>,
         _row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
-        use datafusion::datasource::listing::PartitionedFile;
         use datafusion::datasource::physical_plan::FileScanConfigBuilder;
 
         let metadata = self
@@ -328,10 +351,7 @@ impl DataReader for ParquetDataReader {
         let mut row_count = 0u64;
 
         // Stream all Parquet rows, casting to Utf8 for the stats builder.
-        let store = self.inner.file().store();
-        let path = self.inner.file().store_path().clone();
-        let object_reader = ParquetObjectReader::new(store, path);
-        let parquet_builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+        let parquet_builder = ParquetRecordBatchStreamBuilder::new(self.open_file_reader().await?)
             .await
             .map_err(|e| {
                 BundlebaseError::from(format!("Failed to open Parquet for stats: {}", e))
@@ -393,10 +413,6 @@ impl DataReader for ParquetDataReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        // Get object store components for stream-based reading
-        let store = self.inner.file().store();
-        let path = self.inner.file().store_path().clone();
-
         // Get file metadata (size, timestamps, etc.) without reading file content
         let object_meta = self
             .inner
@@ -406,9 +422,8 @@ impl DataReader for ParquetDataReader {
             .ok_or_else(|| BundlebaseError::from("Parquet file not found"))?;
         let file_size = object_meta.size as usize;
 
-        // Create async Parquet reader using ObjectStore (only reads metadata footer)
-        let object_reader = ParquetObjectReader::new(store, path);
-        let builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+        // Create async Parquet reader (only reads metadata footer)
+        let builder = ParquetRecordBatchStreamBuilder::new(self.file_reader(object_meta)?)
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
@@ -432,13 +447,8 @@ impl DataReader for ParquetDataReader {
         _ctx: Arc<SessionContext>,
         projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
-        // Get object store components
-        let store = self.inner.file().store();
-        let path = self.inner.file().store_path().clone();
-
         // Create async Parquet reader
-        let object_reader = ParquetObjectReader::new(store, path);
-        let mut builder = ParquetRecordBatchStreamBuilder::new(object_reader)
+        let mut builder = ParquetRecordBatchStreamBuilder::new(self.open_file_reader().await?)
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
@@ -879,6 +889,45 @@ mod tests {
             113629, bytes,
             "Parquet statistics should return correct file size in bytes. Got {} bytes",
             bytes
+        );
+
+        Ok(())
+    }
+
+    /// Footer reads go through DataFusion's cached reader factory, so the
+    /// parsed metadata is shared with later query scans of the same file
+    /// instead of being re-fetched and re-decoded.
+    #[tokio::test]
+    async fn test_footer_reads_populate_session_metadata_cache() -> Result<(), BundlebaseError> {
+        let plugin = ParquetPlugin::default();
+
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                test_datafile("userdata.parquet"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        let cache = binding
+            .session_context()
+            .runtime_env()
+            .cache_manager
+            .get_file_metadata_cache();
+        assert_eq!(0, cache.len(), "cache should start empty");
+
+        reader.read_statistics().await?;
+
+        assert_eq!(
+            1,
+            cache.len(),
+            "reading the footer should populate the session's file metadata cache"
         );
 
         Ok(())
