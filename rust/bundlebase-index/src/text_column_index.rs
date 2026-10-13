@@ -301,7 +301,7 @@ impl TextIndex {
 
         // Execute search
         let top_docs = searcher
-            .search(&parsed_query, &TopDocs::with_limit(limit))
+            .search(&parsed_query, &TopDocs::with_limit(limit).order_by_score())
             .map_err(|e| BundlebaseError::from(format!("Search failed: {}", e)))?;
 
         // Collect results
@@ -764,7 +764,7 @@ pub fn search_in_unified(
         BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e))
     })?;
     let top_docs = searcher
-        .search(&parsed, &TopDocs::with_limit(limit))
+        .search(&parsed, &TopDocs::with_limit(limit).order_by_score())
         .map_err(|e| BundlebaseError::from(format!("Search failed: {}", e)))?;
 
     let mut hits = Vec::with_capacity(top_docs.len());

@@ -41,8 +41,8 @@ libloading = { workspace = true }
 # Feature-gated connector deps
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"], optional = true }
 postgres-types = { version = "0.2", features = ["derive"], optional = true }
-zip = { version = "8.1", default-features = false, features = ["deflate"], optional = true }
-scraper = { version = "0.25", optional = true }
+zip = { version = "9.0", default-features = false, features = ["deflate"], optional = true }
+scraper = { version = "0.27", optional = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

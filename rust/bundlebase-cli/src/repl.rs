@@ -347,6 +347,8 @@ pub async fn start(
                 info!("Goodbye!");
                 break;
             }
+            // Host-command and other signals aren't bound in this REPL.
+            _ => {}
         }
     }
 

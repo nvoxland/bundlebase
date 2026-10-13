@@ -8,7 +8,7 @@ use bundlebase_common::progress::run_with_tracker;
 use bundlebase_common::BundlebaseError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars;
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -193,7 +193,7 @@ impl BundlebaseMcpServer {
         {
             let guard = self.bundles.lock().await;
             if guard.contains_key(&params.bundle) {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "A bundle is already open with identifier '{}'. Use close_bundle first or choose a different identifier.",
                     params.bundle
                 ))]));
@@ -207,12 +207,12 @@ impl BundlebaseMcpServer {
                     .lock()
                     .await
                     .insert(params.bundle.clone(), builder);
-                Ok(CallToolResult::success(vec![Content::text(format!(
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Created bundle '{}' at {}",
                     params.bundle, url
                 ))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Failed to create bundle: {}",
                 e
             ))])),
@@ -230,12 +230,12 @@ impl BundlebaseMcpServer {
         match BundleBuilder::upgrade_bundle(&params.path, None).await {
             Ok(()) => {
                 let version = bundlebase_common::format_version_string();
-                Ok(CallToolResult::success(vec![Content::text(format!(
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Bundle at '{}' upgraded to version {}",
                     params.path, version
                 ))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Failed to upgrade bundle: {}",
                 e
             ))])),
@@ -253,7 +253,7 @@ impl BundlebaseMcpServer {
         {
             let guard = self.bundles.lock().await;
             if guard.contains_key(&params.bundle) {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "A bundle is already open with identifier '{}'. Use close_bundle first or choose a different identifier.",
                     params.bundle
                 ))]));
@@ -281,7 +281,7 @@ impl BundlebaseMcpServer {
                     .lock()
                     .await
                     .insert(params.bundle.clone(), bundle);
-                Ok(CallToolResult::success(vec![Content::text(format!(
+                Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Opened bundle '{}' at {} (version {}, {} commit{})",
                     params.bundle,
                     url,
@@ -290,7 +290,7 @@ impl BundlebaseMcpServer {
                     if commits == 1 { "" } else { "s" }
                 ))]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Failed to open bundle: {}",
                 e
             ))])),
@@ -307,12 +307,12 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let mut guard = self.bundles.lock().await;
         if guard.remove(&params.bundle).is_none() {
-            return Ok(CallToolResult::error(vec![Content::text(format!(
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "No bundle is open with identifier '{}'.",
                 params.bundle
             ))]));
         }
-        Ok(CallToolResult::success(vec![Content::text(format!(
+        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Bundle '{}' closed.",
             params.bundle
         ))]))
@@ -329,7 +329,7 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
 
         // If the client provided a progressToken, install an MCP progress tracker
@@ -342,8 +342,8 @@ impl BundlebaseMcpServer {
         };
 
         match result {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -360,11 +360,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_describe(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -380,12 +380,12 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         let limit = params.limit.unwrap_or(10).min(1000);
         match tools::get_analyze(&bundle, limit).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -404,11 +404,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_data_quality(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -425,13 +425,13 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         let dimensions = params.dimensions.unwrap_or_default();
         let limit = params.limit.unwrap_or(100).min(1000);
         match tools::get_metric(&bundle, &params.name, &dimensions, limit).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -448,11 +448,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_schema(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -466,11 +466,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_count(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -484,12 +484,12 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         let limit = params.limit.unwrap_or(10).min(1000);
         match tools::get_sample(&bundle, limit).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -503,11 +503,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_status(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -521,11 +521,11 @@ impl BundlebaseMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            Err(e) => return Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         };
         match tools::get_history(&bundle).await {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
         }
     }
 
@@ -551,8 +551,8 @@ impl BundlebaseMcpServer {
         )
         .await
         {
-            Ok(msg) => Ok(CallToolResult::success(vec![Content::text(msg)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Ok(msg) => Ok(CallToolResult::success(vec![ContentBlock::text(msg)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Report generation failed: {}",
                 e
             ))])),
@@ -566,7 +566,7 @@ impl BundlebaseMcpServer {
     async fn list_bundles(&self) -> Result<CallToolResult, McpError> {
         let guard = self.bundles.lock().await;
         if guard.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No bundles are currently open.",
             )]));
         }
@@ -582,8 +582,8 @@ impl BundlebaseMcpServer {
             })
             .collect();
         match serde_json::to_string_pretty(&entries) {
-            Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+            Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
+            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "JSON error: {}",
                 e
             ))])),
@@ -593,8 +593,8 @@ impl BundlebaseMcpServer {
 
 #[tool_handler]
 impl ServerHandler for BundlebaseMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(
                 "bundlebase",
                 env!("CARGO_PKG_VERSION"),

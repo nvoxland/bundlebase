@@ -120,15 +120,12 @@ impl FtpFile {
                         ))
                     })?;
 
-                stream
-                    .finalize_retr_stream(data_stream)
-                    .await
-                    .map_err(|e| {
-                        BundlebaseError::from(format!(
-                            "Failed to finalize FTP download for '{}': {}",
-                            self.path, e
-                        ))
-                    })?;
+                data_stream.finish().await.map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to finalize FTP download for '{}': {}",
+                        self.path, e
+                    ))
+                })?;
                 if let Err(e) = stream.quit().await {
                     debug!("Error closing FTP connection: {}", e);
                 }

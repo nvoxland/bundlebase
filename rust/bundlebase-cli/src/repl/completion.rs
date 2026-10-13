@@ -1,7 +1,7 @@
 use crate::repl::commands::{self, ReplCommand};
 use bundlebase::BundleFacade;
 use bundlebase_command::parser::available_commands;
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 use std::sync::Arc;
 
 pub struct BundleCompleter {
@@ -82,7 +82,13 @@ impl BundleCompleter {
 }
 
 impl Completer for BundleCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.suggestions(line, pos))
+    }
+}
+
+impl BundleCompleter {
+    fn suggestions(&self, line: &str, pos: usize) -> Vec<Suggestion> {
         let mut suggestions = Vec::new();
 
         // Safety check: ensure pos is within bounds
@@ -114,6 +120,7 @@ impl Completer for BundleCompleter {
                                 span,
                                 append_whitespace: false,
                                 match_indices: None,
+                                display_override: None,
                             });
                         }
                     }
@@ -136,6 +143,7 @@ impl Completer for BundleCompleter {
                                 span,
                                 append_whitespace: false,
                                 match_indices: None,
+                                display_override: None,
                             });
                         }
                     }
@@ -162,6 +170,7 @@ impl Completer for BundleCompleter {
                         span,
                         append_whitespace: true,
                         match_indices: None,
+                        display_override: None,
                     });
                 }
             }
@@ -199,6 +208,7 @@ impl Completer for BundleCompleter {
                                 span,
                                 append_whitespace: false,
                                 match_indices: None,
+                                display_override: None,
                             });
                         }
                     }

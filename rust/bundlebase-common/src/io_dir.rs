@@ -5,7 +5,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-use rand::Rng;
+use rand::RngExt;
 use std::fmt::Debug;
 use url::Url;
 use xxhash_rust::xxh3::Xxh3;

@@ -1,6 +1,6 @@
 //! ObjectId module for unique object identification.
 
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A globally unique 64-bit identifier for objects (blocks, packs, indexes, views, etc.).

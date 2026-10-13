@@ -30,7 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tar = { workspace = true }
 russh = "0.64"
 russh-sftp = "3.0"
-suppaftp = { version = "8.0", features = ["tokio"] }
+suppaftp = { version = "12.2", features = ["tokio"] }
 tempfile = { workspace = true }
 shellexpand = "3.1"
 parking_lot = { workspace = true }

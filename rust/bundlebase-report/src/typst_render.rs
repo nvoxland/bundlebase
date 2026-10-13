@@ -1,8 +1,8 @@
 //! Typst compilation: assembles report elements into a Typst document and compiles to PDF.
 
 use bundlebase_common::BundlebaseError;
-use typst::layout::PagedDocument;
 use typst_as_lib::TypstEngine;
+use typst_layout::PagedDocument;
 
 /// A resolved report element ready for Typst rendering.
 pub enum ResolvedElement {

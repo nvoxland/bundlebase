@@ -39,18 +39,18 @@ async-stream = "0.3"
 async-trait = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
-reedline = "0.45"
-dirs = "6"
-comfy-table = "7.2"
+reedline = "0.52"
+dirs = "7"
+comfy-table = "8.0"
 anyhow = "1.0"
 indicatif = "0.18"
 parking_lot = { workspace = true }
 uuid = { workspace = true }
 once_cell = "1.21"
 prost = "0.14"
-base64 = "0.22"
+base64 = "0.23"
 bundlebase-report = { path = "../bundlebase-report" }
-rmcp = { version = "1.2", features = ["server", "transport-io"] }
+rmcp = { version = "3.5", features = ["server", "transport-io"] }
 schemars = "1"
 
 [dev-dependencies]

@@ -112,7 +112,7 @@ pub fn format_batches_as_table(
     }
 
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    table.load_style(UTF8_FULL);
     // Use the simpler `Disabled` arrangement: each cell renders as-is
     // (after the per-cell cap below trims paragraph-long values). The
     // Dynamic arrangement was problematic with 50+ column schemas — it

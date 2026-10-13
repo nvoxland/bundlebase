@@ -30,8 +30,8 @@ rand = { workspace = true }
 url = { version = "2.5", features = ["serde"] }
 tempfile = { workspace = true }
 tar = { workspace = true }
-tantivy = "0.25"
-lru = "0.16"
+tantivy = "0.26"
+lru = "0.18"
 dashmap = "6"
 lazy_static = "1.5"
 
