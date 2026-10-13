@@ -13,7 +13,7 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 bundlebase-sdk = { git = "https://github.com/nvoxland/bundlebase" }
-arrow = "58"
+arrow = "59"
 ```
 
 ## Quick Start
@@ -352,7 +352,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 bundlebase-sdk = { git = "https://github.com/nvoxland/bundlebase" }
-arrow = "58"
+arrow = "59"
 serde_json = "1"
 ```
 

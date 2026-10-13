@@ -16,11 +16,11 @@ This document catalogs bundlebase's external dependencies, version constraints, 
 
 These dependencies are **essential** - bundlebase cannot function without them.
 
-### DataFusion (v53.x)
+### DataFusion (v55.x)
 
 **Purpose:** SQL query engine and DataFrame API
 
-**Version:** `53` (workspace `Cargo.toml`, resolved to 53.0.0; `avro` feature enabled)
+**Version:** `55` (workspace `Cargo.toml`, resolved to 55.2.0; `avro` feature enabled)
 
 **Why this version:**
 - Stable API
@@ -32,20 +32,22 @@ These dependencies are **essential** - bundlebase cannot function without them.
 
 **Rationale:** DataFusion is the core query engine. All query execution goes through DataFusion. Version lock ensures API stability.
 
+**Pinned alongside it:** DataFusion fixes the majors of `arrow`/`arrow-flight`/`arrow-schema`/`parquet`, `sqlparser`, and `object_store` (v55: arrow 59, sqlparser 0.62, object_store 0.13). Don't bump those past what DataFusion depends on, even when `cargo upgrade` offers newer majors -- the types would no longer line up. Check with `curl -s https://crates.io/api/v1/crates/datafusion/<ver>/dependencies`.
+
 **See:** [decisions/002-datafusion-arrow.md](decisions/002-datafusion-arrow.md)
 
 **License:** Apache 2.0
 
 ---
 
-### Apache Arrow (v58.x)
+### Apache Arrow (v59.x)
 
 **Purpose:** Columnar data format and interoperability
 
-**Version:** `58` (resolved to 58.1.0; `ffi` + `pyarrow` features; `arrow-flight` and `parquet` pinned to the same major)
+**Version:** `59` (resolved to 59.3.0; `ffi` + `pyarrow` features; `arrow-flight` and `parquet` pinned to the same major)
 
 **Why this version:**
-- Matches DataFusion v53 requirement
+- Matches DataFusion v55 requirement
 - Stable schema and RecordBatch APIs
 - Interop with Pandas, Polars, PyArrow
 
@@ -57,18 +59,18 @@ These dependencies are **essential** - bundlebase cannot function without them.
 
 ---
 
-### PyO3 (v0.28.x)
+### PyO3 (v0.29.x)
 
 **Purpose:** Rust ↔ Python bindings
 
-**Version:** `0.28` (with `experimental-async`; plus `pyo3-async-runtimes` 0.28 and `pyo3-log` 0.13)
+**Version:** `0.29` (with `experimental-async`; plus `pyo3-async-runtimes` 0.29 and `pyo3-log` 0.13)
 
 **Why this version:**
 - Support for async Python (`experimental-async` feature)
 - Arc-based cloning patterns
 - Good GIL management
 
-**Version policy:** Can upgrade minor versions (0.28.x)
+**Version policy:** Can upgrade minor versions (0.29.x). The major is tied to Arrow: arrow's `pyarrow` feature depends on a specific PyO3 (arrow 59 → PyO3 0.29), and `pyo3-ffi` is a `links` crate, so only one PyO3 can be in the graph.
 
 **Rationale:** PyO3 is the standard for Rust/Python interop. Enables exposing Rust API to Python.
 
@@ -303,8 +305,10 @@ poetry run ./scripts/maturin-build.sh    # Release build
 ### Hard Locks (MUST NOT CHANGE without testing)
 
 ```toml
-datafusion = "53"
-arrow = "58"        # arrow-flight, arrow-schema, parquet pinned to same major
+datafusion = "55"
+arrow = "59"        # arrow-flight, arrow-schema, parquet pinned to same major
+sqlparser = "0.62"  # must match DataFusion's
+object_store = "0.13"  # must match DataFusion's
 ```
 
 **Reason:** API compatibility, ABI compatibility
@@ -321,7 +325,7 @@ arrow = "58"        # arrow-flight, arrow-schema, parquet pinned to same major
 ### Flexible Versions (can upgrade minor)
 
 ```toml
-pyo3 = "0.28"      # 0.28.x OK
+pyo3 = "0.29"      # 0.29.x OK; major follows arrow's pyarrow feature
 tokio = "1"        # 1.x OK
 serde = "1"        # 1.x OK
 ```
@@ -334,11 +338,11 @@ serde = "1"        # 1.x OK
 
 ```
 bundlebase (workspace of rust/bundlebase-* crates)
-├── datafusion = 53 (CRITICAL)
-│   ├── arrow = 58 (CRITICAL)
+├── datafusion = 55 (CRITICAL)
+│   ├── arrow = 59 (CRITICAL)
 │   ├── tokio = 1.x
 │   └── [many DataFusion deps]
-├── pyo3 = 0.28 (bundlebase-python only)
+├── pyo3 = 0.29 (bundlebase-python only)
 │   └── [PyO3 proc macros]
 ├── serde = 1.x
 ├── serde_json = 1.x / serde_yaml_ng = 0.10 (manifests)
@@ -419,7 +423,7 @@ cargo update --dry-run -p datafusion
 open https://github.com/apache/datafusion/releases
 
 # Update version in Cargo.toml
-# datafusion = "54"
+# datafusion = "56"
 
 # Fix breaking changes
 cargo test --no-run
@@ -433,6 +437,12 @@ poetry run pytest
 # Update docs
 # Update .context/dependencies.md with new version
 ```
+
+**Gotchas from past upgrades:**
+- *Pre-release transitive deps break without semver protection.* russh 0.57 pulled RustCrypto `-rc` crates (`rsa 0.10.0-rc`, `pkcs1`/`pkcs8` rcs) that broke on a plain `cargo update`, and pinned a `rand_core 0.10` prerelease that blocked DataFusion 55. When the resolver refuses a version without saying why, run `CARGO_LOG=cargo::core::resolver=trace cargo generate-lockfile 2>&1 | grep conflict_cache`.
+- *DataFusion 55 removed `as_any()` from its traits* (`TableProvider`, `DataSource`, `ExecutionPlan`, UDF impls, `PhysicalExpr`, ...). They are `Any` supertraits with an inherent `downcast_ref` on the trait object.
+- *`DataSource::apply_expressions` is required.* Wrapper sources must delegate to the inner source so dynamic filters stay visible.
+- *tantivy controls the on-disk text index format.* Before bumping, compare `INDEX_FORMAT_VERSION`/`INDEX_FORMAT_OLDEST_SUPPORTED_VERSION` in `src/lib.rs` of both versions.
 
 ---
 
@@ -523,8 +533,8 @@ For users who only need Rust API (no Python):
 
 ```toml
 [dependencies]
-datafusion = "53"
-arrow = "58"
+datafusion = "55"
+arrow = "59"
 tokio = "1"
 serde = "1"
 serde_json = "1"
@@ -534,7 +544,7 @@ log = "0.4"
 
 For Python bindings, add:
 ```toml
-pyo3 = "0.28"
+pyo3 = "0.29"
 ```
 
 ---
@@ -667,9 +677,9 @@ poetry update pyarrow
 ## Summary
 
 **Critical dependencies:**
-- DataFusion v53 (query engine) - LOCKED
-- Arrow v58 (data format) - LOCKED
-- PyO3 v0.28 (Python bindings) - minor updates OK
+- DataFusion v55 (query engine) - LOCKED
+- Arrow v59 (data format) - LOCKED
+- PyO3 v0.29 (Python bindings) - minor updates OK
 - PyArrow >=14 (Python interop) - flexible
 
 **Version policy:**
