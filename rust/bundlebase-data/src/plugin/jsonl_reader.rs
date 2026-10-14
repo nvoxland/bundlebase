@@ -1,3 +1,4 @@
+use crate::layout_cache::load_layout_cached;
 use crate::page_map::{resolve_row_numbers_to_byte_offsets, PageMap};
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
@@ -8,7 +9,6 @@ use async_trait::async_trait;
 use bundlebase_common::BundlebaseError;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
-use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::json::JsonFormat;
 use datafusion::datasource::file_format::FileFormat;
@@ -243,7 +243,7 @@ impl DataReader for JsonlReader {
                 self.inner.file().as_object_store_file(),
                 self.layout.as_ref(),
                 &row_numbers,
-                false, // no header in JSON Lines
+                LineOrientedFormat::JsonLines,
             )
             .await
             .map_err(|e| DataFusionError::External(e))?;
@@ -285,60 +285,29 @@ impl DataReader for JsonlReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        use crate::page_map::LogicalLineCounter;
-        use object_store::GetOptions;
-
-        let object_store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
-
-        // Stream the file counting logical rows — O(1) memory, no buffering.
-        // Blank lines are skipped to match the parser's row numbering.
-        //
-        // This is a fast line count, not a parse: it deliberately does NOT
-        // validate that each line is a JSON object. A malformed (non-object)
-        // line is still counted here, so COUNT(*) can return a number for a
-        // file whose full scan would error (bb-dvo.1). Parsing every line to
-        // reconcile would defeat the streaming-COUNT fast path; for
+        // A fast line count (or the layout's), not a parse: it deliberately
+        // does NOT validate that each line is a JSON object. A malformed
+        // (non-object) line is still counted, so COUNT(*) can return a number
+        // for a file whose full scan would error (bb-dvo.1). Parsing every
+        // line to reconcile would defeat the streaming-COUNT fast path; for
         // well-formed JSONL the count matches the scan exactly (bb-nt8).
-        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
-        let mut stream = get_result.into_stream();
-
-        let mut counter = LogicalLineCounter::new(false, b',');
-        let mut file_size: usize = 0;
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            counter.update(&chunk);
-            file_size += chunk.len();
-        }
-
-        let stats = Statistics {
-            num_rows: Precision::Exact(counter.finish()),
-            total_byte_size: Precision::Exact(file_size),
-            ..Default::default()
-        };
-
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let stats = crate::page_map::line_oriented_statistics(
+            &self.inner.object_store(),
+            &path,
+            self.layout.as_ref(),
+            LineOrientedFormat::JsonLines,
+            b',',
+        )
+        .await?;
         Ok(Some(stats))
     }
 
     async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
-        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
-        use bundlebase_io::IOReadFile;
-
-        let layout_file = match &self.layout {
-            Some(f) => f,
-            None => return Ok(vec![]),
-        };
-        let layout_url = layout_file.url().clone();
-        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
-            cached
-        } else {
-            let loaded = PageMap::load(layout_file).await?;
-            let arc = Arc::new(loaded);
-            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
-            arc
-        };
-        Ok(layout.column_stats.clone())
+        match &self.layout {
+            Some(f) => Ok(load_layout_cached(f).await?.column_stats.clone()),
+            None => Ok(vec![]),
+        }
     }
 
     async fn build_layout(
@@ -346,8 +315,6 @@ impl DataReader for JsonlReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         use crate::column_stats_builder::ColumnStatsBuilder;
-        use crate::page_map::DEFAULT_PAGE_SIZE;
-        use futures::stream;
         use object_store::GetOptions;
         use std::collections::HashMap;
 
@@ -365,17 +332,15 @@ impl DataReader for JsonlReader {
         let name_to_idx: HashMap<&str, usize> =
             col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
 
-        // Pass 1: stream the file through the incremental page-map builder
-        // to get page boundaries — the file is never buffered whole
-        // (bb-xn0.2, ADR-003).
-        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
-        let mut file_stream = get_result.into_stream();
-        let mut pm_builder = crate::page_map::PageMapBuilder::new(false, DEFAULT_PAGE_SIZE, false, b',');
-        while let Some(chunk) = file_stream.next().await {
-            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            pm_builder.feed(&chunk);
-        }
-        let initial_layout = match pm_builder.finish(vec![]) {
+        // Pass 1: page boundaries (streamed — never buffered whole).
+        let initial_layout = match crate::page_map::scan_page_map(
+            &object_store,
+            &path,
+            LineOrientedFormat::JsonLines,
+            b',',
+        )
+        .await?
+        {
             None => return Ok(None),
             Some(l) => l,
         };
@@ -433,17 +398,7 @@ impl DataReader for JsonlReader {
             column_stats,
             ..initial_layout
         };
-        let index_bytes = layout.serialize()?;
-        let data_stream = Box::pin(stream::once(
-            async move { Ok::<_, std::io::Error>(index_bytes) },
-        ));
-        let address = bundlebase_common::ContentAddress::with_sub_type(
-            bundlebase_common::ContentCategory::Block,
-            "layout",
-            bundlebase_common::ContentFormat::Pagemap,
-        )?;
-        let result = data_dir.write_stream(data_stream, &address).await?;
-        Ok(Some(result.file))
+        Ok(Some(crate::page_map::write_layout(&layout, data_dir).await?))
     }
 
     async fn data_source_filtered_pages(
@@ -452,29 +407,17 @@ impl DataReader for JsonlReader {
         filters: &[datafusion::logical_expr::Expr],
         _limit: Option<usize>,
     ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
-        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
         use crate::page_filter::{
             extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound,
             prune_exact_with_bloom, prune_prefix, prune_range,
         };
-        use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
-        use bundlebase_io::IOReadFile;
 
         let layout_file = match &self.layout {
             Some(f) => f,
             None => return Ok(None),
         };
-
-        let layout_url = layout_file.url().clone();
-        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
-            cached
-        } else {
-            let loaded = PageMap::load(layout_file).await?;
-            let arc = Arc::new(loaded);
-            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
-            arc
-        };
+        let layout = load_layout_cached(layout_file).await?;
 
         if layout.pages.len() <= 1 {
             return Ok(None);

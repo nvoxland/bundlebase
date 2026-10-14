@@ -1,4 +1,5 @@
 use crate::bundle::bundle_schema::BundleSchema;
+use crate::bundle::check_text_ordering_comparison_named;
 use crate::bundle::operation::parameter_value::ParameterValue;
 use crate::bundle::operation::Operation;
 use crate::catalog::BundleViewTable;
@@ -9,6 +10,7 @@ use datafusion::dataframe::DataFrame;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -28,13 +30,62 @@ impl FilterOp {
     }
 }
 
+impl FilterOp {
+    fn param_values(&self) -> Vec<ScalarValue> {
+        self.parameters
+            .iter()
+            .map(|p| p.to_scalar_value())
+            .collect()
+    }
+}
+
+/// Internal column name -> user-visible name, for naming a column in errors
+/// raised against a plan written in internal names.
+pub(crate) fn internal_to_display_names(bs: &BundleSchema) -> HashMap<String, String> {
+    bs.name_to_internal_name_map()
+        .into_iter()
+        .map(|(name, internal)| (internal, name))
+        .collect()
+}
+
 impl Operation for FilterOp {
     fn describe(&self) -> String {
         format!("FILTER: {}", self.query)
     }
 
-    async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
-        Ok(())
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        use crate::bundle::BundleFacade;
+        use arrow::array::RecordBatch;
+
+        // Reject `text_col > 100` when the filter is recorded, not at the next
+        // query: plan it against an empty batch with the bundle's schema.
+        // Anything that keeps us from planning here (schema not resolvable
+        // yet, invalid SQL) is left for apply_dataframe — which runs the same
+        // check on the real plan — to report, exactly as before this check.
+        let schema = match bundle.internal_schema().await {
+            Ok(schema) => schema,
+            Err(_) => return Ok(()),
+        };
+        let bs = bundle.bundle_schema();
+        let translated_query = bs.translate_sql(&self.query);
+        let mut config = SessionConfig::new();
+        config.options_mut().sql_parser.enable_ident_normalization = false;
+        let ctx = SessionContext::new_with_config(config);
+        if ctx
+            .register_batch("bundle", RecordBatch::new_empty(schema))
+            .is_err()
+        {
+            return Ok(());
+        }
+        let plan = match ctx.state().create_logical_plan(&translated_query).await {
+            Ok(plan) => plan,
+            Err(_) => return Ok(()),
+        };
+        let plan = match plan.with_param_values(self.param_values()) {
+            Ok(plan) => plan,
+            Err(_) => return Ok(()),
+        };
+        check_text_ordering_comparison_named(&plan, &internal_to_display_names(&bs))
     }
 
     async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
@@ -48,8 +99,6 @@ impl Operation for FilterOp {
         ctx: Arc<SessionContext>,
         bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
-        use crate::bundle::bundle_schema;
-
         let mut span = start_span(OperationCategory::Select, "filter");
         span.set_attribute("sql", &self.query);
         span.set_attribute("param_count", self.parameters.len().to_string());
@@ -65,11 +114,8 @@ impl Operation for FilterOp {
 
         filter_ctx.register_table("bundle", Arc::new(BundleViewTable::new(df)))?;
 
-        let params: Vec<ScalarValue> = self
-            .parameters
-            .iter()
-            .map(|p| p.to_scalar_value())
-            .collect();
+        let params = self.param_values();
+        let display_names = internal_to_display_names(bundle_schema);
 
         let result = async {
             let plan = filter_ctx
@@ -81,6 +127,9 @@ impl Operation for FilterOp {
             let plan = plan
                 .with_param_values(params)
                 .map_err(|e| Box::new(e) as BundlebaseError)?;
+
+            // Before execute_logical_plan's type coercion hides the mistake.
+            check_text_ordering_comparison_named(&plan, &display_names)?;
 
             filter_ctx
                 .execute_logical_plan(plan)

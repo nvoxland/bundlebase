@@ -190,6 +190,25 @@ lazy_static! {
     };
 }
 
+/// Load the layout stored in `file`, through [`GLOBAL_LAYOUT_CACHE`]: a cache
+/// hit returns the shared copy; a miss reads and deserializes the file once
+/// and caches it for later readers.
+pub async fn load_layout_cached(
+    file: &bundlebase_io::plugin::object_store::ObjectStoreFile,
+) -> Result<Arc<PageMap>, bundlebase_common::BundlebaseError> {
+    use bundlebase_io::IOReadFile;
+
+    let url = file.url().clone();
+    if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&url) {
+        log::trace!("Layout cache hit for {}", url);
+        return Ok(cached);
+    }
+    log::debug!("Layout cache miss for {}, loading from disk", url);
+    let loaded = Arc::new(PageMap::load(file).await?);
+    GLOBAL_LAYOUT_CACHE.insert(url, loaded.clone());
+    Ok(loaded)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

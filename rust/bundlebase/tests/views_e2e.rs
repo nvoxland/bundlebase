@@ -83,7 +83,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
         .await?;
     c.commit("v1").await?;
 
-    c.create_view("active", "select * from bundle where \"Index\" > 21")
+    c.create_view("active", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("v2").await?;
 
@@ -126,7 +126,7 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
     // Create view with SQL that has multiple conditions
     c.create_view(
         "working_age",
-        "select * from bundle where \"Index\" > 21 AND \"Index\" < 65",
+        "select * from bundle where CAST(\"Index\" AS BIGINT) > 21 AND CAST(\"Index\" AS BIGINT) < 65",
     )
     .await?;
     c.commit("Add working_age view").await?;
@@ -161,13 +161,13 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
     c.commit("Initial").await?;
 
     // Create first view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add first adults view").await?;
 
     // Try to create view with same name
     let result = c
-        .create_view("adults", "select * from bundle where \"Index\" > 30")
+        .create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 30")
         .await;
 
     assert!(result.is_err());
@@ -189,7 +189,7 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
         .await?;
     c.commit("v1").await?;
 
-    c.create_view("active", "select * from bundle where \"Index\" > 21")
+    c.create_view("active", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("v2").await?;
 
@@ -227,7 +227,7 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
         .await?;
     c.commit("Initial data").await?;
 
-    c.create_view("high_index", "select * where \"Index\" > 50")
+    c.create_view("high_index", "select * where CAST(\"Index\" AS BIGINT) > 50")
         .await?;
     c.commit("Add view").await?;
 
@@ -496,9 +496,9 @@ async fn test_views_method() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create multiple views
-    c.create_view("high_index", "select * where \"Index\" > 50")
+    c.create_view("high_index", "select * where CAST(\"Index\" AS BIGINT) > 50")
         .await?;
-    c.create_view("low_index", "select * where \"Index\" < 30")
+    c.create_view("low_index", "select * where CAST(\"Index\" AS BIGINT) < 30")
         .await?;
 
     c.commit("Add views").await?;
@@ -525,7 +525,7 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 
@@ -594,7 +594,7 @@ async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 
@@ -649,9 +649,9 @@ async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    c.create_view("view1", "select * from bundle where \"Index\" > 21")
+    c.create_view("view1", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
-    c.create_view("view2", "select * from bundle where \"Index\" < 30")
+    c.create_view("view2", "select * from bundle where CAST(\"Index\" AS BIGINT) < 30")
         .await?;
     c.commit("Add two views").await?;
 
@@ -676,7 +676,7 @@ async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view and get its dataframe
-    c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+    c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
         .await?;
     c.commit("Add view").await?;
 
@@ -711,7 +711,7 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create and rename a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 
@@ -774,7 +774,7 @@ async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 
@@ -829,7 +829,7 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create and drop a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 
@@ -859,9 +859,9 @@ async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    c.create_view("view1", "select * from bundle where \"Index\" > 21")
+    c.create_view("view1", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
-    c.create_view("view2", "select * from bundle where \"Index\" < 30")
+    c.create_view("view2", "select * from bundle where CAST(\"Index\" AS BIGINT) < 30")
         .await?;
     c.commit("Add two views").await?;
 
@@ -897,7 +897,7 @@ async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
         .await?;
     c.commit("Add adults view").await?;
 

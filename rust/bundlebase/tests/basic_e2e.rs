@@ -694,3 +694,47 @@ async fn test_text_ordering_comparison_fails_with_cast_hint() -> Result<(), Bund
 
     Ok(())
 }
+
+/// The text-vs-number ordering guard must also cover recorded operations:
+/// a FILTER or ADD COLUMN whose predicate compares a CSV (text) column to a
+/// number would silently compare lexicographically on every later query.
+/// It must fail when recorded, naming the user-visible column.
+#[tokio::test]
+async fn test_text_ordering_comparison_rejected_in_filter_and_add_column(
+) -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+
+    let err = match bundle
+        .filter(r#"SELECT * FROM bundle WHERE "Index" > 50"#, vec![])
+        .await
+    {
+        Ok(_) => panic!("filter comparing a text column to a number must fail"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("lexicographic"), "got: {err}");
+    assert!(err.contains("\"Index\""), "must name the user column, got: {err}");
+
+    let err = match bundle.add_column("big", r#""Index" BETWEEN 10 AND 50"#).await {
+        Ok(_) => panic!("add_column comparing a text column to a number must fail"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("lexicographic"), "got: {err}");
+    assert!(err.contains("\"Index\""), "must name the user column, got: {err}");
+
+    // The bundle is still usable, and the cast spelling is accepted.
+    bundle
+        .filter(
+            r#"SELECT * FROM bundle WHERE CAST("Index" AS BIGINT) > 50"#,
+            vec![],
+        )
+        .await?;
+    bundle
+        .add_column("big", r#"CAST("Index" AS BIGINT) > 90"#)
+        .await?;
+    assert_eq!(50, bundle.num_rows().await?);
+
+    Ok(())
+}

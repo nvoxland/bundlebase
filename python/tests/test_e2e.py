@@ -1065,7 +1065,7 @@ async def test_create_view_basic():
     await c.commit("Initial data")
 
     # Create view with SQL - returns the view builder, but registers on parent
-    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+    view_builder = await c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
     await c.commit("Add high_index view")
 
     # Open view from parent
@@ -1098,7 +1098,7 @@ async def test_view_inherits_parent_changes():
     await c.commit("v1")
 
     # Create view - returns view builder, but we need parent for view lookup
-    view_builder = await c.create_view("active", "select * from bundle where \"Index\" > 50")
+    view_builder = await c.create_view("active", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
     await c.commit("v2")
 
     # Record initial view operations count
@@ -1127,7 +1127,7 @@ async def test_view_with_multiple_operations():
     await c.commit("Initial data")
 
     # Create view with SQL containing multiple conditions
-    view_builder = await c.create_view("mid_range", "select * from bundle where \"Index\" > 20 AND \"Index\" < 80")
+    view_builder = await c.create_view("mid_range", "select * from bundle where CAST(\"Index\" AS BIGINT) > 20 AND CAST(\"Index\" AS BIGINT) < 80")
     await c.commit("Add mid_range view")
 
     # Open view and verify it has the operations
@@ -1149,12 +1149,12 @@ async def test_duplicate_view_name():
     await c.commit("Initial")
 
     # Create first view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 50")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
     await c.commit("Add first adults view")
 
     # Try to create view with same name on PARENT
     with pytest.raises(Exception) as exc_info:
-        await c.create_view("adults", "select * from bundle where \"Index\" > 70")
+        await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 70")
 
     assert "View 'adults' already exists" in str(exc_info.value)
 
@@ -1235,11 +1235,11 @@ async def test_view_chaining():
     await c.commit("Initial data")
 
     # Create first view - keep reference to parent c
-    view1_builder = await c.create_view("view1", "select * from bundle where \"Index\" > 20")
+    view1_builder = await c.create_view("view1", "select * from bundle where CAST(\"Index\" AS BIGINT) > 20")
     await c.commit("Add first view")
 
     # Create second view from base container (parent c)
-    view2_builder = await c.create_view("view2", "select * from bundle where \"Index\" < 80")
+    view2_builder = await c.create_view("view2", "select * from bundle where CAST(\"Index\" AS BIGINT) < 80")
     await c.commit("Add second view")
 
     # Both views should be accessible from parent
@@ -1262,8 +1262,8 @@ async def test_views_method():
     await c.commit("Initial data")
 
     # Create multiple views - keep reference to parent c
-    view1 = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
-    view2 = await c.create_view("low_index", "select * from bundle where \"Index\" < 30")
+    view1 = await c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
+    view2 = await c.create_view("low_index", "select * from bundle where CAST(\"Index\" AS BIGINT) < 30")
 
     await c.commit("Add views")
 
@@ -1287,7 +1287,7 @@ async def test_view_lookup_by_name_and_id():
     await c.commit("Initial data")
 
     # Create a view - keep reference to parent c
-    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+    view_builder = await c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
     await c.commit("Add view")
 
     # Get the view ID
@@ -1335,7 +1335,7 @@ async def test_rename_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
     await c.commit("Add adults view")
 
     # Rename the view
@@ -1380,8 +1380,8 @@ async def test_rename_view_new_name_exists():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.create_view("view1", "select * from bundle where \"Index\" > 21")
-    view2 = await c.create_view("view2", "select * from bundle where \"Index\" < 30")
+    view1 = await c.create_view("view1", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
+    view2 = await c.create_view("view2", "select * from bundle where CAST(\"Index\" AS BIGINT) < 30")
     await c.commit("Add two views")
 
     # Try to rename view1 to view2 (conflict)
@@ -1399,7 +1399,7 @@ async def test_rename_view_preserves_view_data():
     await c.commit("Initial data")
 
     # Create a view
-    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+    view_builder = await c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS BIGINT) > 50")
     await c.commit("Add view")
 
     # Get data before rename
@@ -1428,7 +1428,7 @@ async def test_rename_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and rename a view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
     await c.commit("Add adults view")
 
     await c.rename_view("adults", "adults_renamed")
@@ -1460,7 +1460,7 @@ async def test_drop_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
     await c.commit("Add adults view")
 
     # Verify view exists
@@ -1505,7 +1505,7 @@ async def test_drop_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and drop a view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
     await c.commit("Add adults view")
 
     await c.drop_view("adults")
@@ -1531,8 +1531,8 @@ async def test_drop_view_preserves_other_views():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.create_view("view1", "select * from bundle where \"Index\" > 21")
-    view2 = await c.create_view("view2", "select * from bundle where \"Index\" < 30")
+    view1 = await c.create_view("view1", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
+    view2 = await c.create_view("view2", "select * from bundle where CAST(\"Index\" AS BIGINT) < 30")
     await c.commit("Add two views")
 
     # Verify both views exist
@@ -1565,7 +1565,7 @@ async def test_drop_view_twice_fails():
     await c.commit("Initial data")
 
     # Create a view
-    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
+    view_builder = await c.create_view("adults", "select * from bundle where CAST(\"Index\" AS BIGINT) > 21")
     await c.commit("Add adults view")
 
     # Drop the view

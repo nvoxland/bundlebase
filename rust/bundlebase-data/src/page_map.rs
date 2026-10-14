@@ -21,7 +21,8 @@
 //! Stats blob:   JSON-encoded Vec<ColumnStats> (positional: index = column order in file)
 //! ```
 
-use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
+use crate::layout_cache::load_layout_cached;
+use crate::page_map_data_source::LineOrientedFormat;
 use bundlebase_common::BundlebaseError;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::{IOReadFile, IOReadWriteDir};
@@ -336,8 +337,11 @@ pub struct PageMapBuilder {
     offset: u64,
     /// Absolute offset where the current (unterminated) line starts.
     line_start: u64,
-    /// Whether every byte of the current line seen so far is whitespace.
+    /// Whether every byte of the current line seen so far is one the format's
+    /// parser ignores (see [`is_ignorable_line_byte`]).
     current_line_blank: bool,
+    /// Which format's skipped-line rule applies: CSV when `quote_aware`.
+    line_format: LineOrientedFormat,
     /// CSV field delimiter — quote state is field-start-aware, so the scanner
     /// must know where fields begin. Ignored when `quote_aware` is false.
     delimiter: u8,
@@ -382,6 +386,11 @@ impl PageMapBuilder {
             offset: 0,
             line_start: 0,
             current_line_blank: true,
+            line_format: if quote_aware {
+                LineOrientedFormat::Csv
+            } else {
+                LineOrientedFormat::JsonLines
+            },
             delimiter,
             mode: QuoteMode::FieldStart,
             field_start: 0,
@@ -396,9 +405,15 @@ impl PageMapBuilder {
         }
     }
 
-    /// Mark the current line non-blank if `segment` has any non-whitespace.
+    /// Mark the current line non-blank if `segment` has any byte the
+    /// format's parser would turn into a record.
     fn update_blankness(&mut self, segment: &[u8]) {
-        if self.current_line_blank && segment.iter().any(|b| !b.is_ascii_whitespace()) {
+        let format = self.line_format;
+        if self.current_line_blank
+            && segment
+                .iter()
+                .any(|&b| !is_ignorable_line_byte(b, format))
+        {
             self.current_line_blank = false;
         }
     }
@@ -472,9 +487,10 @@ impl PageMapBuilder {
                 continue;
             }
 
-            // Blank/whitespace-only rows produce no logical row in the parsers
-            // (JSONL skips them, CSV never emits them), so they are not counted
-            // here either — row offsets must align with logical row numbers.
+            // Lines the parser skips produce no logical row, so they are not
+            // counted here either — row offsets must align with logical row
+            // numbers. CSV skips only empty lines; JSONL skips whitespace-only
+            // ones (see [`is_ignorable_line_byte`]).
             let is_blank = self.current_line_blank;
             self.line_start = abs + 1;
             self.current_line_blank = true;
@@ -541,11 +557,13 @@ impl PageMap {
     /// * `skip_first_line` - Whether to skip the first line (e.g., CSV header)
     /// * `page_size` - Target page size in bytes (use `DEFAULT_PAGE_SIZE`)
     /// * `column_stats` - Pre-computed per-column statistics to embed in the layout
-    /// * `quote_aware` - Treat newlines inside double-quoted values as part of
-    ///   the record (CSV semantics), so row counts match the parser's LOGICAL
-    ///   rows. Quote state is field-start-aware (matching csv-core): a quote
-    ///   only opens quoting as a field's first byte, and `""` escapes inside.
-    ///   Pass false for JSONL.
+    /// * `quote_aware` - CSV semantics: treat newlines inside double-quoted
+    ///   values as part of the record, so row counts match the parser's
+    ///   LOGICAL rows, and skip only truly empty lines (csv-core treats a
+    ///   whitespace-only line as a record). Quote state is field-start-aware
+    ///   (matching csv-core): a quote only opens quoting as a field's first
+    ///   byte, and `""` escapes inside. Pass false for JSONL, which skips
+    ///   whitespace-only lines.
     /// * `delimiter` - CSV field delimiter (ignored when `quote_aware` is false).
     pub fn build(
         bytes: &[u8],
@@ -748,7 +766,7 @@ pub async fn resolve_row_numbers_to_byte_offsets(
     data_file: &ObjectStoreFile,
     layout_file: Option<&ObjectStoreFile>,
     row_numbers: &[u32],
-    skip_header: bool,
+    format: LineOrientedFormat,
 ) -> Result<Vec<u64>, BundlebaseError> {
     if row_numbers.is_empty() {
         return Ok(Vec::new());
@@ -757,27 +775,12 @@ pub async fn resolve_row_numbers_to_byte_offsets(
     let store = data_file.store();
     let path = data_file.store_path().clone();
 
-    // Try to load layout (from cache or disk)
-    let layout = match layout_file {
+    match layout_file {
         Some(lf) => {
-            let url = lf.url().clone();
-            if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&url) {
-                log::trace!("Layout cache hit for {}", url);
-                Some(cached)
-            } else {
-                log::debug!("Layout cache miss for {}, loading from disk", url);
-                let loaded = PageMap::load(lf).await?;
-                let arc = Arc::new(loaded);
-                GLOBAL_LAYOUT_CACHE.insert(url, arc.clone());
-                Some(arc)
-            }
+            let layout = load_layout_cached(lf).await?;
+            resolve_with_layout(&store, &path, &layout, row_numbers, format).await
         }
-        None => None,
-    };
-
-    match layout {
-        Some(layout) => resolve_with_layout(&store, &path, &layout, row_numbers).await,
-        None => resolve_without_layout(&store, &path, row_numbers, skip_header).await,
+        None => resolve_without_layout(&store, &path, row_numbers, format).await,
     }
 }
 
@@ -787,6 +790,7 @@ async fn resolve_with_layout(
     path: &object_store::path::Path,
     layout: &PageMap,
     row_numbers: &[u32],
+    format: LineOrientedFormat,
 ) -> Result<Vec<u64>, BundlebaseError> {
     // Group row numbers by page
     let mut pages_to_rows: BTreeMap<usize, Vec<u32>> = BTreeMap::new();
@@ -819,7 +823,8 @@ async fn resolve_with_layout(
         let bytes = get_result.bytes().await?;
 
         // Scan newlines to build row-offset map within this page
-        let offsets = scan_newline_offsets(&bytes, page_start, page_row_begin, &target_rows);
+        let offsets =
+            scan_newline_offsets(&bytes, page_start, page_row_begin, &target_rows, format);
         result.extend(offsets);
     }
 
@@ -832,7 +837,7 @@ async fn resolve_without_layout(
     store: &Arc<dyn ObjectStore>,
     path: &object_store::path::Path,
     row_numbers: &[u32],
-    skip_header: bool,
+    format: LineOrientedFormat,
 ) -> Result<Vec<u64>, BundlebaseError> {
     let get_result = store.get_opts(path, GetOptions::default()).await?;
     let bytes = get_result.bytes().await?;
@@ -840,8 +845,8 @@ async fn resolve_without_layout(
     let mut sorted_targets: Vec<u32> = row_numbers.to_vec();
     sorted_targets.sort();
 
-    // Find the data start (skip header if needed)
-    let data_start = if skip_header {
+    // Find the data start (CSV has a header line to skip)
+    let data_start = if format == LineOrientedFormat::Csv {
         match bytes.iter().position(|&b| b == b'\n') {
             Some(pos) => (pos + 1) as u64,
             None => return Err("File has no newlines but skip_header was requested".into()),
@@ -855,15 +860,32 @@ async fn resolve_without_layout(
         data_start,
         0,
         &sorted_targets,
+        format,
     );
     Ok(offsets)
 }
 
+/// Whether `b` is a byte that, on its own, leaves a line ignored by `format`'s
+/// parser. csv-core skips only truly EMPTY lines — the `\r` left by a CRLF
+/// terminator counts as empty, but a whitespace-only line is a real record.
+/// The JSONL readers skip any whitespace-only line.
+fn is_ignorable_line_byte(b: u8, format: LineOrientedFormat) -> bool {
+    match format {
+        LineOrientedFormat::Csv => b == b'\r',
+        LineOrientedFormat::JsonLines => b.is_ascii_whitespace(),
+    }
+}
+
+/// Whether `line` (without its `\n`) produces no row in `format`'s parser.
+pub(crate) fn is_skipped_line(line: &[u8], format: LineOrientedFormat) -> bool {
+    line.iter().all(|&b| is_ignorable_line_byte(b, format))
+}
+
 /// Scan bytes for newlines and return byte offsets for the requested row numbers.
 ///
-/// Blank/whitespace-only lines are skipped — logical row numbers come from the
-/// parsed stream, which never emits rows for them, so byte offsets must align
-/// with the non-blank lines only.
+/// Lines the format's parser skips (see [`is_skipped_line`]) are skipped —
+/// logical row numbers come from the parsed stream, which never emits rows
+/// for them, so byte offsets must align with the remaining lines only.
 ///
 /// `bytes` is the content to scan.
 /// `base_offset` is the absolute byte offset of `bytes[0]` in the file.
@@ -874,6 +896,7 @@ fn scan_newline_offsets(
     base_offset: u64,
     base_row: u32,
     target_rows: &[u32],
+    format: LineOrientedFormat,
 ) -> Vec<u64> {
     if target_rows.is_empty() {
         return Vec::new();
@@ -885,8 +908,7 @@ fn scan_newline_offsets(
     let mut line_start: usize = 0;
 
     for nl in memchr::memchr_iter(b'\n', bytes) {
-        let is_blank = bytes[line_start..nl].iter().all(|b| b.is_ascii_whitespace());
-        if !is_blank {
+        if !is_skipped_line(&bytes[line_start..nl], format) {
             if target_rows[target_idx] == current_row {
                 result.push(base_offset + line_start as u64);
                 target_idx += 1;
@@ -901,7 +923,7 @@ fn scan_newline_offsets(
 
     // Final line without a trailing newline
     if line_start < bytes.len()
-        && !bytes[line_start..].iter().all(|b| b.is_ascii_whitespace())
+        && !is_skipped_line(&bytes[line_start..], format)
         && target_rows[target_idx] == current_row
     {
         result.push(base_offset + line_start as u64);
@@ -910,12 +932,97 @@ fn scan_newline_offsets(
     result
 }
 
+/// Row/byte statistics for a line-oriented file.
+///
+/// Uses the attach-time layout when there is one: its `total_rows` is exact
+/// (logical rows, header excluded) and its `file_size` is the data file's, so
+/// the data file is never read. Without a layout (small files, CSV with
+/// `newlines_in_values`) it streams the file through [`LogicalLineCounter`] —
+/// O(1) memory.
+pub(crate) async fn line_oriented_statistics(
+    store: &Arc<dyn ObjectStore>,
+    path: &object_store::path::Path,
+    layout_file: Option<&ObjectStoreFile>,
+    format: LineOrientedFormat,
+    delimiter: u8,
+) -> Result<datafusion::common::Statistics, BundlebaseError> {
+    use datafusion::common::stats::Precision;
+    use datafusion::common::Statistics;
+
+    if let Some(lf) = layout_file {
+        let layout = load_layout_cached(lf).await?;
+        return Ok(Statistics {
+            num_rows: Precision::Exact(layout.total_rows as usize),
+            total_byte_size: Precision::Exact(layout.file_size as usize),
+            ..Default::default()
+        });
+    }
+
+    let is_csv = format == LineOrientedFormat::Csv;
+    let mut stream = store.get_opts(path, GetOptions::default()).await?.into_stream();
+    let mut counter = LogicalLineCounter::new(is_csv, delimiter);
+    let mut file_size: usize = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+        counter.update(&chunk);
+        file_size += chunk.len();
+    }
+
+    let lines = counter.finish();
+    // The first logical CSV line is the header.
+    let num_rows = if is_csv { lines.saturating_sub(1) } else { lines };
+    Ok(Statistics {
+        num_rows: Precision::Exact(num_rows),
+        total_byte_size: Precision::Exact(file_size),
+        ..Default::default()
+    })
+}
+
+/// Pass 1 of layout building for a line-oriented file: stream it through a
+/// [`PageMapBuilder`] (CSV: header skipped, quote-aware) — the file is never
+/// buffered whole (bb-xn0.2, ADR-003). Returns `None` for a file with no rows.
+/// The result carries no column stats yet.
+pub(crate) async fn scan_page_map(
+    store: &Arc<dyn ObjectStore>,
+    path: &object_store::path::Path,
+    format: LineOrientedFormat,
+    delimiter: u8,
+) -> Result<Option<PageMap>, BundlebaseError> {
+    let is_csv = format == LineOrientedFormat::Csv;
+    let mut stream = store.get_opts(path, GetOptions::default()).await?.into_stream();
+    let mut builder = PageMapBuilder::new(is_csv, DEFAULT_PAGE_SIZE, is_csv, delimiter);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+        builder.feed(&chunk);
+    }
+    Ok(builder.finish(vec![]))
+}
+
+/// Serialize `layout` and write it to `data_dir` as a block layout file.
+pub(crate) async fn write_layout(
+    layout: &PageMap,
+    data_dir: &dyn IOReadWriteDir,
+) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    let index_bytes = layout.serialize()?;
+    let data_stream = Box::pin(futures::stream::once(async move {
+        Ok::<_, std::io::Error>(index_bytes)
+    }));
+    let address = bundlebase_common::ContentAddress::with_sub_type(
+        bundlebase_common::ContentCategory::Block,
+        "layout",
+        bundlebase_common::ContentFormat::Pagemap,
+    )?;
+    let result = data_dir.write_stream(data_stream, &address).await?;
+    Ok(result.file)
+}
+
 /// Streaming counter of logical lines, for chunk-at-a-time row counting with
-/// O(1) memory. Blank/whitespace-only lines are skipped, matching
-/// [`PageMap::build`] and the Arrow parsers' row numbering. With `quote_aware`
-/// set, newlines inside double-quoted values (CSV `newlines_in_values`) are
-/// treated as in-record rather than as line boundaries; quote state is tracked
-/// by parity, which also handles `""`-escaped quotes.
+/// O(1) memory. It wraps a [`PageMapBuilder`], so its counts always equal the
+/// layout's `total_rows`: lines the parser skips are not counted (CSV: empty
+/// lines only; JSONL: whitespace-only lines). With `quote_aware` set (CSV),
+/// newlines inside double-quoted values are in-record rather than line
+/// boundaries, using the builder's field-start-aware quote state machine
+/// ([`QuoteMode`]), which matches csv-core including `""` escapes.
 pub(crate) struct LogicalLineCounter {
     builder: PageMapBuilder,
 }
@@ -1429,8 +1536,50 @@ mod tests {
         // "row0\n" (0-4), "\n" (5), "row1\n" (6-10), "  \n" (11-13), "row2\n" (14-18)
         // Logical rows are the non-blank lines: starts at 0, 6, 14.
         let data = b"row0\n\nrow1\n  \nrow2\n";
-        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2]);
+        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2], LineOrientedFormat::JsonLines);
         assert_eq!(offsets, vec![0, 6, 14]);
+    }
+
+    // ── Skipped-line rule must match each format's parser ─────────────
+    //
+    // csv-core skips only truly EMPTY lines (a lone `\r` from CRLF counts as
+    // empty); a whitespace-only line is a real record. JSONL readers skip
+    // any whitespace-only line.
+
+    #[test]
+    fn test_csv_build_counts_whitespace_only_line_as_row() {
+        let data = b"name\nalice\n   \n\nbob\n";
+        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![], true, b',').unwrap();
+        assert_eq!(result.total_rows, 3, "\"   \" is a record; only \"\" is skipped");
+    }
+
+    #[test]
+    fn test_csv_build_whitespace_final_line_without_newline_is_row() {
+        let data = b"name\nalice\n  ";
+        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![], true, b',').unwrap();
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn test_csv_build_skips_crlf_empty_line() {
+        let data = b"name\r\nalice\r\n\r\nbob\r\n";
+        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![], true, b',').unwrap();
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn test_csv_logical_line_counter_counts_whitespace_only_line() {
+        let mut counter = LogicalLineCounter::new(true, b',');
+        counter.update(b"a\n   \n\nb");
+        assert_eq!(counter.finish(), 3);
+    }
+
+    #[test]
+    fn test_csv_scan_newline_offsets_counts_whitespace_only_line() {
+        // "alice\n" (0-5), "   \n" (6-9), "\n" (10), "bob\n" (11-14)
+        let data = b"alice\n   \n\nbob\n";
+        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2], LineOrientedFormat::Csv);
+        assert_eq!(offsets, vec![0, 6, 11]);
     }
 
     #[test]
@@ -1475,14 +1624,14 @@ mod tests {
     fn test_scan_newline_offsets_basic() {
         // "row0\nrow1\nrow2\n"
         let data = b"row0\nrow1\nrow2\n";
-        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2]);
+        let offsets = scan_newline_offsets(data, 0, 0, &[0, 1, 2], LineOrientedFormat::JsonLines);
         assert_eq!(offsets, vec![0, 5, 10]);
     }
 
     #[test]
     fn test_scan_newline_offsets_subset() {
         let data = b"row0\nrow1\nrow2\nrow3\n";
-        let offsets = scan_newline_offsets(data, 0, 0, &[1, 3]);
+        let offsets = scan_newline_offsets(data, 0, 0, &[1, 3], LineOrientedFormat::JsonLines);
         assert_eq!(offsets, vec![5, 15]);
     }
 
@@ -1490,14 +1639,14 @@ mod tests {
     fn test_scan_newline_offsets_with_base() {
         // Simulate reading a page starting at byte 100, row 10
         let data = b"row10\nrow11\nrow12\n";
-        let offsets = scan_newline_offsets(data, 100, 10, &[10, 12]);
+        let offsets = scan_newline_offsets(data, 100, 10, &[10, 12], LineOrientedFormat::JsonLines);
         assert_eq!(offsets, vec![100, 112]);
     }
 
     #[test]
     fn test_scan_newline_offsets_empty_targets() {
         let data = b"row0\nrow1\n";
-        let offsets = scan_newline_offsets(data, 0, 0, &[]);
+        let offsets = scan_newline_offsets(data, 0, 0, &[], LineOrientedFormat::JsonLines);
         assert!(offsets.is_empty());
     }
 }

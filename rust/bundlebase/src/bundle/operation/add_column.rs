@@ -1,4 +1,6 @@
 use crate::bundle::bundle_schema::BundleSchema;
+use crate::bundle::check_text_ordering_comparison_named;
+use crate::bundle::operation::filter::internal_to_display_names;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::catalog::BundleViewTable;
@@ -51,11 +53,10 @@ impl Operation for AddColumnOp {
         let empty_batch = RecordBatch::new_empty(bundle.internal_schema().await?);
         ctx.register_batch("bundle", empty_batch)
             .map_err(|e| BundlebaseError::from(format!("Failed to validate expression: {}", e)))?;
-        ctx.state().create_logical_plan(&sql).await.map_err(|e| {
+        let plan = ctx.state().create_logical_plan(&sql).await.map_err(|e| {
             BundlebaseError::from(format!("Invalid expression '{}': {}", self.expression, e))
         })?;
-
-        Ok(())
+        check_text_ordering_comparison_named(&plan, &internal_to_display_names(&bs))
     }
 
     async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
@@ -88,6 +89,7 @@ impl Operation for AddColumnOp {
             .create_logical_plan(&sql)
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
+        check_text_ordering_comparison_named(&plan, &internal_to_display_names(bundle_schema))?;
 
         let result = add_ctx
             .execute_logical_plan(plan)

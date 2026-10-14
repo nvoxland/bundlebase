@@ -22,15 +22,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
 
-/// Download data and save it to the data directory using content-addressed storage.
-///
-/// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 /// Maximum concurrent per-file fetches. Each in-flight fetch streams its
 /// download, but format conversions (e.g. save-as-parquet) still materialize
 /// one file — 100 concurrent fetches multiplied that into unbounded RAM and
 /// hammered remote servers (bb-xn0.4).
 const FETCH_CONCURRENCY: usize = 8;
 
+/// Download data and save it to the data directory using content-addressed storage.
+///
+/// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 pub async fn download_to_data_dir(
     data: Bytes,
     address: &bundlebase_common::ContentAddress,

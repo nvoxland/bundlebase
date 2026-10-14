@@ -18,7 +18,7 @@ Create a view by providing a name and a SQL query.
     bundle = await bb.create("my/data")
     await bundle.attach("customers.csv")
 
-    await bundle.create_view("adults", sql="SELECT * FROM bundle WHERE age > 21")
+    await bundle.create_view("adults", sql="SELECT * FROM bundle WHERE CAST(age AS INT) > 21")
     ```
 
 === "Sync API"
@@ -29,13 +29,13 @@ Create a view by providing a name and a SQL query.
     bundle = bb.create("my/data")
     bundle.attach("customers.csv")
 
-    bundle.create_view("adults", sql="SELECT * FROM bundle WHERE age > 21")
+    bundle.create_view("adults", sql="SELECT * FROM bundle WHERE CAST(age AS INT) > 21")
     ```
 
 === "SQL"
 
     ```sql
-    CREATE VIEW adults AS SELECT * FROM bundle WHERE age > 21
+    CREATE VIEW adults AS SELECT * FROM bundle WHERE CAST(age AS INT) > 21
     ```
 
 ## Opening a View

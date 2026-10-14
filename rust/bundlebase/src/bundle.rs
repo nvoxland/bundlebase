@@ -23,6 +23,7 @@ pub mod function_entry {
 pub mod deleted_row_filter;
 pub mod schema_rename_filter;
 mod sql;
+mod text_ordering;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod tombstone;
@@ -58,6 +59,9 @@ pub use verification::{FileVerificationResult, VerificationResults};
 
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::UpdateVersionOp;
+pub(crate) use text_ordering::{
+    check_text_ordering_comparison, check_text_ordering_comparison_named,
+};
 use crate::bundle_config::PassedBundleConfig;
 use crate::bundle_config::Scope;
 use crate::catalog::CATALOG_NAME;
@@ -1545,124 +1549,6 @@ impl Bundle {
             },
         }
     }
-}
-
-/// Reject an ordering comparison (`>`, `>=`, `<`, `<=`) between a text (Utf8)
-/// column and a numeric literal — e.g. `WHERE amount > 100` where `amount` came
-/// from a CSV and is therefore text.
-///
-/// This is the *silent* half of the all-Utf8 footgun. DataFusion does not fail
-/// here: it coerces the number to a string and compares lexicographically, so
-/// `"9" > "50"` is true and the query quietly returns the wrong rows. Since
-/// CSV/TSV/JSONL columns are always imported as text, writing a bare numeric
-/// bound against one is a mistake essentially every time, so we fail loudly and
-/// say how to fix it.
-///
-/// Deliberately limited to *ordering* comparisons. Equality is left alone:
-/// `"amount" = 100` compares against the literal's text form, which behaves
-/// sensibly, and failing `WHERE id = 5` over a text id would break working
-/// queries for no correctness gain.
-///
-/// Column types are resolved against each node's *input* schema, so an explicit
-/// cast (`FROM (SELECT CAST(x AS DOUBLE) AS x FROM bundle) WHERE x > 100`) is
-/// correctly left alone.
-fn check_text_ordering_comparison(plan: &LogicalPlan) -> Result<(), BundlebaseError> {
-    use arrow_schema::DataType;
-    use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
-    use datafusion::common::DFSchema;
-    use datafusion::logical_expr::{BinaryExpr, Operator};
-
-    fn is_numeric_literal(sv: &ScalarValue) -> bool {
-        matches!(
-            sv,
-            ScalarValue::Int8(_)
-                | ScalarValue::Int16(_)
-                | ScalarValue::Int32(_)
-                | ScalarValue::Int64(_)
-                | ScalarValue::UInt8(_)
-                | ScalarValue::UInt16(_)
-                | ScalarValue::UInt32(_)
-                | ScalarValue::UInt64(_)
-                | ScalarValue::Float32(_)
-                | ScalarValue::Float64(_)
-                | ScalarValue::Decimal128(..)
-                | ScalarValue::Decimal256(..)
-        )
-    }
-
-    fn is_text(dt: &DataType) -> bool {
-        matches!(
-            dt,
-            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
-        )
-    }
-
-    let mut offender: Option<(String, String)> = None;
-
-    plan.apply(|node| {
-        // A node's expressions are written against its inputs' schemas
-        // (against its own schema only when it has no inputs).
-        let inputs = node.inputs();
-        let schemas: Vec<&DFSchema> = if inputs.is_empty() {
-            vec![node.schema()]
-        } else {
-            inputs.iter().map(|i| i.schema().as_ref()).collect()
-        };
-        let col_type = |name: &str| -> Option<DataType> {
-            schemas.iter().find_map(|s| {
-                s.fields()
-                    .iter()
-                    .find(|f| f.name() == name)
-                    .map(|f| f.data_type().clone())
-            })
-        };
-
-        for expr in node.expressions() {
-            expr.apply(|e| {
-                if let Expr::BinaryExpr(BinaryExpr { left, op, right }) = e {
-                    if matches!(
-                        op,
-                        Operator::Gt | Operator::GtEq | Operator::Lt | Operator::LtEq
-                    ) {
-                        // Either orientation: `col > 100` or `100 < col`.
-                        for (a, b) in [
-                            (left.as_ref(), right.as_ref()),
-                            (right.as_ref(), left.as_ref()),
-                        ] {
-                            if let (Expr::Column(c), Expr::Literal(sv, _)) = (a, b) {
-                                if is_numeric_literal(sv)
-                                    && col_type(&c.name).as_ref().is_some_and(is_text)
-                                {
-                                    offender = Some((c.name.clone(), sv.to_string()));
-                                    return Ok(TreeNodeRecursion::Stop);
-                                }
-                            }
-                        }
-                    }
-                }
-                Ok(TreeNodeRecursion::Continue)
-            })?;
-            if offender.is_some() {
-                break;
-            }
-        }
-        Ok(if offender.is_some() {
-            TreeNodeRecursion::Stop
-        } else {
-            TreeNodeRecursion::Continue
-        })
-    })?;
-
-    if let Some((col, lit)) = offender {
-        return Err(BundlebaseError::from(format!(
-            "Column \"{col}\" is text (Utf8) but is being compared to the number {lit}. Text \
-             compares lexicographically — \"9\" > \"50\" — so this would silently return the \
-             wrong rows. Bundlebase imports CSV, TSV, and JSONL columns as text.\n\n  \
-             • To compare numerically, cast the column:   CAST COLUMN \"{col}\" TO DOUBLE\n  \
-             • To compare as text on purpose, quote it:   \"{col}\" > '{lit}'"
-        )));
-    }
-    Ok(())
 }
 
 /// Augment a query error with a remedy when it's caused by the CSV/JSONL

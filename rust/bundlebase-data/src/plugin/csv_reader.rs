@@ -1,4 +1,5 @@
 use crate::attach_format::AttachFormat;
+use crate::layout_cache::load_layout_cached;
 use crate::page_map::{resolve_row_numbers_to_byte_offsets, PageMap};
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
@@ -11,7 +12,6 @@ use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bytes::Buf;
 use datafusion::common::config::CsvOptions;
-use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::csv::CsvFormat;
 use datafusion::datasource::file_format::FileFormat;
@@ -361,7 +361,7 @@ impl DataReader for CsvReader {
                 self.inner.file().as_object_store_file(),
                 self.layout.as_ref(),
                 &row_numbers,
-                true, // skip CSV header
+                LineOrientedFormat::Csv,
             )
             .await
             .map_err(|e| DataFusionError::External(e))?;
@@ -389,67 +389,29 @@ impl DataReader for CsvReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        use crate::page_map::LogicalLineCounter;
-        use object_store::GetOptions;
-
-        let object_store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
-
-        // Stream the file counting logical rows — O(1) memory, no buffering.
-        // Quote-aware so newlines inside quoted values don't count as rows,
-        // and blank lines are skipped to match the parser's row numbering.
-        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
-        let mut stream = get_result.into_stream();
-
-        let mut counter = LogicalLineCounter::new(true, self.inner.config().delimiter);
-        let mut file_size: usize = 0;
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            counter.update(&chunk);
-            file_size += chunk.len();
-        }
-
-        // The first logical line is the header.
-        let row_count = counter.finish().saturating_sub(1);
-
-        let stats = Statistics {
-            num_rows: Precision::Exact(row_count),
-            total_byte_size: Precision::Exact(file_size),
-            ..Default::default()
-        };
-
+        let stats = crate::page_map::line_oriented_statistics(
+            &self.inner.object_store(),
+            &path,
+            self.layout.as_ref(),
+            LineOrientedFormat::Csv,
+            self.inner.config().delimiter,
+        )
+        .await?;
         Ok(Some(stats))
     }
 
     async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
-        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
-        use crate::page_map::PageMap;
-        use bundlebase_io::IOReadFile;
-
-        let layout_file = match &self.layout {
-            Some(f) => f,
-            None => return Ok(vec![]),
-        };
-        let layout_url = layout_file.url().clone();
-        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
-            cached
-        } else {
-            let loaded = PageMap::load(layout_file).await?;
-            let arc = Arc::new(loaded);
-            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
-            arc
-        };
-        Ok(layout.column_stats.clone())
+        match &self.layout {
+            Some(f) => Ok(load_layout_cached(f).await?.column_stats.clone()),
+            None => Ok(vec![]),
+        }
     }
 
     async fn build_layout(
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        use crate::page_map::DEFAULT_PAGE_SIZE;
-        use futures::stream;
-
         // With newlines_in_values, raw-newline scanning can split records
         // mid-field, so a byte-offset layout would misalign logical rows.
         // Skip layout creation entirely — reads fall back to full scans.
@@ -466,19 +428,15 @@ impl DataReader for CsvReader {
         let path = object_store::path::Path::parse(self.inner.url().path())?;
         let delimiter = self.inner.config().delimiter;
 
-        // Pass 1: stream the file through the incremental page-map builder —
-        // the file is never buffered whole (bb-xn0.2, ADR-003).
-        let get_result = object_store
-            .get_opts(&path, object_store::GetOptions::default())
-            .await?;
-        let mut file_stream = get_result.into_stream();
-        let mut pm_builder =
-            crate::page_map::PageMapBuilder::new(true, DEFAULT_PAGE_SIZE, true, delimiter);
-        while let Some(chunk) = file_stream.next().await {
-            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            pm_builder.feed(&chunk);
-        }
-        let initial_layout = match pm_builder.finish(vec![]) {
+        // Pass 1: page boundaries (streamed — never buffered whole).
+        let initial_layout = match crate::page_map::scan_page_map(
+            &object_store,
+            &path,
+            LineOrientedFormat::Csv,
+            delimiter,
+        )
+        .await?
+        {
             None => return Ok(None),
             Some(l) => l,
         };
@@ -530,17 +488,7 @@ impl DataReader for CsvReader {
             column_stats,
             ..initial_layout
         };
-        let index_bytes = layout.serialize()?;
-        let data_stream = Box::pin(stream::once(
-            async move { Ok::<_, std::io::Error>(index_bytes) },
-        ));
-        let address = bundlebase_common::ContentAddress::with_sub_type(
-            bundlebase_common::ContentCategory::Block,
-            "layout",
-            bundlebase_common::ContentFormat::Pagemap,
-        )?;
-        let result = data_dir.write_stream(data_stream, &address).await?;
-        Ok(Some(result.file))
+        Ok(Some(crate::page_map::write_layout(&layout, data_dir).await?))
     }
 
     async fn data_source_filtered_pages(
@@ -549,30 +497,19 @@ impl DataReader for CsvReader {
         filters: &[datafusion::logical_expr::Expr],
         _limit: Option<usize>,
     ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
-        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
         use crate::page_filter::{
             extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound,
             prune_exact_with_bloom, prune_prefix, prune_range,
         };
-        use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
-        use bundlebase_io::IOReadFile;
 
         let layout_file = match &self.layout {
             Some(f) => f,
             None => return Ok(None),
         };
 
-        // Load layout from cache (page stats live in layout.column_stats[col].page_stats)
-        let layout_url = layout_file.url().clone();
-        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
-            cached
-        } else {
-            let loaded = PageMap::load(layout_file).await?;
-            let arc = Arc::new(loaded);
-            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
-            arc
-        };
+        // Page stats live in layout.column_stats[col].page_stats.
+        let layout = load_layout_cached(layout_file).await?;
 
         if layout.pages.len() <= 1 {
             // Single page — no pruning possible.
@@ -809,6 +746,7 @@ mod tests {
     use super::*;
     use crate::plugin::ReaderPlugin;
     use crate::test_utils::{test_context, test_datafile};
+    use datafusion::common::stats::Precision;
     use arrow::array::{downcast_array, Array, StringArray};
     use futures::stream::StreamExt;
 
@@ -1061,8 +999,8 @@ mod tests {
         Ok(())
     }
 
-    /// Statistics must count logical rows like the parser does — blank and
-    /// whitespace-only lines produce no row.
+    /// Statistics must count logical rows like the parser does — empty lines
+    /// (including CRLF ones) produce no row.
     #[tokio::test]
     async fn test_statistics_skips_blank_lines() -> Result<(), BundlebaseError> {
         use bundlebase_io::file::IOReadWriteFile;
@@ -1071,7 +1009,7 @@ mod tests {
         let url = Url::parse("memory:///test_csv_stats_blank/data.csv")?;
         let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
         file.write(bytes::Bytes::from_static(
-            b"id,name\n1,a\n\n2,b\n   \n3,c\n",
+            b"id,name\n1,a\n\n2,b\r\n\r\n3,c\n",
         ))
         .await?;
 
@@ -1101,9 +1039,156 @@ mod tests {
 
         assert_eq!(
             &3, rows,
-            "blank/whitespace-only lines must not count as rows"
+            "empty lines must not count as rows"
         );
 
+        Ok(())
+    }
+
+    /// csv-core skips only truly EMPTY lines; a whitespace-only line is a real
+    /// record (a single field holding the spaces). Statistics, the layout and
+    /// the parser must all agree on that, or COUNT(*) and RowId seeks drift.
+    #[tokio::test]
+    async fn test_whitespace_only_line_is_a_row_like_the_parser(
+    ) -> Result<(), BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        use bundlebase_io::plugin::object_store::ObjectStoreFile;
+
+        let url = Url::parse("memory:///test_csv_ws_line/data.csv")?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
+        file.write(bytes::Bytes::from_static(b"name\nalice\n   \n\n bob\n"))
+            .await?;
+
+        let plugin = CsvPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+        let reader = plugin
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                Some(schema),
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+
+        // What the real parser (full scan) produces.
+        let ds = reader.data_source(None, &[], None, None).await?;
+        let stream = ds.open(0, test_context().ctx.task_ctx())?;
+        let mut parsed: Vec<String> = Vec::new();
+        for batch in stream.collect::<Vec<_>>().await {
+            let batch = batch.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            let arr: StringArray = downcast_array(batch.column(0).as_ref());
+            for i in 0..arr.len() {
+                parsed.push(arr.value(i).to_string());
+            }
+        }
+        assert_eq!(vec!["alice", "   ", " bob"], parsed, "parser rows");
+
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        assert_eq!(
+            Some(&parsed.len()),
+            stats.num_rows.get_value(),
+            "statistics row count must match the parser"
+        );
+
+        let layout = crate::page_map::PageMap::build(
+            b"name\nalice\n   \n\n bob\n",
+            true,
+            crate::page_map::DEFAULT_PAGE_SIZE,
+            vec![],
+            true,
+            b',',
+        )
+        .ok_or_else(|| BundlebaseError::from("Expected layout"))?;
+        assert_eq!(parsed.len() as u64, layout.total_rows, "layout row count");
+
+        // RowId seeks (index path) must land on the same rows, with the
+        // same field content, as the full scan.
+        let alias = crate::ObjectIdAlias::from(1u16);
+        let row_ids = vec![RowId::new(alias, 1), RowId::new(alias, 2)];
+        let ds = reader.data_source(None, &[], None, Some(&row_ids)).await?;
+        let stream = ds.open(0, test_context().ctx.task_ctx())?;
+        let mut seeked: Vec<String> = Vec::new();
+        for batch in stream.collect::<Vec<_>>().await {
+            let batch = batch.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            if batch.num_rows() == 0 {
+                continue;
+            }
+            let arr: StringArray = downcast_array(batch.column(0).as_ref());
+            for i in 0..arr.len() {
+                seeked.push(arr.value(i).to_string());
+            }
+        }
+        assert_eq!(vec!["   ", " bob"], seeked, "index-path rows");
+
+        Ok(())
+    }
+
+    /// With an attach-time layout, statistics come from the layout's exact
+    /// row count — the data file is not re-read. Proven by deleting the data
+    /// file before asking.
+    #[tokio::test]
+    async fn test_statistics_use_layout_without_reading_file() -> Result<(), BundlebaseError> {
+        use bundlebase_io::file::IOReadWriteFile;
+        use bundlebase_io::plugin::object_store::ObjectStoreFile;
+
+        let url = Url::parse("memory:///test_csv_stats_layout/data.csv")?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
+        file.write(bytes::Bytes::from_static(b"id\n1\n2\n3\n")).await?;
+
+        let plugin = CsvPlugin::default();
+        let binding = test_context();
+        let reader = plugin
+            .reader(url.as_str(), &BlockId::generate(), &binding, None, None, None, None)
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+        let layout_file = reader
+            .build_layout(binding.data_context_dir().as_ref())
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected layout"))?;
+
+        let reader = plugin
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                None,
+                Some(layout_file.url().to_string()),
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
+        file.delete().await?;
+
+        let stats = reader
+            .read_statistics()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected stats"))?;
+        assert_eq!(Some(&3), stats.num_rows.get_value());
+        assert_eq!(Some(&9), stats.total_byte_size.get_value());
         Ok(())
     }
 

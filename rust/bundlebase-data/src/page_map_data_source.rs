@@ -30,9 +30,9 @@ pub enum LineOrientedFormat {
 
 /// Outcome of locating one row's line within a fetched buffer.
 enum LineSlot {
-    /// Full line found (trimmed, non-empty)
+    /// Full line found, normalized for the format (see [`line_text`])
     Complete(String),
-    /// Line is blank/whitespace-only, or the offset lies beyond the buffer
+    /// Line is one the format's parser skips, or the offset lies beyond the buffer
     Skip,
     /// No newline within the buffer — the line continues past the fetched
     /// range. Holds the bytes from the row start to the end of the buffer.
@@ -156,7 +156,12 @@ impl PageMapDataSource {
     ///
     /// Operates on raw bytes (UTF-8 conversion happens per line) so that
     /// invalid UTF-8 sequences cannot misalign byte-offset indexing.
-    fn extract_line_slots(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<LineSlot> {
+    fn extract_line_slots(
+        bytes: &[u8],
+        batch_start: u64,
+        row_offsets: &[u64],
+        format: LineOrientedFormat,
+    ) -> Vec<LineSlot> {
         if bytes.is_empty() || row_offsets.is_empty() {
             return Vec::new();
         }
@@ -170,15 +175,10 @@ impl PageMapDataSource {
                 continue;
             }
             match memchr::memchr(b'\n', &bytes[pos..]) {
-                Some(end) => {
-                    let text = String::from_utf8_lossy(&bytes[pos..pos + end]);
-                    let trimmed = text.trim();
-                    if trimmed.is_empty() {
-                        slots.push(LineSlot::Skip);
-                    } else {
-                        slots.push(LineSlot::Complete(trimmed.to_string()));
-                    }
-                }
+                Some(end) => match line_text(&bytes[pos..pos + end], format) {
+                    Some(line) => slots.push(LineSlot::Complete(line)),
+                    None => slots.push(LineSlot::Skip),
+                },
                 // No newline in the buffer — the line continues past the
                 // fetched range; the caller must read the remainder.
                 None => slots.push(LineSlot::Incomplete(bytes[pos..].to_vec())),
@@ -191,8 +191,13 @@ impl PageMapDataSource {
     /// Test-facing wrapper over [`Self::extract_line_slots`] that returns only
     /// the lines fully contained in the buffer.
     #[cfg(test)]
-    fn extract_lines(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<String> {
-        Self::extract_line_slots(bytes, batch_start, row_offsets)
+    fn extract_lines(
+        bytes: &[u8],
+        batch_start: u64,
+        row_offsets: &[u64],
+        format: LineOrientedFormat,
+    ) -> Vec<String> {
+        Self::extract_line_slots(bytes, batch_start, row_offsets, format)
             .into_iter()
             .filter_map(|slot| match slot {
                 LineSlot::Complete(line) => Some(line),
@@ -519,7 +524,8 @@ impl DataSource for PageMapDataSource {
                         let reached_eof = bytes.len() < requested_len;
                         let buffer_end = batch_start + bytes.len() as u64;
 
-                        let slots = Self::extract_line_slots(&bytes, batch_start, &batch_offsets);
+                        let slots =
+                            Self::extract_line_slots(&bytes, batch_start, &batch_offsets, format);
                         let mut lines = Vec::with_capacity(slots.len());
                         for slot in slots {
                             match slot {
@@ -537,10 +543,8 @@ impl DataSource for PageMapDataSource {
                                         )
                                         .await?
                                     };
-                                    let text = String::from_utf8_lossy(&full);
-                                    let trimmed = text.trim();
-                                    if !trimmed.is_empty() {
-                                        lines.push(trimmed.to_string());
+                                    if let Some(line) = line_text(&full, format) {
+                                        lines.push(line);
                                     }
                                 }
                             }
@@ -708,6 +712,24 @@ pub fn coalesce_page_ranges(
     }
     ranges.push((range_start, range_end));
     ranges
+}
+
+/// The text of one row's line (without its `\n`) as the format's parser
+/// should see it, or `None` when that parser skips the line. JSONL lines are
+/// trimmed (surrounding whitespace is insignificant JSON). CSV lines are kept
+/// verbatim apart from a CRLF's `\r`: csv-core treats leading/trailing spaces
+/// as field content, and a whitespace-only line is a real record.
+fn line_text(line: &[u8], format: LineOrientedFormat) -> Option<String> {
+    if crate::page_map::is_skipped_line(line, format) {
+        return None;
+    }
+    match format {
+        LineOrientedFormat::Csv => {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            Some(String::from_utf8_lossy(line).into_owned())
+        }
+        LineOrientedFormat::JsonLines => Some(String::from_utf8_lossy(line).trim().to_string()),
+    }
 }
 
 /// Parse raw line-oriented bytes into a RecordBatch.
@@ -919,7 +941,7 @@ mod tests {
         let csv_data = "value1,value2,value3\nvalue4,value5,value6\nvalue7,value8,value9\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 21]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 21], LineOrientedFormat::Csv);
 
         assert_eq!(2, lines.len());
         assert_eq!("value1,value2,value3", lines[0]);
@@ -931,7 +953,7 @@ mod tests {
         let csv_data = "single,line,data\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0], LineOrientedFormat::Csv);
 
         assert_eq!(1, lines.len());
         assert_eq!("single,line,data", lines[0]);
@@ -946,7 +968,7 @@ mod tests {
 "#;
         let bytes = json_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 24]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 24], LineOrientedFormat::JsonLines);
 
         assert_eq!(2, lines.len());
         assert_eq!(r#"{"id":1,"name":"Alice"}"#, lines[0]);
@@ -959,7 +981,7 @@ mod tests {
         let csv_data = "line1\nline2\npartial";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
 
         // Should only get 2 complete lines, not the partial one (no trailing newline)
         assert_eq!(2, lines.len());
@@ -973,7 +995,7 @@ mod tests {
         let csv_data = "line1\nline2\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
 
         // Should get all 3 complete lines
         assert_eq!(3, lines.len());
@@ -988,12 +1010,31 @@ mod tests {
         let csv_data = "line1\n\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 7]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 7], LineOrientedFormat::Csv);
 
         // Empty line at offset 6 is trimmed and not included
         assert_eq!(2, lines.len());
         assert_eq!("line1", lines[0]);
         assert_eq!("line3", lines[1]);
+    }
+
+    /// csv-core keeps leading/trailing spaces as field content and treats a
+    /// whitespace-only line as a record, so CSV lines must not be trimmed;
+    /// only a CRLF's `\r` is dropped and only truly empty lines skipped.
+    #[test]
+    fn test_extract_lines_csv_preserves_whitespace() {
+        // "a\r\n" (0-2), "   \n" (3-6), "\n" (7), " b \n" (8-11)
+        let data = b"a\r\n   \n\n b \n";
+        let lines = PageMapDataSource::extract_lines(data, 0, &[0, 3, 7, 8], LineOrientedFormat::Csv);
+        assert_eq!(vec!["a", "   ", " b "], lines);
+    }
+
+    #[test]
+    fn test_extract_lines_jsonl_trims_and_skips_whitespace() {
+        let data = b" {\"a\":1} \n   \n";
+        let lines =
+            PageMapDataSource::extract_lines(data, 0, &[0, 10], LineOrientedFormat::JsonLines);
+        assert_eq!(vec!["{\"a\":1}"], lines);
     }
 
     #[test]
@@ -1004,7 +1045,7 @@ mod tests {
         let bytes = data.as_bytes();
         // "row1,data1\n" = 11 bytes, "row2,data2\n" = 11 bytes, "row3,data3\n" starts at 22
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 22]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 22], LineOrientedFormat::Csv);
 
         assert_eq!(2, lines.len());
         assert_eq!("row1,data1", lines[0]);
@@ -1019,7 +1060,7 @@ mod tests {
         let bytes = data.as_bytes();
 
         // Row offsets are absolute file positions
-        let lines = PageMapDataSource::extract_lines(bytes, 100, &[100, 117]);
+        let lines = PageMapDataSource::extract_lines(bytes, 100, &[100, 117], LineOrientedFormat::Csv);
 
         assert_eq!(2, lines.len());
         assert_eq!("middle_row,value", lines[0]);
@@ -1033,7 +1074,7 @@ mod tests {
         let data = "short\nthis_is_a_very"; // second line has no \n
         let bytes = data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6], LineOrientedFormat::Csv);
 
         // First line is complete, second line is truncated (no \n) so it's skipped
         assert_eq!(1, lines.len());
@@ -1046,7 +1087,7 @@ mod tests {
         let data = "only_line\n";
         let bytes = data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 500]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 500], LineOrientedFormat::Csv);
 
         // First line extracted, second offset is beyond buffer and skipped
         assert_eq!(1, lines.len());
@@ -1061,7 +1102,7 @@ mod tests {
         // "bad\xFFline\n" is 9 bytes, so the second line starts at offset 9.
         let data = b"bad\xFFline\nrow2,x\n";
 
-        let lines = PageMapDataSource::extract_lines(data, 0, &[0, 9]);
+        let lines = PageMapDataSource::extract_lines(data, 0, &[0, 9], LineOrientedFormat::Csv);
 
         assert_eq!(2, lines.len());
         assert_eq!("row2,x", lines[1]);

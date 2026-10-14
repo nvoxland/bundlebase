@@ -36,7 +36,7 @@ bundlebase create --bundle ./sales --exists-ok "CREATE SOURCE ..."
 bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"
 
 # Mutating commands on existing bundles (auto-commits after each call)
-bundlebase extend --bundle ./sales "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+bundlebase extend --bundle ./sales "FILTER WITH SELECT * FROM bundle WHERE CAST(amount AS DOUBLE) > 0"
 bundlebase extend --bundle ./sales -m "Cleaned sales data" "RENAME COLUMN amt TO amount"
 
 # Multiple statements in one call (committed together)

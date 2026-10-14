@@ -89,7 +89,7 @@ You can execute multiple statements in a single input by separating them with se
 ./my-bundle> ATTACH 'data.csv'; RENAME COLUMN fname TO first_name; SHOW COLUMNS
 
 # Multiple statements via extend (all committed together)
-bundlebase extend --bundle ./data "ATTACH 'sales.csv'; FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+bundlebase extend --bundle ./data "ATTACH 'sales.csv'; FILTER WITH SELECT * FROM bundle WHERE CAST(amount AS DOUBLE) > 0"
 
 # Multiple queries
 bundlebase query --bundle ./data "SHOW COLUMNS; SHOW COUNT"
