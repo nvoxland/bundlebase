@@ -10,7 +10,8 @@ Custom functions let you extend bundlebase's SQL with high-performance scalar an
 
 | Runtime | How it works | Best for | Persistent? |
 |---------|-------------|----------|-------------|
-| `python` | In-process via PyO3 | Prototyping, scripts | Temp only |
+| `python` (module) | `python::my_module:func` -- in-process via PyO3 | Prototyping, scripts | Temp only |
+| `python` (file) | `python::./script.py:func` -- runs the `.py` file in a subprocess | Python functions that ship with the bundle | Yes |
 | `ipc` | Subprocess via SDK, communicates via Arrow IPC | Go, Python, any language | Yes |
 | `ffi` | Loads a shared library (.so/.dylib) via FFI | Rust, C, C++ -- zero IPC overhead | Yes |
 | `java` | JVM subprocess via `java -jar` | Java | Yes |
@@ -19,7 +20,15 @@ Custom functions let you extend bundlebase's SQL with high-performance scalar an
 ### Persistent vs Temporary
 
 - **Temporary** (`IMPORT TEMP FUNCTION`): Session-scoped, supports all runtimes including `python`. Great for iterative development.
-- **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runtime (`ipc`, `ffi`, `java`, `docker` -- not `python`).
+- **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runtime (`ipc`, `ffi`, `java`, `docker`, or file-backed `python::./script.py:func` -- not module-backed `python`).
+
+### External code is off by default
+
+Every runtime except module-backed `python` runs code that is not part of bundlebase: `ffi` loads a shared library, and `ipc`, `java`, `docker` and file-backed `python` start a subprocess. Bundles can ship that code, so opening a bundle you did not build should not run it. These functions are therefore gated behind the `system.allow_external_code` setting, which defaults to `false`.
+
+While the setting is off, the function still imports and appears in the bundle, and queries that don't call it work normally. Calling it fails with `External code execution is disabled`. The setting is checked on every call, so turning it on (or back off) with `SET CONFIG` takes effect immediately for functions that are already registered -- no need to reopen the bundle. See [Troubleshooting](#external-code-execution-is-disabled) for how to enable it.
+
+Module-backed `python` functions run code from your own Python environment and can't be stored in a bundle, so they are not gated.
 
 **Development workflow:** Start temporary for fast iteration, then promote to persistent when ready:
 
@@ -449,9 +458,9 @@ Renames **runtime-only** function entries to a new name. Only temporary entries 
 
 ## Troubleshooting
 
-### "External code execution is not allowed"
+### "External code execution is disabled"
 
-External code execution is disabled by default. Enable it with the `system.allow_external_code` config key:
+External code execution is disabled by default (see [External code is off by default](#external-code-is-off-by-default)). Enable it with the `system.allow_external_code` config key. Only do this for bundles whose functions and connectors you trust:
 
 ```python
 await c.set_config("system", "allow_external_code", "true")
@@ -462,6 +471,8 @@ Or in SQL:
 ```sql
 SET CONFIG allow_external_code = 'true' FOR 'system';
 ```
+
+The change applies to the next function call; you don't need to reopen the bundle or re-import the function. Setting it back to `'false'` blocks calls again right away.
 
 ### Subprocess not found or not executable
 

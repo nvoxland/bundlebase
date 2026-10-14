@@ -46,11 +46,12 @@ pub struct ScalarFunction {
     signature: Signature,
     overloads: Vec<FunctionEntry>,
     subprocess_cache: SubprocessCache,
-    /// When set, calling this function returns this error instead of dispatching.
+    /// When set, checked on every invocation; errors instead of dispatching
+    /// while `system.allow_external_code` is disabled.
     /// Used to gate external-code functions behind `system.allow_external_code`:
     /// the function still registers (so queries that don't call it work), but
     /// invoking it fails with a clear message.
-    gated: Option<String>,
+    gated: Option<crate::function_entry::ExternalGate>,
 }
 
 impl PartialEq for ScalarFunction {
@@ -120,11 +121,11 @@ impl ScalarFunction {
         })
     }
 
-    /// Mark this function as gated: it registers normally but returns `reason`
-    /// when invoked. Used for external-code functions when
-    /// `system.allow_external_code` is disabled.
-    pub fn with_gated(mut self, reason: Option<String>) -> Self {
-        self.gated = reason;
+    /// Attach an external-code gate: the function registers normally, but each
+    /// invocation first checks `system.allow_external_code` and errors while it
+    /// is disabled.
+    pub fn with_gated(mut self, gate: Option<crate::function_entry::ExternalGate>) -> Self {
+        self.gated = gate;
         self
     }
 
@@ -183,10 +184,8 @@ impl ScalarUDFImpl for ScalarFunction {
         &self,
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::common::Result<ColumnarValue> {
-        if let Some(reason) = &self.gated {
-            return Err(datafusion::common::DataFusionError::Execution(
-                reason.clone(),
-            ));
+        if let Some(gate) = &self.gated {
+            gate.check()?;
         }
         if self.overloads.len() == 1 {
             return invoke_entry(

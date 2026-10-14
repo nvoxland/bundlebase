@@ -3,6 +3,7 @@
 use crate::defaults::CHART_COLORS;
 use crate::parse::{ChartBlock, ChartType};
 use crate::query::BoundedQueryResult;
+use crate::typst_escape::{escape_markup, escape_string};
 use bundlebase_common::BundlebaseError;
 
 /// Generate Typst markup for a chart block with its query results.
@@ -35,7 +36,7 @@ pub fn render_chart(
     }
     output.push_str(&markup);
     if let Some(title) = &chart.title {
-        output.push_str(&format!("],\ncaption: [{}]\n)\n", escape_typst(title)));
+        output.push_str(&format!("],\ncaption: [{}]\n)\n", escape_markup(title)));
     }
     output.push('\n');
 
@@ -87,7 +88,7 @@ fn render_pie(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, B
 
     // Legend
     if let Some(v) = get_yaml_str(opts, "legend") {
-        params.push(format!("  legend: \"{}\"", v));
+        params.push(format!("  legend: \"{}\"", escape_string(&v)));
     }
 
     lines.push(format!("  piechart(\n{}\n  )", params.join(",\n")));
@@ -126,27 +127,27 @@ fn render_bar(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, B
         params.push(format!("  bar-width: {}", v));
     }
     if let Some(v) = get_yaml_str(opts, "mode") {
-        params.push(format!("  mode: \"{}\"", v));
+        params.push(format!("  mode: \"{}\"", escape_string(&v)));
     }
 
     // Axis labels
     if let Some(v) = get_yaml_str(opts, "x_label") {
-        params.push(format!("  x-label: [{}]", escape_typst(&v)));
+        params.push(format!("  x-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_label") {
-        params.push(format!("  y-label: [{}]", escape_typst(&v)));
+        params.push(format!("  y-label: [{}]", escape_markup(&v)));
     }
 
     // Legend
     if let Some(v) = get_yaml_str(opts, "legend") {
-        params.push(format!("  legend: \"{}\"", v));
+        params.push(format!("  legend: \"{}\"", escape_string(&v)));
     }
     if let Some(labels) = get_yaml_str_array(opts, "labels") {
         params.push(format!(
             "  labels: ({})",
             labels
                 .iter()
-                .map(|l| format!("\"{}\"", l))
+                .map(|l| format!("\"{}\"", escape_string(l)))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -205,26 +206,26 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
 
     // Grid
     if let Some(v) = get_yaml_str(opts, "x_grid") {
-        plot_params.push(format!("    x-grid: \"{}\"", v));
+        plot_params.push(format!("    x-grid: \"{}\"", escape_string(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_grid") {
-        plot_params.push(format!("    y-grid: \"{}\"", v));
+        plot_params.push(format!("    y-grid: \"{}\"", escape_string(&v)));
     }
 
     // Axis labels
     if let Some(v) = get_yaml_str(opts, "x_label") {
-        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    x-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_label") {
-        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    y-label: [{}]", escape_markup(&v)));
     }
 
     // Axis format
     if let Some(v) = get_yaml_str(opts, "x_format") {
-        plot_params.push(format!("    x-format: \"{}\"", v));
+        plot_params.push(format!("    x-format: \"{}\"", escape_string(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_format") {
-        plot_params.push(format!("    y-format: \"{}\"", v));
+        plot_params.push(format!("    y-format: \"{}\"", escape_string(&v)));
     }
 
     // Units and decimals
@@ -243,7 +244,7 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
 
     // Legend
     if let Some(v) = get_yaml_str(opts, "legend") {
-        plot_params.push(format!("    legend: \"{}\"", v));
+        plot_params.push(format!("    legend: \"{}\"", escape_string(&v)));
     }
 
     // Build data points for plot.add
@@ -273,7 +274,7 @@ fn render_line(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String, 
 
     // Markers
     if let Some(v) = get_yaml_str(opts, "mark") {
-        add_params.push(format!("      mark: \"{}\"", v));
+        add_params.push(format!("      mark: \"{}\"", escape_string(&v)));
     }
     if let Some(v) = get_yaml_number(opts, "mark_size") {
         add_params.push(format!("      mark-size: {}", v));
@@ -328,27 +329,27 @@ fn render_horizontal_bar(
         params.push(format!("  bar-width: {}", v));
     }
     if let Some(v) = get_yaml_str(opts, "mode") {
-        params.push(format!("  mode: \"{}\"", v));
+        params.push(format!("  mode: \"{}\"", escape_string(&v)));
     }
 
     // Axis labels
     if let Some(v) = get_yaml_str(opts, "x_label") {
-        params.push(format!("  x-label: [{}]", escape_typst(&v)));
+        params.push(format!("  x-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_label") {
-        params.push(format!("  y-label: [{}]", escape_typst(&v)));
+        params.push(format!("  y-label: [{}]", escape_markup(&v)));
     }
 
     // Legend
     if let Some(v) = get_yaml_str(opts, "legend") {
-        params.push(format!("  legend: \"{}\"", v));
+        params.push(format!("  legend: \"{}\"", escape_string(&v)));
     }
     if let Some(labels) = get_yaml_str_array(opts, "labels") {
         params.push(format!(
             "  labels: ({})",
             labels
                 .iter()
-                .map(|l| format!("\"{}\"", l))
+                .map(|l| format!("\"{}\"", escape_string(l)))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -410,7 +411,7 @@ fn render_box_whisker(
     }
 
     if let Some(v) = get_yaml_str(opts, "mark") {
-        params.push(format!("  mark: \"{}\"", v));
+        params.push(format!("  mark: \"{}\"", escape_string(&v)));
     }
 
     lines.push(format!("  boxwhisker(\n{}\n  )", params.join(",\n")));
@@ -445,7 +446,7 @@ fn render_pyramid(
 
     // Mode: REGULAR, AREA-HEIGHT, HEIGHT, WIDTH
     if let Some(v) = get_yaml_str(opts, "mode") {
-        params.push(format!("  mode: \"{}\"", v));
+        params.push(format!("  mode: \"{}\"", escape_string(&v)));
     }
     if let Some(v) = get_yaml_number(opts, "gap") {
         params.push(format!("  gap: {}", v));
@@ -491,13 +492,13 @@ fn render_error_bar(
     }
 
     if let Some(v) = get_yaml_str(opts, "x_label") {
-        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    x-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_label") {
-        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    y-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "legend") {
-        plot_params.push(format!("    legend: \"{}\"", v));
+        plot_params.push(format!("    legend: \"{}\"", escape_string(&v)));
     }
 
     // Build data points for the line
@@ -591,13 +592,13 @@ fn render_violin(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String
     }
 
     if let Some(v) = get_yaml_str(opts, "x_label") {
-        plot_params.push(format!("    x-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    x-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "y_label") {
-        plot_params.push(format!("    y-label: [{}]", escape_typst(&v)));
+        plot_params.push(format!("    y-label: [{}]", escape_markup(&v)));
     }
     if let Some(v) = get_yaml_str(opts, "legend") {
-        plot_params.push(format!("    legend: \"{}\"", v));
+        plot_params.push(format!("    legend: \"{}\"", escape_string(&v)));
     }
 
     // add-violin params
@@ -605,7 +606,7 @@ fn render_violin(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<String
     add_params.push(format!("      {}", data_str));
 
     if let Some(v) = get_yaml_str(opts, "side") {
-        add_params.push(format!("      side: \"{}\"", v));
+        add_params.push(format!("      side: \"{}\"", escape_string(&v)));
     } else {
         add_params.push("      side: \"both\"".to_string());
     }
@@ -693,7 +694,7 @@ fn json_to_typst_value(val: &serde_json::Value) -> String {
         serde_json::Value::Null => "none".to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("\"{}\"", escape_typst_string(s)),
+        serde_json::Value::String(s) => format!("\"{}\"", escape_string(s)),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(json_to_typst_value).collect();
             format!("({})", items.join(", "))
@@ -708,7 +709,7 @@ fn get_color_list(opts: &serde_yaml_ng::Value, key: &str) -> String {
         let items: Vec<String> = colors
             .iter()
             .map(|c| match c {
-                serde_yaml_ng::Value::String(s) => format!("rgb(\"{}\")", s),
+                serde_yaml_ng::Value::String(s) => format!("rgb(\"{}\")", escape_string(s)),
                 _ => format!("rgb(\"{}\")", CHART_COLORS[0]),
             })
             .collect();
@@ -793,7 +794,7 @@ fn yaml_to_typst_value(val: &serde_yaml_ng::Value) -> String {
             if s.ends_with("pt") || s.ends_with("em") || s.ends_with('%') || s.starts_with("rgb") {
                 s.clone()
             } else {
-                format!("\"{}\"", escape_typst(s))
+                format!("\"{}\"", escape_string(s))
             }
         }
         serde_yaml_ng::Value::Sequence(seq) => {
@@ -826,25 +827,6 @@ fn yaml_mapping_to_typst_dict(map: &serde_yaml_ng::Mapping) -> String {
         })
         .collect();
     format!("({})", entries.join(", "))
-}
-
-/// Escape special Typst characters in text content.
-fn escape_typst(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('#', "\\#")
-        .replace('$', "\\$")
-        .replace('@', "\\@")
-        .replace('<', "\\<")
-        .replace('>', "\\>")
-}
-
-/// Escape a string for use inside a Typst double-quoted string literal (as built
-/// by `json_to_typst_value`). Only backslash and double-quote are special here;
-/// the markup escapes above (`\#` etc.) are invalid inside a string literal and
-/// an unescaped `"` would break out of it, allowing crafted cell data to inject
-/// Typst code.
-fn escape_typst_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -928,6 +910,54 @@ mod tests {
     }
 
     #[test]
+    fn test_chart_title_and_labels_escape_brackets() {
+        // A `]` in a title/label used inside a `[...]` content block must not
+        // close the block early and let the rest be parsed as Typst code.
+        let opts: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str("x_label: \"x]#y\"\ny_label: \"[z\"").expect("yaml");
+        let chart = ChartBlock {
+            bundle: "test".to_string(),
+            query: "SELECT region, revenue FROM bundle".to_string(),
+            chart_type: ChartType::Bar,
+            title: Some("Revenue] #evil".to_string()),
+            options: opts,
+        };
+        let result = render_chart(&chart, &sample_data()).expect("should render");
+        assert!(
+            result.contains("caption: [Revenue\\] \\#evil]"),
+            "title brackets must be escaped: {}",
+            result
+        );
+        assert!(result.contains("x-label: [x\\]\\#y]"), "{}", result);
+        assert!(result.contains("y-label: [\\[z]"), "{}", result);
+    }
+
+    #[test]
+    fn test_string_options_escape_quotes() {
+        // Option values interpolated into Typst string literals must not be
+        // able to break out of the literal.
+        assert_eq!(
+            yaml_to_typst_value(&serde_yaml_ng::Value::String("a\"b".to_string())),
+            "\"a\\\"b\""
+        );
+        let opts: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str("legend: 'x\") + 1'").expect("yaml");
+        let chart = ChartBlock {
+            bundle: "test".to_string(),
+            query: "SELECT region, revenue FROM bundle".to_string(),
+            chart_type: ChartType::Pie,
+            title: None,
+            options: opts,
+        };
+        let result = render_chart(&chart, &sample_data()).expect("should render");
+        assert!(
+            result.contains("legend: \"x\\\") + 1\""),
+            "legend must be string-escaped: {}",
+            result
+        );
+    }
+
+    #[test]
     fn test_render_chart_insufficient_columns() {
         let data = BoundedQueryResult {
             columns: vec!["x".to_string()],
@@ -945,9 +975,9 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_typst() {
-        assert_eq!(escape_typst("hello #world $100"), "hello \\#world \\$100");
-        assert_eq!(escape_typst("x < 5 and y > 10"), "x \\< 5 and y \\> 10");
+    fn test_escape_markup() {
+        assert_eq!(escape_markup("hello #world $100"), "hello \\#world \\$100");
+        assert_eq!(escape_markup("x < 5 and y > 10"), "x \\< 5 and y \\> 10");
     }
 
     #[test]

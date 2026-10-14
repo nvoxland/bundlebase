@@ -45,9 +45,9 @@ pub struct AggregateFunction {
     signature: Signature,
     overloads: Vec<FunctionEntry>,
     subprocess_cache: SubprocessCache,
-    /// When set, using this aggregate returns this error instead of running.
+    /// When set, checked before each use; errors while external code is disabled.
     /// Gates external-code aggregates behind `system.allow_external_code`.
-    gated: Option<String>,
+    gated: Option<crate::function_entry::ExternalGate>,
 }
 
 impl PartialEq for AggregateFunction {
@@ -120,10 +120,10 @@ impl AggregateFunction {
         self
     }
 
-    /// Mark this aggregate as gated: it registers but errors with `reason` when
-    /// used. Mirrors `ScalarFunction::with_gated`.
-    pub fn with_gated(mut self, reason: Option<String>) -> Self {
-        self.gated = reason;
+    /// Attach an external-code gate, checked each time an accumulator is
+    /// created. Mirrors `ScalarFunction::with_gated`.
+    pub fn with_gated(mut self, gate: Option<crate::function_entry::ExternalGate>) -> Self {
+        self.gated = gate;
         self
     }
 }
@@ -183,10 +183,8 @@ impl AggregateUDFImpl for AggregateFunction {
         &self,
         acc_args: datafusion::logical_expr::function::AccumulatorArgs,
     ) -> DFResult<Box<dyn Accumulator>> {
-        if let Some(reason) = &self.gated {
-            return Err(datafusion::common::DataFusionError::Execution(
-                reason.clone(),
-            ));
+        if let Some(gate) = &self.gated {
+            gate.check()?;
         }
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]

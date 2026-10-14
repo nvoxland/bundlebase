@@ -37,7 +37,21 @@ const PAGE_SIZE: usize = 10_000;
 const DOLLAR_TAG: &str = "$__bb$";
 
 config_scopes!(scopes, {
-    pub const POSTGRES_SCOPE: ConfigScope = ConfigScope::new("postgres");
+    pub const POSTGRES_SCOPE: ConfigScope = {
+        /// Map a `postgres://`/`postgresql://` URL to the same
+        /// `postgres/{host}[/{port}]/{dbname}` name that `source_scope()` uses,
+        /// so `SET CONFIG password FOR '<url>'` lands where the connector looks.
+        /// The default url_to_name would keep the user and `:port`, producing a
+        /// scope that never matches.
+        fn url_to_name(_scope: &ConfigScope, input: &str) -> Option<String> {
+            let url = Url::parse(input).ok()?;
+            if url.scheme() != "postgres" && url.scheme() != "postgresql" {
+                return None;
+            }
+            Some(scope_name_for_url(&url))
+        }
+        ConfigScope::new("postgres").with_url_to_name(url_to_name)
+    };
 });
 
 // PASSWORD_CFG is the PostgreSQL password. Runtime-only and secure: it is never
@@ -45,10 +59,7 @@ config_scopes!(scopes, {
 // password this way (or via env/passed config) instead of embedding it in the
 // `url` arg, which would be persisted in — and travel with — the bundle.
 config_keys!(configs, {
-    pub const PASSWORD_CFG: ConfigKey = POSTGRES_SCOPE
-        .define("password")
-        .runtime_only()
-        .secure();
+    pub const PASSWORD_CFG: ConfigKey = POSTGRES_SCOPE.define("password").runtime_only().secure();
 });
 
 /// Config scope for a postgres source's secrets: `postgres/{host}[/{port}]/{dbname}`.
@@ -61,8 +72,14 @@ config_keys!(configs, {
 fn source_scope(url: &str) -> Result<Scope, BundlebaseError> {
     let parsed =
         Url::parse(url).map_err(|e| BundlebaseError::from(format!("Invalid postgres url: {e}")))?;
+    Scope::from_name(scope_name_for_url(&parsed))
+}
+
+/// Build the `postgres/{host}[/{port}]/{dbname}` scope name for a parsed URL.
+/// Shared by `source_scope()` and `POSTGRES_SCOPE`'s url_to_name.
+fn scope_name_for_url(parsed: &Url) -> String {
     let mut name = POSTGRES_SCOPE.name.to_string();
-    if let Some(host) = parsed.host_str() {
+    if let Some(host) = parsed.host_str().filter(|h| !h.is_empty()) {
         name.push('/');
         name.push_str(host);
         if let Some(port) = parsed.port() {
@@ -73,12 +90,12 @@ fn source_scope(url: &str) -> Result<Scope, BundlebaseError> {
             name.push_str(&port.to_string());
         }
     }
-    let db = parsed.path().trim_start_matches('/');
+    let db = parsed.path().trim_start_matches('/').trim_end_matches('/');
     if !db.is_empty() {
         name.push('/');
         name.push_str(db);
     }
-    Scope::from_name(name)
+    name
 }
 
 /// PostgreSQL connector.
@@ -135,9 +152,8 @@ impl PostgresConnector {
         let scope = source_scope(url)?;
         match config.get_in_scope(&scope, &PASSWORD_CFG)? {
             Some(password) if !password.is_empty() => {
-                let mut parsed = Url::parse(url).map_err(|e| {
-                    BundlebaseError::from(format!("Invalid postgres url: {e}"))
-                })?;
+                let mut parsed = Url::parse(url)
+                    .map_err(|e| BundlebaseError::from(format!("Invalid postgres url: {e}")))?;
                 parsed.set_password(Some(&password)).map_err(|_| {
                     BundlebaseError::from("Failed to apply postgres password to connection url")
                 })?;
@@ -613,8 +629,9 @@ impl Connector for PostgresConnector {
             arg_specs: vec![
                 ArgSpec {
                     name: "url",
-                    description:
-                        "PostgreSQL connection URL without a password                          (postgres://user@host:port/dbname); set the password via                          config, e.g. SET CONFIG password = '...' FOR 'postgres/<host>'",
+                    description: "PostgreSQL connection URL without a password \
+                                  (postgres://user@host:port/dbname); set the password via \
+                                  config, e.g. SET CONFIG password = '...' FOR 'postgres/<host>'",
                     required: true,
                     default: None,
                 },
@@ -652,20 +669,24 @@ impl Connector for PostgresConnector {
         // a password — that would leak the secret to anyone the bundle is shared
         // with. Supply the password via runtime-only secure config instead.
         let parsed = Url::parse(url).map_err(|e| {
-            BundlebaseError::from(format!("url must be a valid PostgreSQL connection URL: {e}"))
+            BundlebaseError::from(format!(
+                "url must be a valid PostgreSQL connection URL: {e}"
+            ))
         })?;
         // tokio-postgres also honors libpq-style URI query parameters, so a
         // credential can hide in `?password=` / `?passfile=` — reject those
         // the same as userinfo passwords.
-        let has_credential_query_param = parsed.query_pairs().any(|(k, _)| {
-            k.eq_ignore_ascii_case("password") || k.eq_ignore_ascii_case("passfile")
-        });
+        let has_credential_query_param = parsed
+            .query_pairs()
+            .any(|(k, _)| k.eq_ignore_ascii_case("password") || k.eq_ignore_ascii_case("passfile"));
         if parsed.password().is_some() || has_credential_query_param {
-            return Err("Do not put the password in the url — it would be persisted in the \
+            return Err(
+                "Do not put the password in the url — it would be persisted in the \
                  bundle and shared with it. Set the postgres password via config instead, e.g. \
                  `SET CONFIG password = '<secret>' FOR 'postgres/<host>'`, and use a \
                  password-less url like `postgres://user@host/db`."
-                .into());
+                    .into(),
+            );
         }
 
         // Validate sort_column is a safe identifier
@@ -962,6 +983,44 @@ mod tests {
             Scope::from_name("postgres/db.example.com/5432".to_string()).expect("port scope");
         assert!(port_tier.matches(&scope));
         assert!(POSTGRES_SCOPE.matches(&scope), "base tier must match");
+    }
+
+    #[test]
+    fn test_set_config_for_postgres_url_matches_source_scope() {
+        // `SET CONFIG password FOR 'postgres://u@h:5432/db'` resolves the URL via
+        // the scope's url_to_name; it must land on the same scope that
+        // source_scope() computes at connect time, or the password is never found.
+        let url = "postgres://u@db.example.com:5432/analytics";
+        let set_scope = Scope::from_url(url, &POSTGRES_SCOPE).expect("url maps to a scope");
+        let query_scope = source_scope(url).expect("scope parses");
+        assert_eq!(set_scope.as_str(), query_scope.as_str());
+
+        // postgresql:// is an accepted alias scheme.
+        let alias = Scope::from_url("postgresql://u@db.example.com/analytics", &POSTGRES_SCOPE)
+            .expect("postgresql:// maps to a scope");
+        assert_eq!(alias.as_str(), "postgres/db.example.com/analytics");
+
+        // Bare scheme still maps to the base scope; other schemes don't match.
+        assert_eq!(
+            POSTGRES_SCOPE.url_to_name("postgres://").as_deref(),
+            Some("postgres")
+        );
+        assert_eq!(POSTGRES_SCOPE.url_to_name("http://db.example.com/x"), None);
+    }
+
+    #[test]
+    fn test_url_arg_description_has_no_whitespace_runs() {
+        let sig = PostgresConnector.signature();
+        let url_spec = sig
+            .arg_specs
+            .iter()
+            .find(|a| a.name == "url")
+            .expect("url arg");
+        assert!(
+            !url_spec.description.contains("  "),
+            "description has whitespace runs: {:?}",
+            url_spec.description
+        );
     }
 
     #[test]

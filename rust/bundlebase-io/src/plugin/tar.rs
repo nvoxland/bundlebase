@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::{Read, Seek};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tar::{Archive, Builder, Header};
@@ -300,90 +300,12 @@ impl TarObjectStore {
             Vec::new()
         };
 
-        // Rewrite the entire tar into a sibling temp file, then atomically
-        // rename it over the original. Previously this did File::create on the
-        // live archive, which truncates it in place, so a crash (or power loss)
-        // between truncate and finish destroyed every committed entry.
-        // pid alone collides when two TarObjectStore instances in the same
-        // process write the same archive (each instance has its own lock);
-        // a random component makes the staged path unique per rewrite.
-        let mut tmp_os = self.tar_path.as_os_str().to_owned();
-        tmp_os.push(format!(
-            ".{}.{:08x}.tmp",
-            std::process::id(),
-            rand::random::<u32>()
-        ));
-        let tmp_path = PathBuf::from(tmp_os);
-
-        let file = File::create(&tmp_path).map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?;
-
-        let mut builder = Builder::new(file);
-
-        // Write all existing entries
-        for (existing_path, existing_data) in existing_entries {
-            let mut header = Header::new_gnu();
-            header.set_size(existing_data.len() as u64);
-            header.set_mode(0o644);
-            header.set_mtime(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("BUG: current time should be after Unix epoch")
-                    .as_secs(),
-            );
-            header.set_cksum();
-
-            builder
-                .append_data(&mut header, existing_path.as_ref(), &existing_data[..])
-                .map_err(|e| object_store::Error::Generic {
-                    store: "TarObjectStore",
-                    source: Box::new(e),
-                })?;
-        }
-
-        // Write the new entry
-        let mut header = Header::new_gnu();
-        header.set_size(data.len() as u64);
-        header.set_mode(0o644);
-        header.set_mtime(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("BUG: current time should be after Unix epoch")
-                .as_secs(),
-        );
-        header.set_cksum();
-
-        builder
-            .append_data(&mut header, path.as_ref(), &data[..])
-            .map_err(|e| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            })?;
-
-        // Finish writing (writes tar footer) and recover the file handle so we
-        // can fsync the bytes before publishing the new archive.
-        let file = builder
-            .into_inner()
-            .map_err(|e| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            })?;
-        file.sync_all().map_err(|e| object_store::Error::Generic {
-            store: "TarObjectStore",
-            source: Box::new(e),
-        })?;
-        drop(file);
-
-        // Atomic publish: rename the fully-written temp over the original.
-        std::fs::rename(&tmp_path, self.tar_path.as_ref()).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path);
-            object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            }
-        })?;
+        let mut entries: Vec<(String, Bytes)> = existing_entries
+            .into_iter()
+            .map(|(p, d)| (p.as_ref().to_string(), d))
+            .collect();
+        entries.push((path.as_ref().to_string(), data));
+        publish_archive(&self.tar_path, &entries)?;
 
         // Rebuild index to include all entries
         self.indexed.store(false, Ordering::Release);
@@ -1451,6 +1373,78 @@ impl IOFactory for TarIOFactory {
 // Tests
 // ============================================================================
 
+fn tar_err(e: impl std::error::Error + Send + Sync + 'static) -> object_store::Error {
+    object_store::Error::Generic {
+        store: "TarObjectStore",
+        source: Box::new(e),
+    }
+}
+
+/// Write `entries` as a complete tar archive to a sibling temp file, fsync it,
+/// then atomically rename it over `tar_path`.
+///
+/// Rewriting into a temp file (instead of File::create on the live archive,
+/// which truncates it in place) means a crash between truncate and finish
+/// cannot destroy committed entries. pid alone collides when two
+/// TarObjectStore instances in the same process write the same archive (each
+/// has its own lock), so a random component makes the staged path unique.
+fn publish_archive(tar_path: &Path, entries: &[(String, Bytes)]) -> ObjectStoreResult<()> {
+    let mut tmp_os = tar_path.as_os_str().to_owned();
+    tmp_os.push(format!(
+        ".{}.{:08x}.tmp",
+        std::process::id(),
+        rand::random::<u32>()
+    ));
+    let tmp_path = PathBuf::from(tmp_os);
+
+    let file = File::create(&tmp_path).map_err(tar_err)?;
+    // From here on, any early return (append/finish/fsync/rename failure)
+    // removes the staged file; it is disarmed only after a successful rename.
+    let mut staged = StagedTempFile {
+        path: &tmp_path,
+        armed: true,
+    };
+    let mut builder = Builder::new(file);
+    let mtime = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    for (entry_path, entry_data) in entries {
+        let mut header = Header::new_gnu();
+        header.set_size(entry_data.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(mtime);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, entry_path, &entry_data[..])
+            .map_err(tar_err)?;
+    }
+    // Finish writing (writes tar footer) and recover the file handle so we
+    // can fsync the bytes before publishing the new archive.
+    let file = builder.into_inner().map_err(tar_err)?;
+    file.sync_all().map_err(tar_err)?;
+    drop(file);
+
+    // Atomic publish: rename the fully-written temp over the original.
+    std::fs::rename(&tmp_path, tar_path).map_err(tar_err)?;
+    staged.armed = false;
+    Ok(())
+}
+
+/// Removes a staged temp file on drop unless disarmed.
+struct StagedTempFile<'a> {
+    path: &'a Path,
+    armed: bool,
+}
+
+impl Drop for StagedTempFile<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(self.path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -1612,11 +1606,57 @@ mod tests {
         }
 
         // The temp file used for the atomic rename must be renamed away.
-        let mut tmp_os = tar_path.as_os_str().to_owned();
-        tmp_os.push(format!(".{}.tmp", std::process::id()));
+        assert_no_leftover_temp(&tar_path);
+    }
+
+    /// Assert no `<archive>.<pid>.<rand>.tmp` staging file remains next to
+    /// `tar_path`, whatever its random suffix.
+    fn assert_no_leftover_temp(tar_path: &std::path::Path) {
+        let dir = tar_path.parent().expect("archive has a parent dir");
+        let prefix = format!(
+            "{}.",
+            tar_path
+                .file_name()
+                .expect("archive has a file name")
+                .to_string_lossy()
+        );
+        let leftovers: Vec<String> = std::fs::read_dir(dir)
+            .expect("read archive dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with(&prefix) && name.ends_with(".tmp"))
+            .collect();
         assert!(
-            !std::path::PathBuf::from(tmp_os).exists(),
-            "atomic-rename temp file should not be left behind"
+            leftovers.is_empty(),
+            "atomic-rename temp file(s) left behind: {:?}",
+            leftovers
+        );
+    }
+
+    #[test]
+    fn test_publish_archive_removes_temp_when_write_fails() {
+        // An error while writing the staged archive (here: tar rejects a `..`
+        // entry path in append_data) must not leave the temp file behind, and
+        // must not touch the live archive.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tar_path = dir.path().join("bundle.tar");
+        publish_archive(&tar_path, &[("ok.txt".to_string(), Bytes::from("ok"))])
+            .expect("initial publish");
+        let before = std::fs::read(&tar_path).expect("read archive");
+
+        let result = publish_archive(
+            &tar_path,
+            &[
+                ("ok.txt".to_string(), Bytes::from("ok")),
+                ("a/../escape.txt".to_string(), Bytes::from("bad")),
+            ],
+        );
+        assert!(result.is_err(), "`..` entry path must be rejected");
+        assert_no_leftover_temp(&tar_path);
+        assert_eq!(
+            std::fs::read(&tar_path).expect("read archive"),
+            before,
+            "live archive must be unchanged after a failed rewrite"
         );
     }
 

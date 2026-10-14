@@ -3,6 +3,7 @@
 use crate::defaults;
 use crate::parse::TableBlock;
 use crate::query::BoundedQueryResult;
+use crate::typst_escape::escape_markup;
 use bundlebase_common::BundlebaseError;
 
 /// Generate Typst markup for a table block with its query results.
@@ -68,7 +69,7 @@ pub fn render_table(
     // Header row
     lines.push("  table.header(".to_string());
     for real_name in &data.columns {
-        lines.push(format!("    [*{}*],", escape_typst(real_name)));
+        lines.push(format!("    [*{}*],", escape_markup(real_name)));
     }
     lines.push("  ),".to_string());
 
@@ -77,7 +78,7 @@ pub fn render_table(
         for (col_idx, val) in row.iter().enumerate() {
             let cell_text = json_to_display(val);
             let _ = col_idx; // reserved for per-column formatting
-            lines.push(format!("  [{}],", escape_typst(&cell_text)));
+            lines.push(format!("  [{}],", escape_markup(&cell_text)));
         }
     }
 
@@ -85,7 +86,7 @@ pub fn render_table(
 
     // Close figure with caption — content block ] closes before caption
     if let Some(title) = &table.title {
-        lines.push(format!("], caption: [{}])", escape_typst(title)));
+        lines.push(format!("], caption: [{}])", escape_markup(title)));
     }
 
     lines.push(String::new());
@@ -154,31 +155,9 @@ fn get_opt_bool(opts: &serde_yaml_ng::Value, key: &str) -> Option<bool> {
     })
 }
 
-/// Escape special Typst characters in markup content (used inside `[...]`
-/// content blocks). Brackets must be escaped too, otherwise a cell containing
-/// `]` closes the content block early and unbalances the whole `#table(...)`.
-fn escape_typst(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('[', "\\[")
-        .replace(']', "\\]")
-        .replace('#', "\\#")
-        .replace('$', "\\$")
-        .replace('@', "\\@")
-        .replace('<', "\\<")
-        .replace('>', "\\>")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_escape_typst_escapes_brackets() {
-        // bb-dvo: a cell containing ] must not close the content block early.
-        assert_eq!(escape_typst("a]b"), "a\\]b");
-        assert_eq!(escape_typst("[x]"), "\\[x\\]");
-        assert_eq!(escape_typst("a#b"), "a\\#b");
-    }
 
     fn sample_data() -> BoundedQueryResult {
         BoundedQueryResult {

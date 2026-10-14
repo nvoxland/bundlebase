@@ -3,6 +3,8 @@
 //! Provides the page layout, font configuration, and styling rules
 //! that give reports a consistent, pleasant appearance.
 
+use crate::typst_escape::escape_markup;
+
 /// Generate the Typst template preamble.
 ///
 /// This is prepended to the rendered report content and sets up:
@@ -148,7 +150,7 @@ fn convert_markdown_table(header_line: &str, data_rows: &[&str]) -> String {
     // Header row
     lines.push("  table.header(".to_string());
     for h in &headers {
-        lines.push(format!("    [*{}*],", escape_typst(h)));
+        lines.push(format!("    [*{}*],", escape_markup(h)));
     }
     lines.push("  ),".to_string());
 
@@ -156,22 +158,12 @@ fn convert_markdown_table(header_line: &str, data_rows: &[&str]) -> String {
     for row in data_rows {
         let cells = parse_table_cells(row);
         for cell in &cells {
-            lines.push(format!("  [{}],", escape_typst(cell)));
+            lines.push(format!("  [{}],", escape_markup(cell)));
         }
     }
 
     lines.push(")".to_string());
     lines.join("\n")
-}
-
-/// Escape special Typst characters in text content.
-fn escape_typst(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('#', "\\#")
-        .replace('$', "\\$")
-        .replace('@', "\\@")
-        .replace('<', "\\<")
-        .replace('>', "\\>")
 }
 
 /// Convert a single markdown line to Typst.
@@ -296,7 +288,10 @@ mod tests {
         assert!(!is_table_separator("  |  "));
         assert!(is_table_separator("|---|---|"));
         assert_eq!(parse_table_cells("|"), Vec::<String>::new());
-        assert_eq!(parse_table_cells("| a | b |"), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            parse_table_cells("| a | b |"),
+            vec!["a".to_string(), "b".to_string()]
+        );
     }
 
     #[test]
@@ -360,6 +355,17 @@ mod tests {
     fn test_horizontal_rule() {
         assert!(convert_line("---").contains("#line("));
         assert!(convert_line("***").contains("#line("));
+    }
+
+    #[test]
+    fn test_markdown_table_cell_escapes_brackets() {
+        let md = "| Name |\n|------|\n| a]b |";
+        let result = markdown_to_typst(md);
+        assert!(
+            result.contains("[a\\]b]"),
+            "cell brackets must be escaped: {}",
+            result
+        );
     }
 
     #[test]

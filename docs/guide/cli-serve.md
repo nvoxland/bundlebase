@@ -18,18 +18,18 @@ bundlebase serve --bundle <path> [options]
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
 | `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
-| `--host <addr>` | `0.0.0.0` | Host address to bind to |
+| `--host <addr>` | `127.0.0.1` | Host address to bind to. The default only accepts local connections; use `--host 0.0.0.0` to listen on all interfaces |
 | `--port <port>` | `50051` | Port to listen on |
 | `--log-level <level>` | `ui` | Logging level |
 
 ### Examples
 
 ```bash
-# Start with defaults (0.0.0.0:50051)
+# Start with defaults (127.0.0.1:50051, local connections only)
 bundlebase serve --bundle ./my-bundle
 
-# Custom host and port
-bundlebase serve --bundle ./my-bundle --host 127.0.0.1 --port 8080
+# Listen on all interfaces with a custom port (set credentials first, see below)
+bundlebase serve --bundle ./my-bundle --host 0.0.0.0 --port 8080
 
 # Read-only server
 bundlebase serve --bundle ./my-bundle --read-only
@@ -65,7 +65,7 @@ Each authenticated client gets its own session:
 - Each session maintains its own bundle state and prepared statements
 - Sessions expire after **30 minutes** of inactivity
 - Expired sessions are cleaned up automatically every 5 minutes
-- If an expired token is reused, the server re-creates the session automatically
+- If an expired token is reused, the request fails with a "Session expired" error and the client must authenticate again; any uncommitted session state is gone
 
 ## Supported Operations
 
@@ -87,7 +87,7 @@ See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 ## Column Descriptions in BI Tools
 
-Column descriptions set with [`DESCRIBE COLUMN`](../sql-reference/index.md#describe-column) are exported as **Arrow field metadata** (under the key `description`) on the schema the server serves. BI and Arrow clients that read field metadata will show them alongside the column, so the meaning of a column travels with the data instead of living in a separate wiki.
+Column descriptions set with [`DESCRIBE COLUMN`](../sql-reference/index.md#describe-column) are exported as **Arrow field metadata** (under the key `description`) on the table schema returned by the Flight SQL `GetTables` metadata call (with `include_schema` set). BI and Arrow clients that browse table metadata this way can show them alongside the column, so the meaning of a column travels with the data instead of living in a separate wiki. Query result schemas (from `SELECT`) do not carry the descriptions.
 
 ```sql
 DESCRIBE COLUMN amount AS 'order total in USD, net of refunds'

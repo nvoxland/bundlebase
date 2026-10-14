@@ -128,10 +128,15 @@ impl UdfRuntime {
     }
 
     /// Whether this runtime executes external code that must be gated behind
-    /// `system.allow_external_code`. The in-process `python` runtime is not
-    /// considered external; ffi/ipc/docker/java load or spawn external code.
+    /// `system.allow_external_code`. ffi/ipc/docker/java load or spawn external
+    /// code. File-backed python (`python::./x.py:f`) is bundleable and runs the
+    /// shipped `.py` in a subprocess, so it is external too. Only module-backed
+    /// python (in-process, importable module, never bundled) is not external.
     pub fn is_external(&self) -> bool {
-        !matches!(self, UdfRuntime::Python(_))
+        match self {
+            UdfRuntime::Python(r) => r.is_file_backed(),
+            _ => true,
+        }
     }
 
     /// Reconstruct the entrypoint portion of the FROM string.

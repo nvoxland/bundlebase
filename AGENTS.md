@@ -50,6 +50,7 @@ For detailed documentation, see the modular guides in the `.context/` directory:
   - [007-no-unwrap.md](.context/decisions/007-no-unwrap.md) - No `.unwrap()` allowed
   - [008-no-mod-rs.md](.context/decisions/008-no-mod-rs.md) - Named module files convention
   - [009-block-level-edit-representation.md](.context/decisions/009-block-level-edit-representation.md) - Tombstones/overlays as the sole DELETE/UPDATE representation
+  - [010-trust-model.md](.context/decisions/010-trust-model.md) - Trusted client, untrusted bundle data; what `allow_external_code` gates; no source-URL guard
 
 **AI Prompt Templates:**
 - **[prompts/](.context/prompts/)** - Task-specific templates for AI-assisted development

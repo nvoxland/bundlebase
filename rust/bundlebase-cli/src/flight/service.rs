@@ -32,7 +32,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use prost::Message;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
@@ -71,9 +71,82 @@ const SESSION_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Interval between session cleanup sweeps (5 minutes).
 const SESSION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
+/// How long an idle-expired token is remembered so its next request can be
+/// told "session expired" rather than the generic "authentication required".
+const EXPIRED_TOKEN_RETENTION: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Upper bound on remembered expired tokens; the oldest are forgotten first.
+const MAX_EXPIRED_TOKENS: usize = 10_000;
+
+/// Tokens whose sessions were idle-expired, with the time they expired.
+/// Bounded by `EXPIRED_TOKEN_RETENTION` and `MAX_EXPIRED_TOKENS`.
+type ExpiredTokens = Arc<RwLock<HashMap<String, std::time::Instant>>>;
+
 /// Create a new session store.
 fn new_session_store() -> SessionStore {
     Arc::new(RwLock::new(HashMap::new()))
+}
+
+/// Remove sessions idle longer than `idle_timeout`, remembering their tokens
+/// in `expired_tokens` so the next request with one gets an explicit "session
+/// expired" error. Returns how many sessions were removed.
+fn sweep_idle_sessions(
+    sessions: &SessionStore,
+    expired_tokens: &RwLock<HashMap<String, std::time::Instant>>,
+    idle_timeout: std::time::Duration,
+) -> usize {
+    let expired: Vec<String> = {
+        let sessions = sessions.read();
+        sessions
+            .iter()
+            .filter(|(_, session)| session.last_accessed.elapsed() > idle_timeout)
+            .map(|(token, _)| token.clone())
+            .collect()
+    };
+    {
+        let mut sessions = sessions.write();
+        for token in &expired {
+            sessions.remove(token);
+        }
+    }
+    let now = std::time::Instant::now();
+    remember_expired_tokens(
+        &mut expired_tokens.write(),
+        expired.iter().cloned(),
+        now,
+        EXPIRED_TOKEN_RETENTION,
+        MAX_EXPIRED_TOKENS,
+    );
+    if !expired.is_empty() {
+        info!("Cleaned up {} idle session(s)", expired.len());
+    }
+    expired.len()
+}
+
+/// Record newly expired tokens, then prune entries older than `retention`
+/// and, if still over `max`, the oldest ones — so the set stays bounded.
+fn remember_expired_tokens(
+    expired_tokens: &mut HashMap<String, std::time::Instant>,
+    newly_expired: impl Iterator<Item = String>,
+    now: std::time::Instant,
+    retention: std::time::Duration,
+    max: usize,
+) {
+    for token in newly_expired {
+        expired_tokens.insert(token, now);
+    }
+    expired_tokens.retain(|_, at| now.saturating_duration_since(*at) <= retention);
+    if expired_tokens.len() > max {
+        let mut by_age: Vec<(std::time::Instant, String)> = expired_tokens
+            .iter()
+            .map(|(token, at)| (*at, token.clone()))
+            .collect();
+        by_age.sort_unstable_by_key(|(at, _)| *at);
+        let excess = expired_tokens.len() - max;
+        for (_, token) in by_age.into_iter().take(excess) {
+            expired_tokens.remove(&token);
+        }
+    }
 }
 
 /// The bundlebase Flight SQL service implementation.
@@ -104,8 +177,9 @@ pub struct BundlebaseFlightSqlService {
     read_only: bool,
     /// Session states keyed by auth token
     sessions: SessionStore,
-    /// Set of tokens issued by this server instance (for validating reconnections)
-    issued_tokens: Arc<RwLock<HashSet<String>>>,
+    /// Tokens whose sessions idle-expired (bounded, TTL'd), so a returning
+    /// client is told to re-handshake instead of getting a generic auth error.
+    expired_tokens: ExpiredTokens,
     authenticator: BundlebaseAuthenticator,
 }
 
@@ -125,41 +199,17 @@ impl BundlebaseFlightSqlService {
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
         let sessions = new_session_store();
-        let issued_tokens: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
+        let expired_tokens: ExpiredTokens = Arc::new(RwLock::new(HashMap::new()));
 
-        // Start background task to clean up idle sessions. The issued-token
-        // set is pruned along with the session, so it stays bounded and an
-        // expired token is fully forgotten (bb-8gq.4).
+        // Start background task to clean up idle sessions. Expired tokens are
+        // remembered (bounded by count and age) so the client gets an explicit
+        // "session expired" error on its next request (bb-8gq.4).
         let cleanup_sessions = Arc::clone(&sessions);
-        let cleanup_tokens = Arc::clone(&issued_tokens);
+        let cleanup_tokens = Arc::clone(&expired_tokens);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(SESSION_CLEANUP_INTERVAL).await;
-                let expired: Vec<String> = {
-                    let sessions = cleanup_sessions.read();
-                    sessions
-                        .iter()
-                        .filter(|(_, session)| {
-                            session.last_accessed.elapsed() > SESSION_IDLE_TIMEOUT
-                        })
-                        .map(|(token, _)| token.clone())
-                        .collect()
-                };
-                if !expired.is_empty() {
-                    {
-                        let mut sessions = cleanup_sessions.write();
-                        for token in &expired {
-                            sessions.remove(token);
-                        }
-                    }
-                    {
-                        let mut tokens = cleanup_tokens.write();
-                        for token in &expired {
-                            tokens.remove(token);
-                        }
-                    }
-                    info!("Cleaned up {} idle session(s)", expired.len());
-                }
+                sweep_idle_sessions(&cleanup_sessions, &cleanup_tokens, SESSION_IDLE_TIMEOUT);
             }
         });
 
@@ -168,7 +218,7 @@ impl BundlebaseFlightSqlService {
             bundle_config,
             read_only,
             sessions,
-            issued_tokens,
+            expired_tokens,
             authenticator,
         }
     }
@@ -195,12 +245,11 @@ impl BundlebaseFlightSqlService {
                     }
                 }
 
-                // The token was issued by this server but its session is
-                // gone (idle-expired). Silently handing out a FRESH session
+                // The token's session was idle-expired by the cleanup sweep. Silently handing out a FRESH session
                 // here discarded the client's staged work with no signal and
                 // raced concurrent requests through create_session
                 // (bb-8gq.4). Tell the client to re-handshake instead.
-                if self.issued_tokens.write().remove(token) {
+                if self.expired_tokens.write().remove(token).is_some() {
                     info!(
                         "Rejecting expired session token {} — client must re-handshake",
                         redact_token(token)
@@ -256,7 +305,11 @@ impl BundlebaseFlightSqlService {
         // Try to get initial bundle schema (may be empty for new bundles).
         // described_schema carries column descriptions as Arrow field metadata,
         // so Flight/BI clients see the semantic layer, not just MCP agents.
-        let bundle_schema = state.described_schema().await.ok().map(|s| (*s).clone().into());
+        let bundle_schema = state
+            .described_schema()
+            .await
+            .ok()
+            .map(|s| (*s).clone().into());
 
         Ok(Session {
             bundle: state,
@@ -301,6 +354,12 @@ impl BundlebaseFlightSqlService {
     #[cfg(test)]
     pub fn has_sessions(&self) -> bool {
         !self.sessions.read().is_empty()
+    }
+
+    /// Run one idle-session sweep with the given timeout (the background
+    /// cleanup task does the same with `SESSION_IDLE_TIMEOUT`).
+    fn sweep_idle_sessions(&self, idle_timeout: std::time::Duration) -> usize {
+        sweep_idle_sessions(&self.sessions, &self.expired_tokens, idle_timeout)
     }
 }
 
@@ -378,8 +437,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         // Generate a unique token for this session
         let token = format!("token-{}", Uuid::new_v4());
 
-        // Store the session and track the issued token
-        self.issued_tokens.write().insert(token.clone());
+        // Store the session
         self.sessions.write().insert(token.clone(), session);
 
         info!(
@@ -923,23 +981,74 @@ fn encode_schema(schema: &SchemaRef) -> Result<Bytes, Status> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_remembered_expired_tokens_are_bounded() {
+        let now = std::time::Instant::now();
+        let retention = std::time::Duration::from_secs(60);
+        let mut tokens = HashMap::new();
+
+        // Count bound: oldest are dropped first.
+        remember_expired_tokens(
+            &mut tokens,
+            (0..5).map(|i| format!("t{i}")),
+            now,
+            retention,
+            3,
+        );
+        assert_eq!(tokens.len(), 3);
+
+        // Age bound: entries older than retention are pruned.
+        let later = now + std::time::Duration::from_secs(61);
+        remember_expired_tokens(
+            &mut tokens,
+            std::iter::once("fresh".to_string()),
+            later,
+            retention,
+            3,
+        );
+        assert_eq!(tokens.len(), 1);
+        assert!(tokens.contains_key("fresh"));
+    }
+
     #[tokio::test]
-    async fn test_expired_issued_token_is_rejected_not_recreated() {
-        // bb-8gq.4: a token whose session idle-expired must get an explicit
-        // unauthenticated error — silently minting a fresh empty session
-        // discarded the client's staged work with no signal.
+    async fn test_session_expired_by_cleanup_sweep_reports_expiry() {
+        // Go through the real expiry path: an issued token whose session is
+        // removed by the idle sweep must get the "Session expired" message on
+        // its next request, not the generic "Authentication required".
         let svc = BundlebaseFlightSqlService::new(
-            "memory:///expired_token_test".to_string(),
+            "memory:///sweep_expiry_test".to_string(),
             None,
             true,
             crate::auth::BundlebaseAuthenticator::default(),
         );
-        // Simulate: token was issued, session has since been cleaned up.
-        svc.issued_tokens.write().insert("token-expired".to_string());
+        let bundle: Arc<dyn BundleFacade> =
+            bundlebase::BundleBuilder::create("memory:///sweep_expiry_test", None)
+                .await
+                .expect("create bundle");
+        let token = "token-sweep".to_string();
+        svc.sessions.write().insert(
+            token.clone(),
+            Session {
+                bundle,
+                prepared_statements: HashMap::new(),
+                bundle_schema: None,
+                last_accessed: std::time::Instant::now(),
+            },
+        );
 
         let mut req = tonic::Request::new(());
-        req.metadata_mut()
-            .insert("authorization", "Bearer token-expired".parse().expect("meta"));
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {token}").parse().expect("meta"),
+        );
+        assert!(svc.get_bundle(&req).await.is_ok(), "live session works");
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert_eq!(
+            svc.sweep_idle_sessions(std::time::Duration::from_millis(1)),
+            1
+        );
+        assert!(!svc.has_sessions());
 
         let err = svc
             .get_bundle(&req)
@@ -948,13 +1057,14 @@ mod tests {
             .expect("expired token must be rejected");
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
         assert!(
-            err.message().contains("re-handshake") || err.message().contains("do_handshake"),
-            "error should tell the client to re-handshake: {}",
+            err.message().contains("Session expired"),
+            "expected the session-expired message, got: {}",
             err.message()
         );
-        // The token is forgotten — the issued set stays bounded.
-        assert!(svc.issued_tokens.read().is_empty());
-        assert!(!svc.has_sessions());
+
+        // Reported once, then forgotten.
+        let err = svc.get_bundle(&req).await.err().expect("still rejected");
+        assert!(!err.message().contains("Session expired"));
     }
 
     #[test]

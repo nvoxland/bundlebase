@@ -119,6 +119,46 @@ pub struct FunctionRegistry {
     config: Arc<dyn ConfigProvider>,
 }
 
+/// Call-time check that an external-code function may run.
+///
+/// Holds the bundle's live config provider so the decision always reflects the
+/// current value of `system.allow_external_code`, matching how external
+/// connectors check the setting when they are used.
+#[derive(Clone)]
+pub struct ExternalGate {
+    function: String,
+    runtimes: String,
+    config: Arc<dyn ConfigProvider>,
+}
+
+impl fmt::Debug for ExternalGate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExternalGate")
+            .field("function", &self.function)
+            .field("runtimes", &self.runtimes)
+            .finish()
+    }
+}
+
+impl ExternalGate {
+    /// `Ok(())` when external code is currently allowed, otherwise an
+    /// execution error explaining how to enable it.
+    pub fn check(&self) -> datafusion::common::Result<()> {
+        match is_external_code_allowed(self.config.as_ref()) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(datafusion::common::DataFusionError::Execution(format!(
+                "External code execution is disabled. Run SET CONFIG allow_external_code='true' \
+                 FOR 'system' (system.allow_external_code=true) to call function '{}' ({} runtime).",
+                self.function, self.runtimes
+            ))),
+            Err(e) => Err(datafusion::common::DataFusionError::Execution(format!(
+                "Cannot call function '{}': failed to read system.allow_external_code: {}",
+                self.function, e
+            ))),
+        }
+    }
+}
+
 impl fmt::Debug for FunctionRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FunctionRegistry")
@@ -144,11 +184,33 @@ impl FunctionRegistry {
         }
     }
 
-    /// If any overload uses an external runtime and `system.allow_external_code`
-    /// is not enabled, return a gate message. The function still registers, but
-    /// invoking it returns this error (queries that don't call it are fine).
-    /// The in-process python runtime is never gated.
-    fn compute_external_gate(&self, name: &str, overloads: &[FunctionEntry]) -> Option<String> {
+    /// A copy of this registry bound to a different session context and data
+    /// directory. Used when a Bundle is extended into an independent builder
+    /// with its own `SessionContext`, so functions the builder registers (and
+    /// its `version()` refreshes) don't reach the source Bundle's context.
+    pub fn rebound(
+        &self,
+        data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
+        ctx: Arc<SessionContext>,
+    ) -> Self {
+        let mut registry = self.clone();
+        registry.data_dir = data_dir;
+        registry.ctx = ctx;
+        registry
+    }
+
+    /// If any overload uses an external runtime, return a gate that checks
+    /// `system.allow_external_code` each time the function is invoked. The
+    /// function still registers, but invoking it errors while the setting is
+    /// disabled (queries that don't call it are fine). Checking at call time
+    /// means `SET CONFIG allow_external_code=... FOR 'system'` takes effect
+    /// immediately, in both directions, without re-registering.
+    /// Module-backed (in-process) python is never gated.
+    fn compute_external_gate(
+        &self,
+        name: &str,
+        overloads: &[FunctionEntry],
+    ) -> Option<ExternalGate> {
         let mut runtimes: Vec<&str> = overloads
             .iter()
             .filter(|e| e.from.is_external())
@@ -157,23 +219,22 @@ impl FunctionRegistry {
         if runtimes.is_empty() {
             return None;
         }
-        if is_external_code_allowed(self.config.as_ref()).unwrap_or(false) {
-            return None;
-        }
         runtimes.sort_unstable();
         runtimes.dedup();
         let runtimes = runtimes.join("/");
-        log::warn!(
-            "Function '{}' uses external runtime(s) [{}] and is gated because \
-             system.allow_external_code is not enabled; calling it will error until enabled",
-            name,
-            runtimes
-        );
-        Some(format!(
-            "External code execution is disabled. Set system.allow_external_code=true to call \
-             function '{}' ({} runtime).",
-            name, runtimes
-        ))
+        if !is_external_code_allowed(self.config.as_ref()).unwrap_or(false) {
+            log::warn!(
+                "Function '{}' uses external runtime(s) [{}] and is gated because \
+                 system.allow_external_code is not enabled; calling it will error until enabled",
+                name,
+                runtimes
+            );
+        }
+        Some(ExternalGate {
+            function: name.to_string(),
+            runtimes,
+            config: Arc::clone(&self.config),
+        })
     }
 
     /// Stable internal ObjectId for a user-visible function name, if registered.
@@ -342,12 +403,10 @@ impl FunctionRegistry {
         match kind {
             FunctionKind::Scalar => {
                 use crate::bridge::scalar::ScalarFunction;
-                let func = ScalarFunction::new_composite(
-                    overloads,
-                    Arc::clone(&self.subprocess_cache),
-                )?
-                .with_name(internal_name.clone())
-                .with_gated(gate);
+                let func =
+                    ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?
+                        .with_name(internal_name.clone())
+                        .with_gated(gate);
                 self.ctx.register_udf(ScalarUDF::from(func));
             }
             FunctionKind::Aggregate => {
@@ -816,8 +875,12 @@ mod tests {
         // ffi/ipc/docker/java are external -> gated with a clear message.
         let ipc = entry_with_runtime("acme.ext", "ipc::./f");
         let gate = reg.compute_external_gate("acme.ext", std::slice::from_ref(&ipc));
-        assert!(gate.is_some(), "external function must be gated when disabled");
-        assert!(gate.unwrap().contains("allow_external_code"));
+        let err = gate
+            .expect("external function must be gated when disabled")
+            .check()
+            .expect_err("gate must block while disabled")
+            .to_string();
+        assert!(err.contains("allow_external_code"));
 
         // In-process python is NOT external -> never gated.
         let py = entry_with_runtime("acme.py", "python::mod:f");
@@ -829,13 +892,112 @@ mod tests {
     }
 
     #[test]
+    fn test_file_backed_python_function_is_gated() {
+        // File-backed python is bundleable and runs as an IPC subprocess, so an
+        // untrusted bundle could ship a .py file: it must be gated.
+        let reg = test_registry();
+        let py_file = entry_with_runtime("acme.pyfile", "python::./udfs/f.py:f");
+        assert!(
+            reg.compute_external_gate("acme.pyfile", std::slice::from_ref(&py_file))
+                .is_some(),
+            "file-backed python function must be gated when allow_external_code is disabled"
+        );
+    }
+
+    /// Config whose `allow_external_code` can be flipped at runtime, mimicking
+    /// `SET CONFIG allow_external_code=... FOR 'system'` after registration.
+    struct ToggleConfigProvider(std::sync::atomic::AtomicBool);
+    impl bundlebase_common::ConfigProvider for ToggleConfigProvider {
+        fn get_in_scope(
+            &self,
+            _scope: &bundlebase_common::Scope,
+            key: &bundlebase_common::ConfigKey,
+        ) -> Result<Option<String>, bundlebase_common::BundlebaseError> {
+            if key.key == "allow_external_code" && self.0.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                Ok(Some("true".to_string()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    async fn call_error(reg: &FunctionRegistry, name: &str) -> String {
+        use futures::StreamExt;
+        let internal = reg
+            .name_to_internal_name()
+            .get(name)
+            .cloned()
+            .expect("registered");
+        let sql = format!("SELECT {}(CAST(1 AS BIGINT))", internal);
+        let result = async {
+            let df = reg.ctx.sql(&sql).await?;
+            let mut stream = df.execute_stream().await?;
+            while let Some(batch) = stream.next().await {
+                batch?;
+            }
+            Ok::<(), datafusion::error::DataFusionError>(())
+        }
+        .await;
+        match result {
+            Ok(()) => String::new(),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_gate_follows_allow_external_code_changes_after_registration() {
+        use crate::bridge::ipc_bridge::new_subprocess_cache;
+        use bundlebase_io::plugin::object_store::ObjectStoreDir;
+        use url::Url;
+        let toggle = Arc::new(ToggleConfigProvider(std::sync::atomic::AtomicBool::new(
+            false,
+        )));
+        let config: Arc<dyn bundlebase_common::ConfigProvider> = toggle.clone();
+        let url = Url::parse("memory:///test").expect("valid url");
+        let dir = ObjectStoreDir::from_url(&url, config.clone()).expect("valid dir");
+        let data_dir = Arc::new(RwLock::new(Arc::new(dir) as Arc<dyn IOReadWriteDir>));
+        let mut reg = FunctionRegistry::new(
+            data_dir,
+            Arc::new(SessionContext::new()),
+            new_subprocess_cache(),
+            config,
+        );
+        reg.add_and_register(entry_with_runtime(
+            "acme.ext",
+            "ipc::./definitely_missing_exe_xyz",
+        ))
+        .expect("register");
+
+        const GATED: &str = "External code execution is disabled";
+        let err = call_error(&reg, "acme.ext").await;
+        assert!(err.contains(GATED), "expected gate error, got: {}", err);
+
+        // Enabling after registration must take effect without re-registering.
+        toggle.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        let err = call_error(&reg, "acme.ext").await;
+        assert!(
+            !err.contains(GATED),
+            "gate must lift once allow_external_code is enabled, got: {}",
+            err
+        );
+
+        // And disabling again must re-gate.
+        toggle.0.store(false, std::sync::atomic::Ordering::SeqCst);
+        let err = call_error(&reg, "acme.ext").await;
+        assert!(err.contains(GATED), "expected gate error, got: {}", err);
+    }
+
+    #[test]
     fn test_external_function_not_gated_when_allowed() {
         let reg = test_registry_allowing_external();
         let ipc = entry_with_runtime("acme.ext", "ipc::./f");
+        let gate = reg
+            .compute_external_gate("acme.ext", std::slice::from_ref(&ipc))
+            .expect("external functions always carry a call-time gate");
         assert!(
-            reg.compute_external_gate("acme.ext", std::slice::from_ref(&ipc))
-                .is_none(),
-            "external function must not be gated when allow_external_code=true"
+            gate.check().is_ok(),
+            "external function must not be blocked when allow_external_code=true"
         );
     }
 
@@ -1275,7 +1437,6 @@ mod tests {
 
     // ==================== fn_<id> stable internal name tests ====================
     use datafusion::execution::FunctionRegistry as DfFunctionRegistry;
-
 
     /// `register_functions_for_name` should register the composite UDF in
     /// DataFusion under `fn_<id>` rather than the user-visible name. The

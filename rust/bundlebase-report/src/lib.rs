@@ -9,6 +9,7 @@ pub mod parse;
 pub mod query;
 pub mod template;
 pub mod typst_chart;
+mod typst_escape;
 pub mod typst_render;
 pub mod typst_table;
 
