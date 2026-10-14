@@ -51,3 +51,6 @@ ideas
 .beads-credential-key
 
 .claude/scheduled_tasks.lock
+
+# Standalone FFI test fixture crate; lockfile is not tracked
+rust/bundlebase/tests/test_lib_function/Cargo.lock
