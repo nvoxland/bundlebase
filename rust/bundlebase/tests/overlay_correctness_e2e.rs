@@ -366,19 +366,10 @@ async fn test_count_star_reflects_tombstones() -> Result<(), BundlebaseError> {
     builder.commit("attach").await?;
     let total = builder.num_rows().await?;
 
-    // Blocks-only delete: tombstone RowIds without the query-level FilterOp
-    // (the same composition the always-rules and the representation benchmarks
-    // use). The tombstone is persisted by the commit.
-    let wc = builder.translate_sql("salary > 200000");
-    let ids = builder.select_row_ids(&wc).await?;
-    let n_deleted = ids.len();
+    // DELETE records only a tombstone (no query-level filter); the
+    // tombstone is persisted by the commit.
+    let n_deleted = builder.delete("salary > 200000").await?;
     assert!(n_deleted > 0);
-    builder
-        .run_command("blocks-only delete".to_string(), async {
-            builder.mark_deleted(ids, &wc);
-            Ok(())
-        })
-        .await?;
     builder.commit("tombstone-only delete").await?;
 
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
@@ -465,18 +456,9 @@ async fn test_block_level_delete_visible_in_session() -> Result<(), BundlebaseEr
     builder.commit("attach").await?;
     let total = builder.num_rows().await?;
 
-    // Blocks-only delete: no FilterOp — exactly what the DELETE command does
-    // once the duplicate FilterOp is removed.
-    let wc = builder.translate_sql("salary > 200000");
-    let ids = builder.select_row_ids(&wc).await?;
-    let n = ids.len();
+    // The DELETE command records no FilterOp — only block tombstones.
+    let n = builder.delete("salary > 200000").await?;
     assert!(n > 0);
-    builder
-        .run_command("blocks-only delete".to_string(), async {
-            builder.mark_deleted(ids, &wc);
-            Ok(())
-        })
-        .await?;
 
     let batches = query_collect(builder.as_ref(), "SELECT * FROM bundle").await;
     let streamed: usize = batches.iter().map(|b| b.num_rows()).sum();
@@ -513,7 +495,7 @@ async fn test_failed_command_rolls_back_flushed_block_state() -> Result<(), Bund
                     &wc,
                 )
                 .await?;
-            builder.flush_pending_updates_to_blocks();
+            builder.flush_pending_updates_to_blocks()?;
             Err::<(), BundlebaseError>("simulated failure".into())
         })
         .await;
@@ -547,25 +529,11 @@ async fn test_block_level_update_visible_through_index() -> Result<(), Bundlebas
         .await?;
     builder.commit("index on Email").await?;
 
-    // Blocks-only update: overlay without the CASE FilterOp — exactly what the
-    // UPDATE command emits once the duplicate FilterOp is removed.
+    // The UPDATE command records only a block overlay (no CASE FilterOp).
     let email = "zunigavanessa@smith.info";
-    let city_col = builder.translate_sql("City");
-    let wc = builder.translate_sql(&format!("Email = '{email}'"));
-    let n = builder
-        .run_command("blocks-only update".to_string(), async {
-            let n = builder
-                .evaluate_update_cols(
-                    std::slice::from_ref(&city_col),
-                    &["'BLOCKS_CITY'".to_string()],
-                    &wc,
-                )
-                .await?;
-            builder.flush_pending_updates_to_blocks();
-            Ok(n)
-        })
+    builder
+        .update(&format!("SET City = 'BLOCKS_CITY' WHERE Email = '{email}'"))
         .await?;
-    assert_eq!(n, 1);
     builder.commit("blocks-only update").await?;
 
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
@@ -599,23 +567,10 @@ async fn test_search_sees_block_level_updates() -> Result<(), BundlebaseError> {
         .await?;
     builder.commit("text index").await?;
 
-    // Blocks-only update of a NON-indexed column on the rows search will hit.
-    let city_col = builder.translate_sql("City");
-    let wc = builder.translate_sql("Company LIKE '%Group%'");
-    let n = builder
-        .run_command("blocks-only update".to_string(), async {
-            let n = builder
-                .evaluate_update_cols(
-                    std::slice::from_ref(&city_col),
-                    &["'SEARCH_CITY'".to_string()],
-                    &wc,
-                )
-                .await?;
-            builder.flush_pending_updates_to_blocks();
-            Ok(n)
-        })
+    // Update a NON-indexed column on the rows search will hit.
+    builder
+        .update("SET City = 'SEARCH_CITY' WHERE Company LIKE '%Group%'")
         .await?;
-    assert!(n > 0, "fixture should have Group companies");
     builder.commit("blocks-only update").await?;
 
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
@@ -664,16 +619,9 @@ async fn test_search_excludes_block_level_deletes() -> Result<(), BundlebaseErro
         .await?;
     builder.commit("text index").await?;
 
-    // Blocks-only delete of every row the search would match.
-    let wc = builder.translate_sql("Company LIKE '%Group%'");
-    let ids = builder.select_row_ids(&wc).await?;
-    assert!(!ids.is_empty());
-    builder
-        .run_command("blocks-only delete".to_string(), async {
-            builder.mark_deleted(ids, &wc);
-            Ok(())
-        })
-        .await?;
+    // Delete every row the search would match.
+    let n = builder.delete("Company LIKE '%Group%'").await?;
+    assert!(n > 0, "fixture should have Group companies");
     builder.commit("blocks-only delete").await?;
 
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
@@ -687,3 +635,181 @@ async fn test_search_excludes_block_level_deletes() -> Result<(), BundlebaseErro
     Ok(())
 }
 
+
+/// Collect the given string column of a search() result into a sorted Vec.
+async fn search_strings(facade: &dyn BundleFacade, sql: &str, column: &str) -> Vec<String> {
+    let batches = query_collect(facade, sql).await;
+    let mut out = Vec::new();
+    for batch in &batches {
+        let col = batch
+            .column_by_name(column)
+            .unwrap_or_else(|| panic!("missing column {column}"));
+        let col = arrow::compute::cast(col, &arrow::datatypes::DataType::Utf8)
+            .expect("cast to Utf8");
+        let arr = col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("string column");
+        for i in 0..arr.len() {
+            if !arr.is_null(i) {
+                out.push(arr.value(i).to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// search() over an UPDATEd *indexed* column must match the NEW text and
+/// must not match the OLD text — the inverted index was built on base values.
+#[tokio::test]
+async fn test_search_reflects_updated_indexed_column() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder
+        .create_index(
+            &["Company"],
+            IndexType::text(bundlebase_index::TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    builder.commit("text index").await?;
+
+    // Row 1 is "Rasmussen Group": move it away from "Group"...
+    builder
+        .update("SET Company = 'Plainname Holdings' WHERE \"Index\" = 1")
+        .await?;
+    // ...and give row 2 ("Vega-Gentry") a brand-new searchable term.
+    builder
+        .update("SET Company = 'Zyxwvut Partners' WHERE \"Index\" = 2")
+        .await?;
+
+    let check = |facade: std::sync::Arc<dyn BundleFacade>| async move {
+        let new_hits = search_strings(
+            facade.as_ref(),
+            "SELECT \"Company\" FROM search('company_search', 'Zyxwvut')",
+            "Company",
+        )
+        .await;
+        assert_eq!(
+            new_hits,
+            vec!["Zyxwvut Partners".to_string()],
+            "search must find a row by its UPDATED indexed text"
+        );
+        let group_hits = search_strings(
+            facade.as_ref(),
+            "SELECT \"Company\" FROM search('company_search', 'Rasmussen')",
+            "Company",
+        )
+        .await;
+        assert!(
+            group_hits.is_empty(),
+            "search must not match a row by its stale pre-UPDATE text, got {group_hits:?}"
+        );
+        let group_hits = search_strings(
+            facade.as_ref(),
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            "Company",
+        )
+        .await;
+        assert!(
+            group_hits.iter().all(|c| c.contains("Group")),
+            "every 'Group' hit must still contain Group, got {group_hits:?}"
+        );
+    };
+
+    check(builder.clone() as std::sync::Arc<dyn BundleFacade>).await;
+    builder.commit("update indexed column").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    check(reopened as std::sync::Arc<dyn BundleFacade>).await;
+    Ok(())
+}
+
+/// Edits apply beneath every user filter(): a filter recorded BEFORE an
+/// UPDATE is evaluated against the UPDATED values (ADR-009).
+#[tokio::test]
+async fn test_filter_then_update_filter_sees_updated_values() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("attach").await?;
+
+    builder.filter("SELECT * FROM bundle WHERE id <= 10", vec![]).await?;
+    assert_eq!(
+        query_count(builder.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
+        10
+    );
+
+    // Move row 3 out of the earlier filter's range.
+    builder
+        .update("SET id = 500 WHERE id = 3")
+        .await?;
+    assert_eq!(
+        query_count(builder.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
+        9,
+        "the earlier filter must see the UPDATEd value and drop row 3"
+    );
+
+    builder.commit("filter then update").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    assert_eq!(
+        query_count(reopened.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
+        9
+    );
+    Ok(())
+}
+
+/// DELETE/UPDATE WHERE clauses get the same text-vs-number ordering check as
+/// queries: `text_col > 100` would otherwise silently compare lexicographically.
+#[tokio::test]
+async fn test_edit_where_rejects_text_vs_number_ordering() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder.commit("attach").await?;
+
+    let query_err = builder
+        .query("SELECT * FROM bundle WHERE Company > 100", vec![], None)
+        .await
+        .err()
+        .expect("query must reject text > number");
+
+    let delete_err = match builder.delete("Company > 100").await {
+        Ok(n) => panic!("DELETE must reject text > number (deleted {n})"),
+        Err(e) => e,
+    };
+    let update_err = match builder.update("SET City = 'x' WHERE Company > 100").await {
+        Ok(_) => panic!("UPDATE must reject text > number"),
+        Err(e) => e,
+    };
+
+    for err in [&delete_err, &update_err] {
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Company"),
+            "error should name the user-visible column: {msg}"
+        );
+    }
+    // Same class of error as query().
+    let first_word = |s: String| s.split_whitespace().next().map(str::to_string);
+    assert_eq!(
+        first_word(delete_err.to_string()),
+        first_word(query_err.to_string())
+    );
+    assert_eq!(
+        query_count(builder.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
+        100,
+        "a rejected DELETE must not remove rows"
+    );
+    Ok(())
+}

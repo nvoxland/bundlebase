@@ -124,7 +124,7 @@ impl BundleBuilderCommand for UpdateCommand {
             // is the sole representation — no query-level CASE projection is
             // recorded (stacked CASE FilterOps are exponential in edit count;
             // see ideas/filterop-vs-block-overlays.md).
-            builder.flush_pending_updates_to_blocks();
+            builder.flush_pending_updates_to_blocks()?;
         }
 
         Ok(format!("Updated {} rows", updated_count))

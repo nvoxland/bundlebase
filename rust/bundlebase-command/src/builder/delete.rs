@@ -72,7 +72,7 @@ impl BundleBuilderCommand for DeleteCommand {
             return Ok("Deleted 0 rows".to_string());
         }
 
-        // Tombstone the rows: mark_deleted stores the RowIds for the commit's
+        // Tombstone the rows: mark_deleted stores them for the commit's
         // DeleteOp and mirrors them into the blocks for immediate in-session
         // exclusion. No query-level filter is recorded — the tombstone is the
         // sole representation (stacked per-edit FilterOps grow query cost

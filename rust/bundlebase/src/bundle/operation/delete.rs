@@ -1,18 +1,19 @@
 //! Delete operation — records a tombstone file reference.
 //!
-//! `DeleteOp` stores only the tombstone filename. The actual row exclusion
+//! `DeleteOp` stores only the tombstone filename. The tombstone keys rows by
+//! block `(BlockId, version)` and row number (see `tombstone`). The actual row exclusion
 //! happens at scan time in `DataBlock::scan()`, not in `apply_dataframe()`.
 
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::tombstone;
+use crate::data::VersionedBlockId;
 use crate::object_id::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Operation that records a tombstone file for deleted rows.
@@ -80,32 +81,25 @@ impl Operation for DeleteOp {
             }
         };
 
-        let row_ids =
-            tombstone::deserialize_rowids(&bytes).map_err(|e| DataFusionError::External(e))?;
+        let selection =
+            tombstone::deserialize(&bytes).map_err(|e| DataFusionError::External(e))?;
 
-        // Group RowIds by block_ref -> row numbers
-        let mut by_block: HashMap<u16, Vec<u32>> = HashMap::new();
-        for rid in &row_ids {
-            by_block
-                .entry(rid.block_ref().as_u16())
-                .or_default()
-                .push(rid.row_number());
-        }
-
-        // Distribute to the corresponding DataBlocks in the base pack
+        // Distribute to the matching base-pack blocks by (BlockId, version) —
+        // never by position, which DETACH/REPLACE shift. Rows recorded against
+        // a version that is no longer attached don't apply (ADR-009).
         let packs = bundle.packs().read().clone();
         if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
-            let blocks = pack.blocks();
-            for (block_idx, row_numbers) in by_block {
-                if let Some(block) = blocks.get(block_idx as usize) {
-                    block.add_deleted_rows(row_numbers.into_iter());
+            for block in pack.blocks() {
+                let key = VersionedBlockId::new(*block.id(), block.version());
+                if let Some(rows) = selection.rows_for(&key) {
+                    block.add_deleted_rows(rows.iter().copied());
                 }
             }
         }
 
         log::debug!(
-            "Loaded {} deleted RowIds from {}",
-            row_ids.len(),
+            "Loaded {} deleted rows from {}",
+            selection.len(),
             self.tombstone
         );
 

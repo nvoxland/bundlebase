@@ -199,7 +199,7 @@ impl BundleBuilderCommand for AttachCommand {
                         );
                         // The overlay is the sole representation — flushed
                         // to the blocks for in-session visibility.
-                        builder.flush_pending_updates_to_blocks();
+                        builder.flush_pending_updates_to_blocks()?;
                     }
                 }
             }

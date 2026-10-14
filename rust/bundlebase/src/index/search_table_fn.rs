@@ -430,7 +430,7 @@ impl TableProvider for SearchResultTableProvider {
         let mut per_entry: Vec<PerEntry> = Vec::new();
         let mut entry_idx_by_path: HashMap<String, usize> = HashMap::new();
         let mut block_id_to_ref: HashMap<BlockId, u16> = HashMap::new();
-        let mut next_unified_ref: u16 = 0;
+        let mut next_unified_ref: Option<u16> = Some(0);
 
         for (block_id, version) in &active_blocks {
             let vb = bundlebase_common::VersionedBlockId::new(*block_id, version.clone());
@@ -443,7 +443,7 @@ impl TableProvider for SearchResultTableProvider {
                 continue;
             };
             let blocks = entry.blocks();
-            let local_ref = blocks
+            let local_pos = blocks
                 .iter()
                 .position(|b| &b.block == block_id && &b.version == version)
                 .ok_or_else(|| {
@@ -451,17 +451,31 @@ impl TableProvider for SearchResultTableProvider {
                         "indexed_blocks() returned an entry that does not contain block {:?}@{}",
                         block_id, version
                     ))
-                })? as u16;
+                })?;
+            let local_ref = u16::try_from(local_pos).map_err(|_| {
+                DataFusionError::Execution(format!(
+                    "Index entry covers more than {} blocks; block {} is out of range",
+                    u16::MAX,
+                    block_id
+                ))
+            })?;
 
             // Assign a fresh unified_ref to this block (each unique BlockId
             // gets exactly one, regardless of how many entries cover it).
-            let unified_ref = *block_id_to_ref.entry(*block_id).or_insert_with(|| {
-                let r = next_unified_ref;
-                next_unified_ref = next_unified_ref
-                    .checked_add(1)
-                    .expect("block_ref namespace exhausted (>65535 active blocks per index)");
-                r
-            });
+            let unified_ref = match block_id_to_ref.get(block_id) {
+                Some(r) => *r,
+                None => {
+                    let r = next_unified_ref.ok_or_else(|| {
+                        DataFusionError::Execution(format!(
+                            "search() supports at most {} active blocks per index",
+                            u16::MAX
+                        ))
+                    })?;
+                    next_unified_ref = r.checked_add(1);
+                    block_id_to_ref.insert(*block_id, r);
+                    r
+                }
+            };
 
             let path = entry.path().to_string();
             let idx = *entry_idx_by_path.entry(path).or_insert_with(|| {
@@ -548,6 +562,23 @@ impl TableProvider for SearchResultTableProvider {
             // local_to_unified.
         }
 
+        // Step 3: UPDATEd indexed text. The inverted index holds the BASE
+        // values, so for rows whose indexed column(s) carry an update overlay
+        // its hits are stale: drop them, then re-evaluate the query against
+        // those rows' CURRENT text with a small throwaway index.
+        let updated = self.rows_with_updated_index_text(&block_id_to_ref)?;
+        if !updated.is_empty() {
+            row_id_scores.retain(|(row_id, _)| {
+                !updated
+                    .get(&row_id.block_ref().as_u16())
+                    .is_some_and(|(_, rows)| rows.contains(&row_id.row_number()))
+            });
+            row_id_scores.extend(
+                self.search_updated_rows(&updated, &rewritten_query, search_limit)
+                    .await?,
+            );
+        }
+
         if row_id_scores.is_empty() {
             return self.empty_exec(&output_schema, projection);
         }
@@ -593,7 +624,159 @@ impl TableProvider for SearchResultTableProvider {
     }
 }
 
+/// Blocks (by unified ref) whose indexed text was UPDATEd, with the row
+/// numbers whose indexed column(s) carry an overlay value.
+type UpdatedIndexRows = HashMap<u16, (Arc<crate::bundle::DataBlock>, HashSet<u32>)>;
+
 impl SearchResultTableProvider {
+    /// Find rows whose indexed column(s) have an update overlay, per indexed
+    /// block. Only overlays that SET an indexed column matter — updates to
+    /// other columns don't change what the index should match.
+    ///
+    /// Limitation: a text index over a COMPUTED column (whose inputs were
+    /// updated) isn't covered — its ColumnId never appears in an overlay.
+    fn rows_with_updated_index_text(
+        &self,
+        block_id_to_ref: &HashMap<BlockId, u16>,
+    ) -> datafusion::common::Result<UpdatedIndexRows> {
+        let index_cols = self.index_def.column_ids();
+        let mut updated: UpdatedIndexRows = HashMap::new();
+        for pack in self.packs.values() {
+            for block in pack.blocks() {
+                let Some(&unified_ref) = block_id_to_ref.get(block.id()) else {
+                    continue;
+                };
+                let overlays = block.update_overlays();
+                if overlays.is_empty() {
+                    continue;
+                }
+                let merged = crate::bundle::update_overlay::UpdateOverlay::merge(&overlays)
+                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                let mut rows = HashSet::new();
+                for col_id in index_cols {
+                    if let Some((_, is_set)) = merged.columns.get(col_id) {
+                        for (pos, row_number) in merged.row_numbers.iter().enumerate() {
+                            if is_set.value(pos) {
+                                rows.insert(*row_number);
+                            }
+                        }
+                    }
+                }
+                if !rows.is_empty() {
+                    updated.insert(unified_ref, (block.clone(), rows));
+                }
+            }
+        }
+        Ok(updated)
+    }
+
+    /// Run `query` against the CURRENT (overlay-applied) indexed text of the
+    /// given updated rows, using a throwaway in-memory text index with the
+    /// same columns and tokenizer as the real one. Returned RowIds use the
+    /// unified block refs, like the main hits.
+    ///
+    /// Scores come from this small corpus's BM25 statistics, so they are not
+    /// strictly comparable with main-index scores; which rows MATCH is exact.
+    async fn search_updated_rows(
+        &self,
+        updated: &UpdatedIndexRows,
+        query: &str,
+        limit: usize,
+    ) -> datafusion::common::Result<Vec<(RowId, f64)>> {
+        let tokenizer = self
+            .index_def
+            .index_type()
+            .tokenizer()
+            .cloned()
+            .unwrap_or_default();
+        let index_cols = self.index_def.column_ids().to_vec();
+        let field_names: Vec<String> = index_cols
+            .iter()
+            .map(bundle_schema::generate_internal_name)
+            .collect();
+        let mut builder =
+            bundlebase_index::TextIndexBuilder::new(self.index_def.name(), &field_names, &tokenizer)
+                .map_err(DataFusionError::External)?;
+        let mut docs = 0usize;
+
+        for (&unified_ref, (block, rows)) in updated {
+            // Block column positions of the indexed columns (None if absent).
+            let positions: Vec<Option<usize>> = index_cols
+                .iter()
+                .map(|cid| block.column_ids().iter().position(|c| c == cid))
+                .collect();
+            let projection: Vec<usize> = positions.iter().flatten().copied().collect();
+            if projection.is_empty() {
+                continue;
+            }
+            let projected_ids: Vec<crate::object_id::ColumnId> = projection
+                .iter()
+                .map(|&p| block.column_ids()[p])
+                .collect();
+            let overlays = block.update_overlays();
+            let mut stream = block
+                .reader()
+                .extract_rowids_stream(ObjectIdAlias::from(unified_ref), self.ctx.clone(), Some(&projection))
+                .await
+                .map_err(DataFusionError::External)?;
+            while let Some(batch_result) = stream.next().await {
+                let rowid_batch = batch_result.map_err(DataFusionError::External)?;
+                let row_numbers: Vec<u32> =
+                    rowid_batch.row_ids.iter().map(|r| r.row_number()).collect();
+                if !row_numbers.iter().any(|rn| rows.contains(rn)) {
+                    continue;
+                }
+                let batch = crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
+                    &overlays,
+                    &rowid_batch.batch,
+                    &projected_ids,
+                    &row_numbers,
+                )
+                .map_err(DataFusionError::External)?;
+                for (i, row_id) in rowid_batch.row_ids.iter().enumerate() {
+                    if !rows.contains(&row_id.row_number()) {
+                        continue;
+                    }
+                    let mut values: Vec<Option<String>> = Vec::with_capacity(positions.len());
+                    let mut proj_idx = 0usize;
+                    for pos in &positions {
+                        if pos.is_none() {
+                            values.push(None);
+                            continue;
+                        }
+                        let scalar = datafusion::common::ScalarValue::try_from_array(
+                            batch.column(proj_idx),
+                            i,
+                        )?;
+                        proj_idx += 1;
+                        values.push(match scalar {
+                            datafusion::common::ScalarValue::Utf8(Some(s))
+                            | datafusion::common::ScalarValue::LargeUtf8(Some(s))
+                            | datafusion::common::ScalarValue::Utf8View(Some(s)) => Some(s),
+                            _ => None,
+                        });
+                    }
+                    if values.iter().any(Option::is_some) {
+                        builder
+                            .add_document(&values, *row_id)
+                            .map_err(DataFusionError::External)?;
+                        docs += 1;
+                    }
+                }
+            }
+        }
+
+        if docs == 0 {
+            return Ok(Vec::new());
+        }
+        let index = builder.finish().map_err(DataFusionError::External)?;
+        let hits = index.search(query, limit).map_err(DataFusionError::External)?;
+        Ok(hits
+            .into_iter()
+            .map(|hit| (hit.row_id, hit.score as f64))
+            .collect())
+    }
+
     fn empty_exec(
         &self,
         schema: &SchemaRef,

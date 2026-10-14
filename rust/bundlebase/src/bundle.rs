@@ -1241,7 +1241,19 @@ impl Bundle {
     /// - `data_dir`: Extended bundles may have different storage locations
     /// - `last_manifest_version`: Each bundle tracks its own manifest version
     /// - `operations`: Each bundle has its own operation list (select/filter adds ops)
-    pub(crate) fn detach_for_extend(&mut self) {
+    /// - `packs` and each block's DELETE/UPDATE edit state (tombstones,
+    ///   overlays): the builder's uncommitted edits must not show through the
+    ///   source Bundle's blocks
+    /// - `ctx` (and the function registry bound to it): the builder registers
+    ///   its own schema providers / `search()` against the context, which
+    ///   would otherwise make the source Bundle's queries resolve `bundle`
+    ///   through the builder
+    pub(crate) fn detach_for_extend(&mut self) -> Result<(), BundlebaseError> {
+        use datafusion::catalog::{
+            CatalogProviderList, MemoryCatalogProvider, MemoryCatalogProviderList,
+        };
+        use datafusion::execution::session_state::SessionStateBuilder;
+
         // Create independent copies of fields that will be modified
         // Read values first to avoid borrow conflicts
         let current_data_dir = Arc::clone(&*self.data_dir.read());
@@ -1251,6 +1263,44 @@ impl Bundle {
         self.last_manifest_version = Arc::new(RwLock::new(current_manifest_version));
         self.operations = Arc::new(RwLock::new(current_operations));
         self.bundle_schema = Arc::new(RwLock::new(BundleSchema::new()));
+
+        // Deep-copy packs and their blocks' edit state. Re-adding every block
+        // in its original order keeps the pack's block order unchanged.
+        let packs: HashMap<ObjectId, Arc<Pack>> = self
+            .packs
+            .read()
+            .iter()
+            .map(|(id, pack)| {
+                let copy = pack.as_ref().clone();
+                for block in pack.blocks() {
+                    copy.remove_block(block.id());
+                    copy.add_block(Arc::new(block.detached_clone()));
+                }
+                (*id, Arc::new(copy))
+            })
+            .collect();
+        self.packs = Arc::new(RwLock::new(packs));
+
+        // Own SessionContext: same config, runtime and registered functions,
+        // but a fresh catalog the builder fills with providers bound to itself.
+        let catalogs = Arc::new(MemoryCatalogProviderList::new());
+        catalogs.register_catalog(
+            CATALOG_NAME.to_string(),
+            Arc::new(MemoryCatalogProvider::new()),
+        );
+        let state = SessionStateBuilder::new_from_existing(self.ctx.state())
+            .with_catalog_list(catalogs)
+            .build();
+        self.ctx = Arc::new(SessionContext::new_with_state(state));
+        let registry = self
+            .function_registry
+            .read()
+            .rebound(Arc::clone(&self.data_dir), Arc::clone(&self.ctx));
+        self.function_registry = Arc::new(RwLock::new(registry));
+
+        // The cached DataFrame was planned against the source's blocks.
+        self.dataframe = DataFrameHolder::new(None);
+        Ok(())
     }
 
     /// Find a join pack by its name

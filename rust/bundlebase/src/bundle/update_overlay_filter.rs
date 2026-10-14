@@ -75,10 +75,8 @@ impl UpdateOverlayDataSource {
             if let Some(&col_idx) = col_id_to_idx.get(col_id) {
                 columns.insert(col_idx, (values.clone(), is_set.clone()));
             } else {
-                log::warn!(
-                    "Overlay column {:?} not found in block schema — skipping",
-                    col_id
-                );
+                // Normal for narrow projections: the column isn't scanned.
+                log::trace!("Overlay column {:?} not in scan projection", col_id);
             }
         }
 

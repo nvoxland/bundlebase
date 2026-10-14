@@ -2,7 +2,7 @@ use crate::BlockId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represents a block and its version, serialized as "{block}@{version}"
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VersionedBlockId {
     pub block: BlockId,
     pub version: String,

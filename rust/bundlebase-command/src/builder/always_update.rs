@@ -130,7 +130,7 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
         if updated_count > 0 {
             // The overlay is the sole representation — flushed to the blocks
             // for in-session visibility.
-            builder.flush_pending_updates_to_blocks();
+            builder.flush_pending_updates_to_blocks()?;
         }
 
         // 2. Register the persistent always-update rule (stored with internal name names)

@@ -491,9 +491,11 @@ async fn test_update_csv() -> Result<(), BundlebaseError> {
     builder
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
-
+    // CSV columns are text; an ordering comparison against a number is
+    // rejected (as in queries), so cast in the predicate. (Edit WHERE clauses
+    // evaluate against the base blocks, beneath CAST COLUMN — ADR-009.)
     builder
-        .update("SET City = 'UPDATED' WHERE Index > 90")
+        .update("SET City = 'UPDATED' WHERE CAST(Index AS DOUBLE) > 90")
         .await?;
 
     let cnt = query_count(

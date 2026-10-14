@@ -188,6 +188,47 @@ impl DataBlock {
         self.num_rows
     }
 
+    /// A copy of this block whose DELETE/UPDATE edit state (tombstones,
+    /// committed and session overlays) is independent of the original.
+    /// Everything else — reader, schema, caches — stays shared. Used when a
+    /// Bundle is extended into a builder, so the builder's uncommitted edits
+    /// never show through the source Bundle's blocks.
+    pub(crate) fn detached_clone(&self) -> DataBlock {
+        let mut block = self.clone();
+        block.deleted_rows = Arc::new(RwLock::new(self.deleted_rows.read().clone()));
+        block.update_overlays = Arc::new(RwLock::new(self.update_overlays.read().clone()));
+        block.session_overlay = Arc::new(RwLock::new(self.session_overlay.read().clone()));
+        block
+    }
+
+    /// Rename one batch's columns (positionally, block column order) from
+    /// physical names to stable internal `col_<id>` names, keeping the
+    /// batch's actual field types.
+    pub(crate) fn rename_batch_to_internal_names(
+        batch: &arrow::record_batch::RecordBatch,
+        column_ids: &[ColumnId],
+    ) -> Result<arrow::record_batch::RecordBatch, arrow::error::ArrowError> {
+        let batch_schema = batch.schema();
+        let id_fields: Vec<Arc<arrow_schema::Field>> = batch_schema
+            .fields()
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(field, col_id)| {
+                Arc::new(
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_name(bundle_schema::generate_internal_name(col_id)),
+                )
+            })
+            .collect();
+        let id_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
+            id_fields,
+            batch_schema.metadata().clone(),
+        ));
+        arrow::record_batch::RecordBatch::try_new(id_schema, batch.columns().to_vec())
+    }
+
     /// Rename batches from physical column names to stable internal names.
     /// Uses the batch's actual field types to build the internal name schema.
     fn rename_batches_with_internal_names(
@@ -196,29 +237,36 @@ impl DataBlock {
     ) -> Vec<arrow::record_batch::RecordBatch> {
         batches
             .into_iter()
-            .map(|batch| {
-                let batch_schema = batch.schema();
-                let id_fields: Vec<Arc<arrow_schema::Field>> = batch_schema
-                    .fields()
-                    .iter()
-                    .zip(column_ids.iter())
-                    .map(|(field, col_id)| {
-                        Arc::new(
-                            field
-                                .as_ref()
-                                .clone()
-                                .with_name(bundle_schema::generate_internal_name(col_id)),
-                        )
-                    })
-                    .collect();
-                let id_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
-                    id_fields,
-                    batch_schema.metadata().clone(),
-                ));
-                arrow::record_batch::RecordBatch::try_new(id_schema, batch.columns().to_vec())
-                    .unwrap_or(batch)
-            })
+            .map(|batch| Self::rename_batch_to_internal_names(&batch, column_ids).unwrap_or(batch))
             .collect()
+    }
+
+    /// ColumnIds of the scan output columns for `projection`.
+    fn projected_col_ids(&self, projection: Option<&Vec<usize>>) -> Vec<ColumnId> {
+        match projection {
+            Some(proj) => proj
+                .iter()
+                .filter_map(|&i| self.column_ids.get(i).copied())
+                .collect(),
+            None => self.column_ids.clone(),
+        }
+    }
+
+    /// Internal-name schema of the scan output for `projection`. Read fresh
+    /// each call: the first full scan replaces `self.schema` with the
+    /// reader's actual types.
+    fn projected_schema(&self, projection: Option<&Vec<usize>>) -> SchemaRef {
+        let current_schema = self.schema.read().clone();
+        match projection {
+            Some(proj) => {
+                let fields: Vec<_> = proj
+                    .iter()
+                    .filter_map(|&i| current_schema.fields().get(i).cloned())
+                    .collect();
+                Arc::new(arrow_schema::Schema::new(fields))
+            }
+            None => current_schema,
+        }
     }
 
     /// Build a synthetic ExecutionPlan that returns `rows` empty rows (zero
@@ -642,29 +690,11 @@ impl DataBlock {
             .reader
             .data_source(projection, &[], limit, None)
             .await?;
-        let projected_col_ids: Vec<ColumnId> = match projection {
-            Some(proj) => proj
-                .iter()
-                .filter_map(|&i| self.column_ids.get(i).copied())
-                .collect(),
-            None => self.column_ids.clone(),
-        };
-        let current_schema = self.schema.read().clone();
-        let projected_schema = match projection {
-            Some(proj) => {
-                let fields: Vec<_> = proj
-                    .iter()
-                    .filter_map(|&i| current_schema.fields().get(i).cloned())
-                    .collect();
-                Arc::new(arrow_schema::Schema::new(fields))
-            }
-            None => current_schema,
-        };
         Ok(Arc::new(
             crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
                 inner_source,
-                projected_schema,
-                projected_col_ids,
+                self.projected_schema(projection),
+                self.projected_col_ids(projection),
             ),
         ))
     }
@@ -800,6 +830,7 @@ impl TableProvider for DataBlock {
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
         let deleted = self.deleted_rows.read().clone();
+        let projected_col_ids = self.projected_col_ids(projection);
 
         // Phase 0: Empty-projection fast path (e.g. `SELECT COUNT(*)`).
         // DataFusion asks for zero columns when it only needs row counts.
@@ -901,30 +932,12 @@ impl TableProvider for DataBlock {
                     .data_source(projection, filters, limit, Some(&row_ids))
                     .await?
                     .clone();
-                let projected_col_ids: Vec<ColumnId> = match projection {
-                    Some(proj) => proj
-                        .iter()
-                        .filter_map(|&i| self.column_ids.get(i).copied())
-                        .collect(),
-                    None => self.column_ids.clone(),
-                };
                 // Use self.schema for planning (types may not match reader exactly, but
                 // SchemaRenameDataSource will use actual batch types at runtime)
-                let current_schema = self.schema.read().clone();
-                let projected_schema = match projection {
-                    Some(proj) => {
-                        let fields: Vec<_> = proj
-                            .iter()
-                            .filter_map(|&i| current_schema.fields().get(i).cloned())
-                            .collect();
-                        Arc::new(arrow_schema::Schema::new(fields))
-                    }
-                    None => current_schema,
-                };
                 let source = Arc::new(
                     crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
                         inner_source,
-                        projected_schema,
+                        self.projected_schema(projection),
                         projected_col_ids,
                     ),
                 );
@@ -944,17 +957,7 @@ impl TableProvider for DataBlock {
         // outside the original stats range, so pruning could return incorrect results.
         let overlays = self.update_overlays();
         if overlays.is_empty() && !indexable_filters.is_empty() {
-            let current_schema = self.schema.read().clone();
-            let projected_schema = match projection {
-                Some(proj) => {
-                    let fields: Vec<_> = proj
-                        .iter()
-                        .filter_map(|&i| current_schema.fields().get(i).cloned())
-                        .collect();
-                    Arc::new(arrow_schema::Schema::new(fields))
-                }
-                None => current_schema,
-            };
+            let projected_schema = self.projected_schema(projection);
 
             // Block-level pruning: if any filter provably excludes this entire block, return empty.
             if self.can_prune_block(&indexable_filters).await? {
@@ -1021,13 +1024,6 @@ impl TableProvider for DataBlock {
                     // The reader emits batches with physical column names —
                     // rename to internal names so the plan above (which speaks
                     // internal names) lines up.
-                    let projected_col_ids: Vec<ColumnId> = match projection {
-                        Some(proj) => proj
-                            .iter()
-                            .filter_map(|&i| self.column_ids.get(i).copied())
-                            .collect(),
-                        None => self.column_ids.clone(),
-                    };
                     let source = Arc::new(
                         crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
                             page_source,
@@ -1108,21 +1104,10 @@ impl TableProvider for DataBlock {
                     .reader
                     .data_source(projection, &[], push_limit, None)
                     .await?;
-                let projected_col_ids: Vec<ColumnId> = proj
-                    .iter()
-                    .filter_map(|&i| self.column_ids.get(i).copied())
-                    .collect();
-                let projected_schema = {
-                    let fields: Vec<_> = proj
-                        .iter()
-                        .filter_map(|&i| current_schema.fields().get(i).cloned())
-                        .collect();
-                    Arc::new(arrow_schema::Schema::new(fields))
-                };
                 let mut source: Arc<dyn datafusion::datasource::source::DataSource> = Arc::new(
                     crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
                         inner_source,
-                        projected_schema,
+                        self.projected_schema(projection),
                         projected_col_ids,
                     ),
                 );
@@ -1154,8 +1139,8 @@ impl TableProvider for DataBlock {
         // limit through to the underlying reader. The cache-population path
         // below collects the entire block before applying the limit, which
         // turns a tiny preview into a full scan. Skipped when overlays exist
-        // (those can change row counts) or when index/page paths already
-        // returned above.
+        // (this path does not apply them; the full paths below do) or when
+        // index/page paths already returned above.
         if let Some(lim) = limit {
             if overlays.is_empty() {
                 // Only push the limit into the reader when there are no deleted
@@ -1170,28 +1155,10 @@ impl TableProvider for DataBlock {
                     .reader
                     .data_source(projection, &[], push_limit, None)
                     .await?;
-                let projected_col_ids: Vec<ColumnId> = match projection {
-                    Some(proj) => proj
-                        .iter()
-                        .filter_map(|&i| self.column_ids.get(i).copied())
-                        .collect(),
-                    None => self.column_ids.clone(),
-                };
-                let current_schema = self.schema.read().clone();
-                let projected_schema = match projection {
-                    Some(proj) => {
-                        let fields: Vec<_> = proj
-                            .iter()
-                            .filter_map(|&i| current_schema.fields().get(i).cloned())
-                            .collect();
-                        Arc::new(arrow_schema::Schema::new(fields))
-                    }
-                    None => current_schema,
-                };
                 let mut source: Arc<dyn datafusion::datasource::source::DataSource> = Arc::new(
                     crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
                         inner_source,
-                        projected_schema,
+                        self.projected_schema(projection),
                         projected_col_ids,
                     ),
                 );
@@ -1270,30 +1237,12 @@ impl TableProvider for DataBlock {
                 // wraps above it. Deleting first would shift the ordinals the
                 // overlay sees, applying updates to the wrong rows.
                 if !overlays.is_empty() {
-                    let projected_col_ids = match projection {
-                        Some(proj) => proj
-                            .iter()
-                            .filter_map(|&i| self.column_ids.get(i).copied())
-                            .collect::<Vec<_>>(),
-                        None => self.column_ids.clone(),
-                    };
-                    let current_schema = self.schema.read().clone();
-                    let projected_schema = match projection {
-                        Some(proj) => {
-                            let fields: Vec<_> = proj
-                                .iter()
-                                .filter_map(|&i| current_schema.fields().get(i).cloned())
-                                .collect();
-                            Arc::new(arrow_schema::Schema::new(fields))
-                        }
-                        None => current_schema,
-                    };
                     let overlay_source =
                         crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
                             source.clone(),
                             &overlays,
                             &projected_col_ids,
-                            &projected_schema,
+                            &self.projected_schema(projection),
                         )?;
                     if overlay_source.has_updates() {
                         source = Arc::new(overlay_source);
@@ -1400,31 +1349,12 @@ impl TableProvider for DataBlock {
         // Deleting first would shift the ordinals the overlay sees, applying
         // updates to the wrong rows.
         if !overlays.is_empty() {
-            // Build projected column_ids matching the scan output columns
-            let projected_col_ids = match projection {
-                Some(proj) => proj
-                    .iter()
-                    .filter_map(|&i| self.column_ids.get(i).copied())
-                    .collect::<Vec<_>>(),
-                None => self.column_ids.clone(),
-            };
-            let current_schema = self.schema.read().clone();
-            let projected_schema = match projection {
-                Some(proj) => {
-                    let fields: Vec<_> = proj
-                        .iter()
-                        .filter_map(|&i| current_schema.fields().get(i).cloned())
-                        .collect();
-                    Arc::new(arrow_schema::Schema::new(fields))
-                }
-                None => current_schema,
-            };
             let overlay_source =
                 crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
                     source.clone(),
                     &overlays,
                     &projected_col_ids,
-                    &projected_schema,
+                    &self.projected_schema(projection),
                 )?;
             if overlay_source.has_updates() {
                 source = Arc::new(overlay_source);

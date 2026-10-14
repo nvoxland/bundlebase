@@ -7,14 +7,23 @@
 //! - `_updated_mask` (Binary): packed bitmask indicating which data columns were SET
 //!
 //! Column naming uses ColumnId (not user-visible name) to survive renames.
-//! Row group metadata contains `block_ref` to identify which block the group belongs to.
+//! File key-value metadata carries one `block` entry per row group naming the
+//! block's stable `<block_id>@<version>` — never its position in the base
+//! pack, which shifts on DETACH/REPLACE (ADR-009).
 
+use crate::bundle::tombstone::parse_block_key;
 use crate::object_id::ColumnId;
 use arrow::array::{ArrayRef, BooleanArray};
-use bundlebase_common::{BundlebaseError, RowId};
+use bundlebase_common::{BundlebaseError, VersionedBlockId};
 use bytes::Bytes;
 use datafusion::scalar::ScalarValue;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// New values for one row: ColumnId → value.
+pub type CellUpdates = HashMap<ColumnId, ScalarValue>;
+
+/// Pending UPDATE values: block `(BlockId, version)` → row number → cells.
+pub type PendingUpdates = HashMap<VersionedBlockId, BTreeMap<u32, CellUpdates>>;
 
 /// Arrow-native overlay for a single block.
 ///
@@ -31,20 +40,13 @@ pub struct UpdateOverlay {
 }
 
 impl UpdateOverlay {
-    /// Build an UpdateOverlay from the pending updates HashMap (used for in-session flushing).
-    pub fn from_pending(updates: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>) -> Self {
-        if updates.is_empty() {
-            return Self {
-                row_numbers: Vec::new(),
-                columns: HashMap::new(),
-            };
-        }
-
-        // Sort by row_number for binary search at scan time
-        let mut rows: Vec<_> = updates.iter().collect();
-        rows.sort_by_key(|(rid, _)| rid.row_number());
-
-        let row_numbers: Vec<u32> = rows.iter().map(|(rid, _)| rid.row_number()).collect();
+    /// Build an UpdateOverlay from one block's pending updates (row number →
+    /// cells), used for in-session flushing.
+    pub fn from_pending(updates: &BTreeMap<u32, CellUpdates>) -> Result<Self, BundlebaseError> {
+        // BTreeMap iteration is ascending by row number, as scan-time binary
+        // search requires.
+        let rows: Vec<(&u32, &CellUpdates)> = updates.iter().collect();
+        let row_numbers: Vec<u32> = rows.iter().map(|(row, _)| **row).collect();
 
         // Collect all ColumnIds across all updates
         let mut all_col_ids: std::collections::HashSet<ColumnId> = std::collections::HashSet::new();
@@ -58,7 +60,7 @@ impl UpdateOverlay {
             let mut values: Vec<ScalarValue> = Vec::with_capacity(rows.len());
             let mut is_set: Vec<bool> = Vec::with_capacity(rows.len());
 
-            // Determine target type from first non-null value
+            // Target type: the type of the first row that SETs this column.
             let target_type = rows
                 .iter()
                 .find_map(|(_, u)| u.get(&col_id))
@@ -77,16 +79,22 @@ impl UpdateOverlay {
                 }
             }
 
-            let array = ScalarValue::iter_to_array(values.into_iter())
-                .unwrap_or_else(|_| arrow::array::new_empty_array(&target_type));
+            // An array of any other length would misalign every overlay
+            // position after it, so a build failure is an error.
+            let array = ScalarValue::iter_to_array(values).map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to build overlay array for column {}: {}",
+                    col_id, e
+                ))
+            })?;
             let mask = BooleanArray::from(is_set);
             columns.insert(col_id, (array, mask));
         }
 
-        Self {
+        Ok(Self {
             row_numbers,
             columns,
-        }
+        })
     }
 
     /// Apply overlays to a batch whose row `i` is block-local row number
@@ -100,8 +108,9 @@ impl UpdateOverlay {
     /// selects the wrong rows (bb-wmu — silent row loss via wrong tombstones).
     ///
     /// `column_ids[j]` names the ColumnId of batch column `j` (block column
-    /// order). Overlay columns whose Arrow type doesn't match the base column
-    /// are skipped with a warning, consistent with scan-time application.
+    /// order). Overlay values whose Arrow type differs from the base column
+    /// (e.g. Utf8 vs Utf8View) are cast to the base type; a column is skipped,
+    /// with a warning, only when that cast is impossible.
     pub fn apply_to_batch(
         overlays: &[Self],
         batch: &arrow::record_batch::RecordBatch,
@@ -298,19 +307,19 @@ impl UpdateOverlay {
 
 const ROW_NUMBER_COL: &str = "_row_number";
 const MASK_COL: &str = "_updated_mask";
-const BLOCK_REF_KEY: &str = "block_ref";
+const BLOCK_KEY: &str = "block";
 
 /// Maximum rows per overlay parquet row group. Each written group carries its
-/// own `block_ref` metadata entry, so a block whose updates exceed this many
+/// own `block` metadata entry, so a block whose updates exceed this many
 /// rows is split across several correctly-attributed groups.
 const OVERLAY_MAX_ROWS_PER_GROUP: usize = 1024 * 1024;
 
 /// Write overlay data to parquet bytes, one or more row groups per block.
 ///
-/// `pending` maps RowId → (ColumnId → ScalarValue) for all updates in the transaction.
+/// `pending` holds every updated cell, keyed by block and row number.
 /// `column_types` maps ColumnId → Arrow DataType for schema construction.
 pub fn write_overlay_parquet(
-    pending: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
+    pending: &PendingUpdates,
     column_types: &HashMap<ColumnId, arrow::datatypes::DataType>,
 ) -> Result<Bytes, BundlebaseError> {
     write_overlay_parquet_with_max(pending, column_types, OVERLAY_MAX_ROWS_PER_GROUP)
@@ -318,13 +327,13 @@ pub fn write_overlay_parquet(
 
 /// `write_overlay_parquet` with an explicit row-group row limit (testable).
 ///
-/// The reader pairs row groups with `block_ref` metadata entries positionally,
-/// so every row group written here MUST append exactly one `block_ref` entry.
+/// The reader pairs row groups with `block` metadata entries positionally,
+/// so every row group written here MUST append exactly one `block` entry.
 /// The writer is configured with the same limit and each write is at most
 /// `max_rows_per_group` rows followed by a flush, so it never splits a write
 /// into extra (unattributed) groups.
 fn write_overlay_parquet_with_max(
-    pending: &HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
+    pending: &PendingUpdates,
     column_types: &HashMap<ColumnId, arrow::datatypes::DataType>,
     max_rows_per_group: usize,
 ) -> Result<Bytes, BundlebaseError> {
@@ -336,22 +345,18 @@ fn write_overlay_parquet_with_max(
         return Err("No updates to write".into());
     }
 
-    // Group by block_ref
-    let mut by_block: std::collections::BTreeMap<
-        u16,
-        Vec<(&RowId, &HashMap<ColumnId, ScalarValue>)>,
-    > = std::collections::BTreeMap::new();
-    for (row_id, cell_updates) in pending {
-        by_block
-            .entry(row_id.block_ref().as_u16())
-            .or_default()
-            .push((row_id, cell_updates));
-    }
-
-    // Sort rows within each block by row_number
-    for rows in by_block.values_mut() {
-        rows.sort_by_key(|(rid, _)| rid.row_number());
-    }
+    // Deterministic block order (by key); rows are already sorted by number.
+    let mut by_block: Vec<(String, Vec<(u32, &CellUpdates)>)> = pending
+        .iter()
+        .filter(|(_, rows)| !rows.is_empty())
+        .map(|(block, rows)| {
+            (
+                block.to_string(),
+                rows.iter().map(|(row, cells)| (*row, cells)).collect(),
+            )
+        })
+        .collect();
+    by_block.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Collect all ColumnIds, sorted for deterministic ordering
     let mut all_col_ids: Vec<ColumnId> = column_types.keys().cloned().collect();
@@ -386,12 +391,12 @@ fn write_overlay_parquet_with_max(
                 BundlebaseError::from(format!("Failed to create parquet writer: {}", e))
             })?;
 
-        for (block_ref, rows) in &by_block {
+        for (block_key, rows) in &by_block {
             let num_rows = rows.len();
 
             // Build _row_number array
             let row_number_values: Vec<u32> =
-                rows.iter().map(|(rid, _)| rid.row_number()).collect();
+                rows.iter().map(|(row, _)| *row).collect();
             let row_number_array: ArrayRef =
                 std::sync::Arc::new(UInt32Array::from(row_number_values));
 
@@ -463,7 +468,7 @@ fn write_overlay_parquet_with_max(
 
             // Write the block's rows in chunks of at most max_rows_per_group,
             // flushing after each so every chunk becomes exactly one row group
-            // — and append one block_ref metadata entry PER GROUP, since the
+            // — and append one `block` metadata entry PER GROUP, since the
             // reader pairs groups with entries positionally (bb-fqm.6: a
             // single oversized write would be split by the writer into extra
             // groups with no matching entry, mis-attributing every overlay
@@ -473,8 +478,8 @@ fn write_overlay_parquet_with_max(
                 let len = max_rows_per_group.min(num_rows - offset);
                 let chunk = batch.slice(offset, len);
                 writer.append_key_value_metadata(parquet::file::metadata::KeyValue::new(
-                    BLOCK_REF_KEY.to_string(),
-                    block_ref.to_string(),
+                    BLOCK_KEY.to_string(),
+                    block_key.clone(),
                 ));
                 writer.write(&chunk).map_err(|e| {
                     BundlebaseError::from(format!("Failed to write overlay parquet: {}", e))
@@ -496,9 +501,11 @@ fn write_overlay_parquet_with_max(
 
 /// Read overlay parquet bytes into per-block UpdateOverlays.
 ///
-/// Returns a vec of (block_ref, UpdateOverlay) pairs. Each overlay contains
+/// Returns a vec of (block, UpdateOverlay) pairs. Each overlay contains
 /// Arrow arrays directly from the parquet row group — no ScalarValue extraction.
-pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, BundlebaseError> {
+pub fn read_overlay_parquet(
+    bytes: &[u8],
+) -> Result<Vec<(VersionedBlockId, UpdateOverlay)>, BundlebaseError> {
     use arrow::array::*;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -512,15 +519,21 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
     let num_row_groups = builder.metadata().num_row_groups();
     let schema = builder.schema().clone();
 
-    // Extract block_ref values from file-level key-value metadata
-    let block_refs: Vec<u16> = file_metadata
+    // Extract the per-row-group block keys from file-level key-value metadata
+    let block_keys: Vec<VersionedBlockId> = file_metadata
         .key_value_metadata()
         .map(|kvs| {
             kvs.iter()
-                .filter(|kv| kv.key == BLOCK_REF_KEY)
-                .filter_map(|kv| kv.value.as_ref()?.parse::<u16>().ok())
-                .collect()
+                .filter(|kv| kv.key == BLOCK_KEY)
+                .map(|kv| {
+                    let value = kv.value.as_deref().ok_or_else(|| {
+                        BundlebaseError::from("Overlay block metadata entry has no value")
+                    })?;
+                    parse_block_key(value)
+                })
+                .collect::<Result<Vec<_>, BundlebaseError>>()
         })
+        .transpose()?
         .unwrap_or_default();
 
     // Identify data columns (not _row_number or _updated_mask)
@@ -551,11 +564,8 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
 
     // Read each row group separately
     for rg_idx in 0..num_row_groups {
-        let block_ref = block_refs.get(rg_idx).copied().ok_or_else(|| {
-            BundlebaseError::from(format!(
-                "Missing block_ref metadata for row group {}",
-                rg_idx
-            ))
+        let block_key = block_keys.get(rg_idx).cloned().ok_or_else(|| {
+            BundlebaseError::from(format!("Missing block metadata for row group {}", rg_idx))
         })?;
 
         let reader = ParquetRecordBatchReaderBuilder::try_new(parquet_bytes.clone())
@@ -652,7 +662,7 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         }
 
         results.push((
-            block_ref,
+            block_key,
             UpdateOverlay {
                 row_numbers: all_row_numbers,
                 columns,
@@ -668,18 +678,34 @@ mod tests {
     use super::*;
     use arrow::array::ArrayRef;
     use arrow::datatypes::DataType;
-    use bundlebase_common::ObjectIdAlias;
+    use bundlebase_common::BlockId;
     use std::sync::Arc;
+
+    fn block(version: &str) -> VersionedBlockId {
+        VersionedBlockId::new(BlockId::generate(), version.to_string())
+    }
+
+    fn one_cell(
+        block: &VersionedBlockId,
+        row: u32,
+        col: ColumnId,
+        value: ScalarValue,
+    ) -> PendingUpdates {
+        let mut pending = PendingUpdates::new();
+        pending
+            .entry(block.clone())
+            .or_default()
+            .entry(row)
+            .or_default()
+            .insert(col, value);
+        pending
+    }
 
     #[test]
     fn test_roundtrip_single_column() {
         let col_id = ColumnId::generate();
-        let row_id = RowId::new(ObjectIdAlias::from(0u16), 42);
-
-        let mut pending = HashMap::new();
-        let mut cell = HashMap::new();
-        cell.insert(col_id, ScalarValue::Int64(Some(100)));
-        pending.insert(row_id, cell);
+        let blk = block("v1");
+        let pending = one_cell(&blk, 42, col_id, ScalarValue::Int64(Some(100)));
 
         let mut column_types = HashMap::new();
         column_types.insert(col_id, DataType::Int64);
@@ -688,8 +714,8 @@ mod tests {
         let overlays = read_overlay_parquet(&bytes).expect("read failed");
 
         assert_eq!(overlays.len(), 1);
-        let (block_ref, overlay) = &overlays[0];
-        assert_eq!(*block_ref, 0);
+        let (key, overlay) = &overlays[0];
+        assert_eq!(*key, blk);
         assert_eq!(overlay.row_numbers, vec![42]);
         let (values, is_set) = overlay.columns.get(&col_id).expect("column not found");
         assert_eq!(values.len(), 1);
@@ -704,18 +730,22 @@ mod tests {
     fn test_roundtrip_blocks_larger_than_row_group_limit() {
         // bb-fqm.6: a block with more updated rows than the parquet
         // max-row-group limit gets split into multiple row groups. Every
-        // group must carry its own block_ref metadata or the positional
+        // group must carry its own block metadata or the positional
         // pairing on read mis-attributes overlays to the wrong blocks.
         let col_id = ColumnId::generate();
-        let mut pending = HashMap::new();
-        for block in 0..2u16 {
+        let blocks = [block("a"), block("b")];
+        let mut pending = PendingUpdates::new();
+        for (b, blk) in blocks.iter().enumerate() {
             for row in 0..5u32 {
-                let mut cell = HashMap::new();
-                cell.insert(
-                    col_id,
-                    ScalarValue::Int64(Some((block as i64) * 1000 + row as i64)),
-                );
-                pending.insert(RowId::new(ObjectIdAlias::from(block), row), cell);
+                pending
+                    .entry(blk.clone())
+                    .or_default()
+                    .entry(row)
+                    .or_default()
+                    .insert(
+                        col_id,
+                        ScalarValue::Int64(Some((b as i64) * 1000 + row as i64)),
+                    );
             }
         }
         let mut column_types = HashMap::new();
@@ -726,11 +756,8 @@ mod tests {
             write_overlay_parquet_with_max(&pending, &column_types, 2).expect("write failed");
         let overlays = read_overlay_parquet(&bytes).expect("read failed");
 
-        // Merge the per-group overlays per block and verify every value landed
-        // on the block that owns it.
-        let mut seen: std::collections::BTreeMap<u16, Vec<(u32, i64)>> =
-            std::collections::BTreeMap::new();
-        for (block_ref, overlay) in &overlays {
+        let mut seen: HashMap<VersionedBlockId, Vec<(u32, i64)>> = HashMap::new();
+        for (key, overlay) in &overlays {
             let (values, is_set) = overlay.columns.get(&col_id).expect("column");
             for i in 0..overlay.row_numbers.len() {
                 assert!(is_set.value(i));
@@ -738,29 +765,25 @@ mod tests {
                     ScalarValue::Int64(Some(v)) => v,
                     other => panic!("unexpected value {other:?}"),
                 };
-                seen.entry(*block_ref)
+                seen.entry(key.clone())
                     .or_default()
                     .push((overlay.row_numbers[i], v));
             }
         }
-        for (block, mut rows) in seen {
+        for (b, blk) in blocks.iter().enumerate() {
+            let mut rows = seen.remove(blk).expect("block present");
             rows.sort_unstable();
             let expected: Vec<(u32, i64)> = (0..5u32)
-                .map(|r| (r, (block as i64) * 1000 + r as i64))
+                .map(|r| (r, (b as i64) * 1000 + r as i64))
                 .collect();
-            assert_eq!(rows, expected, "block {block} overlay rows mis-attributed");
+            assert_eq!(rows, expected, "block {b} overlay rows mis-attributed");
         }
     }
 
     #[test]
     fn test_roundtrip_null_value() {
         let col_id = ColumnId::generate();
-        let row_id = RowId::new(ObjectIdAlias::from(0u16), 10);
-
-        let mut pending = HashMap::new();
-        let mut cell = HashMap::new();
-        cell.insert(col_id, ScalarValue::Utf8(None)); // SET TO NULL
-        pending.insert(row_id, cell);
+        let pending = one_cell(&block("v1"), 10, col_id, ScalarValue::Utf8(None));
 
         let mut column_types = HashMap::new();
         column_types.insert(col_id, DataType::Utf8);
@@ -781,13 +804,8 @@ mod tests {
     fn test_roundtrip_partial_update() {
         let col_a = ColumnId::generate();
         let col_b = ColumnId::generate();
-        let row_id = RowId::new(ObjectIdAlias::from(0u16), 5);
-
         // Only update col_a, not col_b
-        let mut pending = HashMap::new();
-        let mut cell = HashMap::new();
-        cell.insert(col_a, ScalarValue::Float64(Some(3.14)));
-        pending.insert(row_id, cell);
+        let pending = one_cell(&block("v1"), 5, col_a, ScalarValue::Float64(Some(3.14)));
 
         let mut column_types = HashMap::new();
         column_types.insert(col_a, DataType::Float64);
@@ -797,10 +815,8 @@ mod tests {
         let overlays = read_overlay_parquet(&bytes).expect("read failed");
 
         let (_, overlay) = &overlays[0];
-        // col_a should be set
         let (_, is_set_a) = overlay.columns.get(&col_a).expect("col_a not found");
         assert!(is_set_a.value(0));
-        // col_b should not be set
         let (_, is_set_b) = overlay.columns.get(&col_b).expect("col_b not found");
         assert!(!is_set_b.value(0));
     }
@@ -808,45 +824,32 @@ mod tests {
     #[test]
     fn test_multiple_blocks() {
         let col_id = ColumnId::generate();
-        let row_a = RowId::new(ObjectIdAlias::from(0u16), 1);
-        let row_b = RowId::new(ObjectIdAlias::from(1u16), 2);
-
-        let mut pending = HashMap::new();
-        let mut cell_a = HashMap::new();
-        cell_a.insert(col_id, ScalarValue::Int64(Some(10)));
-        pending.insert(row_a, cell_a);
-        let mut cell_b = HashMap::new();
-        cell_b.insert(col_id, ScalarValue::Int64(Some(20)));
-        pending.insert(row_b, cell_b);
+        let a = block("v1");
+        let b = block("v1");
+        let mut pending = one_cell(&a, 1, col_id, ScalarValue::Int64(Some(10)));
+        pending.extend(one_cell(&b, 2, col_id, ScalarValue::Int64(Some(20))));
 
         let mut column_types = HashMap::new();
         column_types.insert(col_id, DataType::Int64);
 
         let bytes = write_overlay_parquet(&pending, &column_types).expect("write failed");
-        let overlays = read_overlay_parquet(&bytes).expect("read failed");
+        let overlays: HashMap<VersionedBlockId, UpdateOverlay> = read_overlay_parquet(&bytes)
+            .expect("read failed")
+            .into_iter()
+            .collect();
 
         assert_eq!(overlays.len(), 2);
-        // Block 0
-        let (ref0, ov0) = &overlays[0];
-        assert_eq!(*ref0, 0);
-        assert_eq!(ov0.row_numbers, vec![1]);
-        // Block 1
-        let (ref1, ov1) = &overlays[1];
-        assert_eq!(*ref1, 1);
-        assert_eq!(ov1.row_numbers, vec![2]);
+        assert_eq!(overlays[&a].row_numbers, vec![1]);
+        assert_eq!(overlays[&b].row_numbers, vec![2]);
     }
 
     #[test]
     fn test_from_pending() {
         let col_id = ColumnId::generate();
-        let row_id = RowId::new(ObjectIdAlias::from(0u16), 5);
+        let blk = block("v1");
+        let pending = one_cell(&blk, 5, col_id, ScalarValue::Int64(Some(42)));
 
-        let mut updates = HashMap::new();
-        let mut cell = HashMap::new();
-        cell.insert(col_id, ScalarValue::Int64(Some(42)));
-        updates.insert(row_id, cell);
-
-        let overlay = UpdateOverlay::from_pending(&updates);
+        let overlay = UpdateOverlay::from_pending(&pending[&blk]).expect("from_pending");
         assert_eq!(overlay.row_numbers, vec![5]);
         let (values, is_set) = overlay.columns.get(&col_id).expect("column not found");
         assert!(is_set.value(0));
@@ -854,6 +857,21 @@ mod tests {
             ScalarValue::try_from_array(values, 0).expect("read value"),
             ScalarValue::Int64(Some(42))
         );
+    }
+
+    #[test]
+    fn test_from_pending_mixed_types_errors() {
+        // A column whose rows hold values of different Arrow types can't form
+        // one array; that must be an error, not a wrong-length array.
+        let col_id = ColumnId::generate();
+        let mut rows: BTreeMap<u32, CellUpdates> = BTreeMap::new();
+        rows.entry(1)
+            .or_default()
+            .insert(col_id, ScalarValue::Int64(Some(1)));
+        rows.entry(2)
+            .or_default()
+            .insert(col_id, ScalarValue::Utf8(Some("x".to_string())));
+        assert!(UpdateOverlay::from_pending(&rows).is_err());
     }
 
     #[test]

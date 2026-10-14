@@ -81,13 +81,19 @@ impl Operation for UpdateDataOp {
         let block_overlays = update_overlay::read_overlay_parquet(&bytes)
             .map_err(|e| DataFusionError::External(e))?;
 
+        // Attach each overlay to the base-pack block with the same
+        // (BlockId, version) — never by position, which DETACH/REPLACE shift.
+        // Overlays for a version that is no longer attached don't apply.
         let mut total_rows = 0;
         let packs = bundle.packs().read().clone();
         if let Some(pack) = packs.get(&crate::object_id::ObjectId::BASE_PACK) {
             let blocks = pack.blocks();
-            for (block_idx, overlay) in block_overlays {
-                total_rows += overlay.row_numbers.len();
-                if let Some(block) = blocks.get(block_idx as usize) {
+            for (key, overlay) in block_overlays {
+                if let Some(block) = blocks
+                    .iter()
+                    .find(|b| *b.id() == key.block && b.version() == key.version)
+                {
+                    total_rows += overlay.row_numbers.len();
                     block.add_update_overlay(overlay);
                 }
             }

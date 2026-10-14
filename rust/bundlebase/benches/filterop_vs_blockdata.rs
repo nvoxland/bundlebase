@@ -150,7 +150,7 @@ async fn apply_update(
                     &wc,
                 )
                 .await?;
-                b.flush_pending_updates_to_blocks();
+                b.flush_pending_updates_to_blocks()?;
                 Ok(())
             })
             .await?;

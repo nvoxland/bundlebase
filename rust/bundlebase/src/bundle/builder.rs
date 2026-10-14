@@ -6,7 +6,7 @@ use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation, SharedAtt
 use crate::bundle::{bundle_schema, sql, AlwaysUpdateRule, Bundle, ReportEntry};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle_config::{PassedBundleConfig, Scope};
-use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
+use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::index::IndexDefinition;
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::source::ConnectorRegistry;
@@ -30,6 +30,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use tracing::{debug, info};
 use url::Url;
+
+mod edits;
 
 /// Format a system time as ISO8601 UTC string (e.g., "2024-01-01T12:34:56Z")
 fn to_iso(time: std::time::SystemTime) -> String {
@@ -207,42 +209,14 @@ pub struct BundleBuilder {
     in_progress_change: RwLock<Option<BundleChange>>,
     /// Tracks uncommitted changes for this builder.
     status: RwLock<BundleStatus>,
-    /// RowIds accumulated by DELETE commands, written to a tombstone file on commit.
-    pending_deletes: RwLock<std::collections::HashSet<bundlebase_common::RowId>>,
-    /// WHERE clauses from DELETE commands, stored for historical reference in the operation log.
-    pending_delete_wheres: RwLock<Vec<String>>,
-    /// Updated cell values accumulated by UPDATE commands, written to an overlay parquet on commit.
-    /// Maps RowId → (ColumnId → ScalarValue).
-    pending_updates: RwLock<
-        std::collections::HashMap<
-            bundlebase_common::RowId,
-            std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>,
-        >,
-    >,
-    /// WHERE clauses from UPDATE commands, stored for historical reference in the operation log.
-    pending_update_wheres: RwLock<Vec<String>>,
+    /// Uncommitted DELETE/UPDATE state (tombstoned rows, updated cells, their
+    /// WHERE clauses) plus per-change deltas for undo/rollback. Written to a
+    /// tombstone file / overlay parquet on commit. See [`edits`].
+    edits: RwLock<edits::PendingEdits>,
     /// True when uncommitted pending edits have been flushed into the live
     /// DataBlocks (overlays/tombstones). Lets failure paths know the blocks
     /// must be rebuilt even when the failed change recorded no operations.
     flushed_block_state: std::sync::atomic::AtomicBool,
-    /// Cumulative snapshots of the pending delete/update accumulators, one per
-    /// completed change in `status` (bb-fqm.4). `undo()` restores the previous
-    /// snapshot so an undone DELETE/UPDATE's pending side-state doesn't ride
-    /// into the next commit's tombstone/overlay; a failed command restores the
-    /// last snapshot so its partial mutations don't linger.
-    pending_snapshots: RwLock<Vec<PendingSnapshot>>,
-}
-
-/// Point-in-time copy of the pending delete/update accumulators.
-#[derive(Clone, Default)]
-struct PendingSnapshot {
-    deletes: std::collections::HashSet<bundlebase_common::RowId>,
-    delete_wheres: Vec<String>,
-    updates: std::collections::HashMap<
-        bundlebase_common::RowId,
-        std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>,
-    >,
-    update_wheres: Vec<String>,
 }
 
 impl bundlebase_data::DataContext for BundleBuilder {
@@ -265,11 +239,7 @@ impl Clone for BundleBuilder {
             bundle: Arc::clone(&self.bundle),
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
             status: RwLock::new(self.status.read().clone()),
-            pending_deletes: RwLock::new(self.pending_deletes.read().clone()),
-            pending_delete_wheres: RwLock::new(self.pending_delete_wheres.read().clone()),
-            pending_updates: RwLock::new(self.pending_updates.read().clone()),
-            pending_update_wheres: RwLock::new(self.pending_update_wheres.read().clone()),
-            pending_snapshots: RwLock::new(self.pending_snapshots.read().clone()),
+            edits: RwLock::new(self.edits.read().clone()),
             flushed_block_state: std::sync::atomic::AtomicBool::new(
                 self.flushed_block_state
                     .load(std::sync::atomic::Ordering::Relaxed),
@@ -339,11 +309,7 @@ impl BundleBuilder {
             bundle,
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-            pending_deletes: RwLock::new(std::collections::HashSet::new()),
-            pending_delete_wheres: RwLock::new(Vec::new()),
-            pending_updates: RwLock::new(std::collections::HashMap::new()),
-            pending_update_wheres: RwLock::new(Vec::new()),
-            pending_snapshots: RwLock::new(Vec::new()),
+            edits: RwLock::new(edits::PendingEdits::default()),
             flushed_block_state: std::sync::atomic::AtomicBool::new(false),
         });
 
@@ -378,8 +344,9 @@ impl BundleBuilder {
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
 
-        // Detach data_dir and last_manifest_version so modifications don't affect the original
-        new_bundle.detach_for_extend();
+        // Detach mutable state (data_dir, manifest version, packs/block edit
+        // state, SessionContext) so modifications don't affect the original
+        new_bundle.detach_for_extend()?;
 
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
@@ -396,11 +363,7 @@ impl BundleBuilder {
             bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-            pending_deletes: RwLock::new(std::collections::HashSet::new()),
-            pending_delete_wheres: RwLock::new(Vec::new()),
-            pending_updates: RwLock::new(std::collections::HashMap::new()),
-            pending_update_wheres: RwLock::new(Vec::new()),
-            pending_snapshots: RwLock::new(Vec::new()),
+            edits: RwLock::new(edits::PendingEdits::default()),
             flushed_block_state: std::sync::atomic::AtomicBool::new(false),
         });
 
@@ -606,87 +569,15 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        // Write tombstone file if there are pending deletes.
-        // The pending sets are only snapshotted here — they are cleared once
-        // the commit has fully succeeded, so a failed commit leaves them
-        // pending and the commit can be retried without losing them.
-        let deleted_ids = self.pending_deletes.read().clone();
-        let delete_wheres = self.pending_delete_wheres.read().clone();
-        if !deleted_ids.is_empty() {
-            use crate::bundle::operation::DeleteOp;
-            use crate::bundle::tombstone;
-
-            // Serialize and write tombstone file via content-addressed storage
-            let tomb_bytes = tombstone::serialize_rowids(&deleted_ids);
-            debug!(
-                "[DELETE] Writing tombstone file ({} bytes)",
-                tomb_bytes.len()
-            );
-            let data_dir = self.bundle.data_dir();
-            let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
-            let address = bundlebase_common::ContentAddress::with_sub_type(
-                bundlebase_common::ContentCategory::Overlay,
-                "tomb",
-                bundlebase_common::ContentFormat::Rowids,
-            )?;
-            let write_result = data_dir.write_stream(Box::pin(stream), &address).await?;
-            let tomb_filename = data_dir.relative_path(write_result.file.as_ref())?;
-            debug!("[DELETE] Tombstone file written: {}", tomb_filename);
-
-            // Record the DeleteOp — block-level tombstones are the sole
-            // representation of DELETE (ADR-009); no query-level FilterOp is
-            // emitted.
-            // On future opens, the tombstone will be loaded for scan-level filtering.
-            let delete_op = DeleteOp::new(&tomb_filename, delete_wheres.join("; "));
-            if let Some(last_change) = changes.last_mut() {
-                last_change.operations.push(AnyOperation::Delete(delete_op));
-            }
-        }
-
-        // Write update overlay file if there are pending updates from UPDATE
-        // commands. Snapshot only — cleared after the commit succeeds.
-        let pending_upd = self.pending_updates.read().clone();
-        let update_wheres = self.pending_update_wheres.read().clone();
-        if !pending_upd.is_empty() {
-            use crate::bundle::operation::UpdateDataOp;
-            use crate::bundle::update_overlay;
-
-            // Collect column types from the bundle schema
-            let schema = self.bundle.schema().await?;
-            let col_names = bundle_schema::BundleSchema::resolved(&self.operations());
-            let mut column_types: std::collections::HashMap<
-                crate::object_id::ColumnId,
-                arrow::datatypes::DataType,
-            > = std::collections::HashMap::new();
-            for (col_id, real_name) in col_names.columns() {
-                if let Some((_, field)) = schema.column_with_name(real_name) {
-                    column_types.insert(*col_id, field.data_type().clone());
-                }
-            }
-
-            let overlay_bytes = update_overlay::write_overlay_parquet(&pending_upd, &column_types)?;
-            debug!(
-                "[UPDATE] Writing overlay file ({} bytes, {} rows)",
-                overlay_bytes.len(),
-                pending_upd.len()
-            );
-            let data_dir = self.bundle.data_dir();
-            let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(overlay_bytes)]);
-            let address = bundlebase_common::ContentAddress::with_sub_type(
-                bundlebase_common::ContentCategory::Overlay,
-                "update",
-                bundlebase_common::ContentFormat::Parquet,
-            )?;
-            let write_result = data_dir.write_stream(Box::pin(stream), &address).await?;
-            let overlay_filename = data_dir.relative_path(write_result.file.as_ref())?;
-            debug!("[UPDATE] Overlay file written: {}", overlay_filename);
-
-            let update_op = UpdateDataOp::new(&overlay_filename, update_wheres.join("; "));
-            if let Some(last_change) = changes.last_mut() {
-                last_change
-                    .operations
-                    .push(AnyOperation::UpdateData(update_op));
-            }
+        // Write the tombstone / update-overlay files for the pending edits
+        // and record them (DeleteOp / UpdateDataOp) on the last change —
+        // block-level edits are the sole representation of DELETE/UPDATE
+        // (ADR-009). The pending edits are only read here; they are cleared
+        // once the commit has fully succeeded, so a failed commit can be
+        // retried without losing them.
+        let edit_ops = self.write_pending_edit_files().await?;
+        if let Some(last_change) = changes.last_mut() {
+            last_change.operations.extend(edit_ops);
         }
 
         let commit_struct = commit::BundleCommit {
@@ -757,11 +648,7 @@ impl BundleBuilder {
         // Clear status and pending deletes/updates now that the operations
         // have been persisted
         self.status.write().clear();
-        self.pending_deletes.write().clear();
-        self.pending_delete_wheres.write().clear();
-        self.pending_updates.write().clear();
-        self.pending_update_wheres.write().clear();
-        self.pending_snapshots.write().clear();
+        self.edits.write().clear();
         self.flushed_block_state
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
@@ -832,11 +719,7 @@ impl BundleBuilder {
 
         // Clear all uncommitted changes
         self.status.write().clear();
-        self.pending_deletes.write().clear();
-        self.pending_delete_wheres.write().clear();
-        self.pending_updates.write().clear();
-        self.pending_update_wheres.write().clear();
-        self.pending_snapshots.write().clear();
+        self.edits.write().clear();
         self.flushed_block_state
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
@@ -870,12 +753,10 @@ impl BundleBuilder {
             .ok_or("No uncommitted changes to undo")?;
         let description = undone.description.clone();
 
-        // Drop the undone change's pending-accumulator snapshot and restore
-        // the accumulators to the previous change's state — otherwise an
-        // undone DELETE/UPDATE's RowIds still ride into the next commit's
-        // tombstone/overlay and silently remove rows (bb-fqm.4).
-        self.pending_snapshots.write().pop();
-        self.restore_pending_from_last_snapshot();
+        // Reverse the undone change's pending edits — otherwise an undone
+        // DELETE/UPDATE still rides into the next commit's tombstone/overlay
+        // and silently removes rows (bb-fqm.4).
+        self.edits.write().undo_last_change();
 
         // Reload the bundle from the last committed state and reapply the
         // remaining uncommitted changes (this also re-flushes the restored
@@ -906,7 +787,7 @@ impl BundleBuilder {
         // mirror the (possibly restored) pending accumulators back in.
         self.flushed_block_state
             .store(false, std::sync::atomic::Ordering::Relaxed);
-        self.flush_pending_updates_to_blocks();
+        self.flush_pending_updates_to_blocks()?;
         self.flush_pending_deletes_to_blocks();
 
         Ok(())
@@ -923,9 +804,9 @@ impl BundleBuilder {
         let discarded = self.in_progress_change.write().take();
         // The failed command's body may have accumulated pending deletes or
         // updates (mark_deleted / evaluate_update_cols) before erroring —
-        // roll the accumulators back so the next commit doesn't persist
-        // side-state for a change that was never recorded (bb-fqm.4 family).
-        self.restore_pending_from_last_snapshot();
+        // roll its edits back so the next commit doesn't persist side-state
+        // for a change that was never recorded (bb-fqm.4 family).
+        self.edits.write().rollback_current();
         // Rebuild the live bundle when the failed change applied operations OR
         // flushed overlays/tombstones into the blocks (a failed DELETE/UPDATE
         // body mutates block state without recording any operation).
@@ -1051,355 +932,6 @@ impl BundleBuilder {
         Ok(())
     }
 
-    /// Evaluate an UPDATE statement: find matching rows, evaluate SET expressions,
-    /// and store results in pending_updates. Returns count of updated rows.
-    /// Evaluate an UPDATE: given column names, expressions, and a WHERE clause,
-    /// find matching rows, evaluate expressions, and store in pending_updates.
-    ///
-    /// `columns` and `expressions` are parallel vectors: columns[i] gets value expressions[i].
-    pub async fn evaluate_update_cols(
-        &self,
-        columns: &[String],
-        expressions: &[String],
-        where_clause: &str,
-    ) -> Result<usize, BundlebaseError> {
-        self.evaluate_update_cols_impl(columns, expressions, where_clause, None)
-            .await
-    }
-
-    /// Like [`evaluate_update_cols`](Self::evaluate_update_cols) but restricted
-    /// to the given base-pack block indices. Used by ATTACH to re-apply
-    /// always-update rules to the NEWLY attached block(s) only — re-running a
-    /// non-idempotent `SET x = x + 1` rule against existing blocks would
-    /// corrupt their already-updated values on every attach (bb-c6l).
-    pub async fn evaluate_update_cols_in_blocks(
-        &self,
-        columns: &[String],
-        expressions: &[String],
-        where_clause: &str,
-        block_indices: &[usize],
-    ) -> Result<usize, BundlebaseError> {
-        self.evaluate_update_cols_impl(columns, expressions, where_clause, Some(block_indices))
-            .await
-    }
-
-    async fn evaluate_update_cols_impl(
-        &self,
-        columns: &[String],
-        expressions: &[String],
-        where_clause: &str,
-        block_filter: Option<&[usize]>,
-    ) -> Result<usize, BundlebaseError> {
-        use futures::StreamExt;
-
-        // Resolve column names to ColumnIds.
-        // columns/expressions/where_clause use internal names.
-        let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns
-            .iter()
-            .map(|internal_name| {
-                let col_id =
-                    bundle_schema::parse_internal_name(internal_name).ok_or_else(|| {
-                        BundlebaseError::from(format!(
-                            "Column '{}' is not a valid internal name",
-                            internal_name
-                        ))
-                    })?;
-                Ok((internal_name.clone(), col_id))
-            })
-            .collect::<Result<Vec<_>, BundlebaseError>>()?;
-
-        // Build SELECT clause for expression evaluation (already in internal name terms)
-        let select_exprs: Vec<String> = columns
-            .iter()
-            .zip(expressions.iter())
-            .map(|(col, expr)| format!("{} AS {}", expr, col))
-            .collect();
-        let select_list = select_exprs.join(", ");
-
-        let mut updated_count = 0usize;
-
-        let base_pack = self
-            .bundle
-            .packs()
-            .read()
-            .get(&ObjectId::BASE_PACK)
-            .cloned();
-
-        if let Some(pack) = base_pack {
-            let blocks = pack.blocks();
-            for (idx, block) in blocks.iter().enumerate() {
-                if block_filter.is_some_and(|f| !f.contains(&idx)) {
-                    continue;
-                }
-                let block_ref = ObjectIdAlias::from(idx as u16);
-                let mut stream = block
-                    .reader()
-                    .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
-                    .await?;
-
-                while let Some(batch_result) = stream.next().await {
-                    let rowid_batch = batch_result?;
-                    let batch = &rowid_batch.batch;
-                    let row_ids = &rowid_batch.row_ids;
-
-                    // Rename columns from physical names to internal names
-                    let batch = {
-                        let schema = batch.schema();
-                        let col_id_list = block.column_ids();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema
-                            .fields()
-                            .iter()
-                            .zip(col_id_list.iter())
-                            .map(|(f, col_id)| {
-                                f.as_ref()
-                                    .clone()
-                                    .with_name(bundle_schema::generate_internal_name(col_id))
-                            })
-                            .collect();
-                        let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
-                            new_fields,
-                            schema.metadata().clone(),
-                        ));
-                        arrow::record_batch::RecordBatch::try_new(
-                            new_schema,
-                            batch.columns().to_vec(),
-                        )?
-                    };
-
-                    // Apply this block's update overlays to the batch VALUES so
-                    // the WHERE clause (and SET expressions reading columns)
-                    // see prior updates, not raw file data (bb-wmu). Positions
-                    // are untouched, so row_ids indexing stays valid.
-                    let overlays = block.update_overlays();
-                    let batch = if overlays.is_empty() {
-                        batch
-                    } else {
-                        let row_numbers: Vec<u32> =
-                            row_ids.iter().map(|r| r.row_number()).collect();
-                        crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
-                            &overlays,
-                            &batch,
-                            &block.column_ids(),
-                            &row_numbers,
-                        )?
-                    };
-
-                    // Evaluate: SELECT _rowid, <set_exprs> FROM (data with _rowid) WHERE <condition>
-                    let eval_sql = format!(
-                        "SELECT CAST(_idx AS BIGINT) AS _idx, {} FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __update_batch) WHERE {}",
-                        select_list,
-                        where_clause
-                    );
-
-                    let mut config = datafusion::prelude::SessionConfig::new();
-                    config.options_mut().sql_parser.enable_ident_normalization = false;
-                    let temp_ctx =
-                        SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
-                    let mem_table = datafusion::datasource::MemTable::try_new(
-                        batch.schema(),
-                        vec![vec![batch.clone()]],
-                    )?;
-                    temp_ctx.register_table("__update_batch", Arc::new(mem_table))?;
-
-                    let result_df = temp_ctx
-                        .sql(&eval_sql)
-                        .await
-                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
-                    let result_batches = result_df
-                        .collect()
-                        .await
-                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
-
-                    // Target Arrow types = the BASE column types. Eval
-                    // expressions can produce a different type (`SET salary =
-                    // 999` yields Int64 against a Float64 column; `SET x =
-                    // NULL` yields untyped Null) and the overlay applier skips
-                    // type-mismatched columns — coerce at insertion so the
-                    // stored overlay always matches the base data.
-                    let target_types: Vec<Option<arrow::datatypes::DataType>> = col_ids
-                        .iter()
-                        .map(|(internal_name, _)| {
-                            batch
-                                .schema()
-                                .field_with_name(internal_name)
-                                .ok()
-                                .map(|f| f.data_type().clone())
-                        })
-                        .collect();
-
-                    let mut pending = self.pending_updates.write();
-                    for result_batch in &result_batches {
-                        let idx_col = result_batch
-                            .column(0)
-                            .as_any()
-                            .downcast_ref::<arrow::array::Int64Array>()
-                            .ok_or_else(|| BundlebaseError::from("Expected Int64 _idx column"))?;
-
-                        for row in 0..result_batch.num_rows() {
-                            let batch_idx = idx_col.value(row) as usize;
-                            if batch_idx >= row_ids.len() {
-                                continue;
-                            }
-                            let row_id = row_ids[batch_idx];
-
-                            let cell_updates = pending
-                                .entry(row_id)
-                                .or_insert_with(std::collections::HashMap::new);
-                            for (col_idx, (internal_name, col_id)) in col_ids.iter().enumerate() {
-                                // Column is at position col_idx + 1 (after _idx)
-                                let value = datafusion::scalar::ScalarValue::try_from_array(
-                                    result_batch.column(col_idx + 1),
-                                    row,
-                                )
-                                .map_err(|e| BundlebaseError::from(e.to_string()))?;
-                                let value = match &target_types[col_idx] {
-                                    Some(t) if &value.data_type() != t => {
-                                        value.cast_to(t).map_err(|e| {
-                                            BundlebaseError::from(format!(
-                                                "UPDATE value for column '{}' is not \
-                                                 castable to the column type {:?}: {}",
-                                                internal_name, t, e
-                                            ))
-                                        })?
-                                    }
-                                    _ => value,
-                                };
-                                cell_updates.insert(*col_id, value);
-                            }
-                            updated_count += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        if updated_count > 0 {
-            self.pending_update_wheres
-                .write()
-                .push(where_clause.to_string());
-        }
-
-        Ok(updated_count)
-    }
-
-    /// Push pending updates to DataBlocks for immediate in-session visibility.
-    pub fn flush_pending_updates_to_blocks(&self) {
-        let pending = self.pending_updates.read();
-        if pending.is_empty() {
-            log::debug!("[UPDATE] No pending updates to flush");
-            return;
-        }
-        log::debug!(
-            "[UPDATE] Flushing {} pending updates to blocks",
-            pending.len()
-        );
-
-        // Group by block_ref
-        let mut by_block: std::collections::HashMap<
-            u16,
-            std::collections::HashMap<
-                bundlebase_common::RowId,
-                std::collections::HashMap<
-                    crate::object_id::ColumnId,
-                    datafusion::scalar::ScalarValue,
-                >,
-            >,
-        > = std::collections::HashMap::new();
-        for (row_id, cell_updates) in pending.iter() {
-            let block_idx = row_id.block_ref().as_u16();
-            by_block
-                .entry(block_idx)
-                .or_default()
-                .insert(*row_id, cell_updates.clone());
-        }
-
-        let packs = self.bundle.packs().read().clone();
-        if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
-            let blocks = pack.blocks();
-            for (block_idx, block_updates) in by_block {
-                if let Some(block) = blocks.get(block_idx as usize) {
-                    let overlay =
-                        crate::bundle::update_overlay::UpdateOverlay::from_pending(&block_updates);
-                    // Replace, don't append: this overlay is built from the
-                    // full pending accumulator and supersedes the prior flush
-                    // (bb-plf). A block whose rows aren't in `by_block` this
-                    // round keeps its earlier session overlay — but the
-                    // accumulator is cumulative, so once a block has updates it
-                    // stays in `by_block` for every later flush.
-                    block.set_session_overlay(overlay);
-                }
-            }
-        }
-
-        // Clear cached dataframe so next query picks up the overlay
-        self.bundle.dataframe.clear();
-        self.flushed_block_state
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Number of blocks currently in the base pack. ATTACH captures this
-    /// before and after adding data so always-rules can be scoped to just the
-    /// newly attached block indices (bb-c6l).
-    pub fn base_pack_block_count(&self) -> usize {
-        self.bundle
-            .packs()
-            .read()
-            .get(&ObjectId::BASE_PACK)
-            .map(|pack| pack.blocks().len())
-            .unwrap_or(0)
-    }
-
-    /// Drop the in-session flush overlay from every block (bb-plf). Used
-    /// after a successful commit, where the committed `UpdateDataOp` overlay
-    /// now durably represents these updates.
-    fn clear_session_overlays(&self) {
-        let packs = self.bundle.packs().read().clone();
-        for pack in packs.values() {
-            for block in pack.blocks().iter() {
-                block.clear_session_overlay();
-            }
-        }
-    }
-
-    /// Push pending deleted row numbers to DataBlocks for immediate in-session
-    /// visibility (mirror of `flush_pending_updates_to_blocks`). Idempotent:
-    /// `add_deleted_rows` sorts and dedups, so re-flushing (and the commit-time
-    /// DeleteOp re-applying the same rows) is safe.
-    pub fn flush_pending_deletes_to_blocks(&self) {
-        let pending = self.pending_deletes.read();
-        if pending.is_empty() {
-            return;
-        }
-        log::debug!(
-            "[DELETE] Flushing {} pending deletes to blocks",
-            pending.len()
-        );
-
-        let mut by_block: std::collections::HashMap<u16, Vec<u32>> =
-            std::collections::HashMap::new();
-        for row_id in pending.iter() {
-            by_block
-                .entry(row_id.block_ref().as_u16())
-                .or_default()
-                .push(row_id.row_number());
-        }
-
-        let packs = self.bundle.packs().read().clone();
-        if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
-            let blocks = pack.blocks();
-            for (block_idx, row_numbers) in by_block {
-                if let Some(block) = blocks.get(block_idx as usize) {
-                    block.add_deleted_rows(row_numbers);
-                }
-            }
-        }
-
-        // Clear cached dataframe so the next query sees the tombstones
-        self.bundle.dataframe.clear();
-        self.flushed_block_state
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-
     /// Returns the current always-delete rules.
     pub fn always_delete_rules(&self) -> Vec<String> {
         self.bundle.always_delete_rules()
@@ -1408,221 +940,6 @@ impl BundleBuilder {
     /// Returns the current always-update rules.
     pub fn always_update_rules(&self) -> Vec<AlwaysUpdateRule> {
         self.bundle.always_update_rules()
-    }
-
-    /// Add RowIds to the pending delete set.
-    ///
-    /// These will be written to a tombstone file on commit.
-    /// Record a snapshot of the pending accumulators for the change that just
-    /// completed (aligned with `status.changes()`).
-    fn push_pending_snapshot(&self) {
-        let snapshot = PendingSnapshot {
-            deletes: self.pending_deletes.read().clone(),
-            delete_wheres: self.pending_delete_wheres.read().clone(),
-            updates: self.pending_updates.read().clone(),
-            update_wheres: self.pending_update_wheres.read().clone(),
-        };
-        self.pending_snapshots.write().push(snapshot);
-    }
-
-    /// Reset the pending accumulators to the state after the last completed
-    /// change (or empty when none remain). Used by `undo()` after popping a
-    /// change's snapshot, and after a failed command whose body may have
-    /// mutated the accumulators before erroring.
-    fn restore_pending_from_last_snapshot(&self) {
-        let snapshot = self
-            .pending_snapshots
-            .read()
-            .last()
-            .cloned()
-            .unwrap_or_default();
-        *self.pending_deletes.write() = snapshot.deletes;
-        *self.pending_delete_wheres.write() = snapshot.delete_wheres;
-        *self.pending_updates.write() = snapshot.updates;
-        *self.pending_update_wheres.write() = snapshot.update_wheres;
-    }
-
-    pub fn mark_deleted(
-        &self,
-        row_ids: std::collections::HashSet<bundlebase_common::RowId>,
-        where_clause: &str,
-    ) {
-        self.pending_deletes.write().extend(row_ids);
-        self.pending_delete_wheres
-            .write()
-            .push(where_clause.to_string());
-        // Mirror the tombstones into the blocks immediately so same-session
-        // queries exclude the rows without any query-level filter.
-        self.flush_pending_deletes_to_blocks();
-    }
-
-    /// Collect RowIds of rows matching a WHERE clause from all blocks.
-    ///
-    /// Streams through each block with RowIds, evaluates the WHERE condition,
-    /// and returns the set of matching RowIds.
-    pub async fn select_row_ids(
-        &self,
-        where_clause: &str,
-    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
-        self.select_row_ids_impl(where_clause, None).await
-    }
-
-    /// Like [`select_row_ids`](Self::select_row_ids) but restricted to the
-    /// given base-pack block indices. Used by ATTACH to re-apply always-delete
-    /// rules to the NEWLY attached block(s) only — existing blocks were already
-    /// processed when they were attached, so re-selecting them would re-tombstone
-    /// already-deleted rows (bb-c6l).
-    pub async fn select_row_ids_in_blocks(
-        &self,
-        where_clause: &str,
-        block_indices: &[usize],
-    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
-        self.select_row_ids_impl(where_clause, Some(block_indices))
-            .await
-    }
-
-    async fn select_row_ids_impl(
-        &self,
-        where_clause: &str,
-        block_filter: Option<&[usize]>,
-    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
-        use futures::StreamExt;
-
-        let mut matching_ids = std::collections::HashSet::new();
-        let base_pack = self
-            .bundle
-            .packs()
-            .read()
-            .get(&ObjectId::BASE_PACK)
-            .cloned();
-
-        if let Some(pack) = base_pack {
-            let blocks = pack.blocks();
-            for (idx, block) in blocks.iter().enumerate() {
-                if block_filter.is_some_and(|f| !f.contains(&idx)) {
-                    continue;
-                }
-                let block_ref = ObjectIdAlias::from(idx as u16);
-                // Rows already tombstoned in this block must not be re-selected:
-                // a repeated DELETE would otherwise re-report them and re-record
-                // redundant tombstones (bb-nt8).
-                let deleted: std::collections::HashSet<u32> =
-                    block.deleted_rows().into_iter().collect();
-                let mut stream = block
-                    .reader()
-                    .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
-                    .await?;
-
-                while let Some(batch_result) = stream.next().await {
-                    let rowid_batch = batch_result?;
-                    let batch = &rowid_batch.batch;
-                    let row_ids = &rowid_batch.row_ids;
-
-                    // Rename columns from physical names to internal names
-                    let batch = {
-                        let schema = batch.schema();
-                        let col_ids = block.column_ids();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema
-                            .fields()
-                            .iter()
-                            .zip(col_ids.iter())
-                            .map(|(f, col_id)| {
-                                f.as_ref()
-                                    .clone()
-                                    .with_name(bundle_schema::generate_internal_name(col_id))
-                            })
-                            .collect();
-                        let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
-                            new_fields,
-                            schema.metadata().clone(),
-                        ));
-                        arrow::record_batch::RecordBatch::try_new(
-                            new_schema,
-                            batch.columns().to_vec(),
-                        )?
-                    };
-
-                    // Apply this block's update overlays to the batch VALUES so
-                    // the WHERE clause is evaluated against updated data, not
-                    // raw file data (bb-wmu). Positions are untouched, so the
-                    // row_ids indexing below stays valid.
-                    let overlays = block.update_overlays();
-                    let batch = if overlays.is_empty() {
-                        batch
-                    } else {
-                        let row_numbers: Vec<u32> =
-                            row_ids.iter().map(|r| r.row_number()).collect();
-                        crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
-                            &overlays,
-                            &batch,
-                            &block.column_ids(),
-                            &row_numbers,
-                        )?
-                    };
-
-                    let filter_sql = format!(
-                        "SELECT CAST(_idx AS BIGINT) AS _idx FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __delete_batch) WHERE {}",
-                        where_clause
-                    );
-
-                    let mut config = datafusion::prelude::SessionConfig::new();
-                    config.options_mut().sql_parser.enable_ident_normalization = false;
-                    let temp_ctx =
-                        SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
-                    let mem_table = datafusion::datasource::MemTable::try_new(
-                        batch.schema(),
-                        vec![vec![batch.clone()]],
-                    )?;
-                    temp_ctx.register_table("__delete_batch", Arc::new(mem_table))?;
-
-                    let idx_df = temp_ctx.sql(&filter_sql).await.map_err(|e| {
-                        BundlebaseError::from(format!(
-                            "Failed to evaluate WHERE clause '{}' on block {}: {}",
-                            where_clause, idx, e
-                        ))
-                    })?;
-                    let idx_batches = idx_df.collect().await.map_err(|e| {
-                        BundlebaseError::from(format!(
-                            "Failed to collect filtered rows for WHERE '{}' on block {}: {}",
-                            where_clause, idx, e
-                        ))
-                    })?;
-
-                    for idx_batch in &idx_batches {
-                        let idx_col = idx_batch.column(0);
-                        for i in 0..idx_batch.num_rows() {
-                            use arrow::array::{Array, AsArray};
-                            use arrow::datatypes::DataType;
-                            let val = match idx_col.data_type() {
-                                DataType::UInt64 => idx_col
-                                    .as_primitive::<arrow::datatypes::UInt64Type>()
-                                    .value(i)
-                                    as usize,
-                                DataType::Int64 => idx_col
-                                    .as_primitive::<arrow::datatypes::Int64Type>()
-                                    .value(i)
-                                    as usize,
-                                dt => {
-                                    return Err(format!(
-                                        "Unexpected column type {:?} from ROW_NUMBER()",
-                                        dt
-                                    )
-                                    .into())
-                                }
-                            };
-                            if val < row_ids.len() {
-                                let row_id = row_ids[val];
-                                if !deleted.contains(&row_id.row_number()) {
-                                    matching_ids.insert(row_id);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(matching_ids)
     }
 
     /// Execute a closure within a change context, managing the change lifecycle automatically.
@@ -1675,7 +992,7 @@ impl BundleBuilder {
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
-                        self.push_pending_snapshot();
+                        self.edits.write().complete_change();
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
                         self.bundle
                             .function_registry()
@@ -1751,7 +1068,7 @@ impl BundleBuilder {
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
-                        self.push_pending_snapshot();
+                        self.edits.write().complete_change();
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
                         self.bundle
                             .function_registry()
@@ -2460,12 +1777,12 @@ mod tests {
         // The failed commit must not lose the pending deletes, the
         // uncommitted status, or advance the in-memory commit bookkeeping.
         assert_eq!(
-            builder.pending_deletes.read().len(),
+            builder.edits.read().deletes.len(),
             deleted_count,
             "pending deletes must survive a failed commit"
         );
         assert!(
-            !builder.pending_delete_wheres.read().is_empty(),
+            !builder.edits.read().delete_wheres.is_empty(),
             "pending delete WHERE clauses must survive a failed commit"
         );
         assert!(
@@ -2486,7 +1803,7 @@ mod tests {
         // Restore the real dir; retrying the commit must persist the deletes.
         *builder.bundle.data_dir.write() = real_dir;
         builder.commit("delete high salaries").await.unwrap();
-        assert!(builder.pending_deletes.read().is_empty());
+        assert!(builder.edits.read().deletes.is_empty());
         assert!(builder.status().is_empty());
 
         let last_commit = builder.bundle.commits.read().last().cloned().unwrap();
@@ -2535,7 +1852,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(moved_out, raw_low.len());
-        builder.flush_pending_updates_to_blocks();
+        builder.flush_pending_updates_to_blocks().unwrap();
 
         // ...and the high-salary rows INTO it.
         let moved_in = builder
@@ -2547,7 +1864,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(moved_in, raw_high.len());
-        builder.flush_pending_updates_to_blocks();
+        builder.flush_pending_updates_to_blocks().unwrap();
 
         let selected = builder.select_row_ids(&low_pred).await.unwrap();
         assert_eq!(
@@ -2581,7 +1898,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first, raw_high.len());
-        builder.flush_pending_updates_to_blocks();
+        builder.flush_pending_updates_to_blocks().unwrap();
 
         // Second update targets the first update's value.
         let second_pred = builder.translate_sql("salary = 12345.0");
@@ -2600,11 +1917,6 @@ mod tests {
         );
     }
 
-    /// bb-plf: each in-session UPDATE flush rebuilds the overlay from the
-    /// FULL pending accumulator, so it supersedes the previous flush. The
-    /// block must hold a bounded number of overlays (one session overlay),
-    /// not one per UPDATE — the old push-per-flush made overlay merge cost
-    /// grow O(N²) in a multi-update session.
     /// bb-nt8(1): `select_row_ids` must not re-select rows already tombstoned
     /// in this session — otherwise a repeated DELETE re-reports the same count
     /// and re-records redundant tombstones.
@@ -2630,6 +1942,11 @@ mod tests {
         );
     }
 
+    /// bb-plf: each in-session UPDATE flush rebuilds the overlay from the
+    /// FULL pending accumulator, so it supersedes the previous flush. The
+    /// block must hold exactly one (session) overlay — not one per UPDATE,
+    /// which made overlay merge cost grow O(N²) in a multi-update session —
+    /// and that overlay must carry every update's value.
     #[tokio::test]
     async fn test_repeated_flushes_do_not_accumulate_overlays() {
         use crate::test_utils::empty_bundle;
@@ -2641,7 +1958,7 @@ mod tests {
         let salary_col = builder.translate_sql("salary");
         for i in 0..8 {
             let pred = builder.translate_sql(&format!("id = {}", i + 1));
-            builder
+            let n = builder
                 .evaluate_update_cols(
                     std::slice::from_ref(&salary_col),
                     &[format!("{}.0", 1000 + i)],
@@ -2649,18 +1966,118 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            builder.flush_pending_updates_to_blocks();
+            assert_eq!(n, 1, "id {} should match one row", i + 1);
+            builder.flush_pending_updates_to_blocks().unwrap();
         }
 
         let packs = builder.bundle.packs().read().clone();
         let pack = packs.get(&ObjectId::BASE_PACK).expect("base pack");
         let blocks = pack.blocks();
         let block = blocks.first().expect("base block");
-        assert!(
-            block.update_overlays().len() <= 1,
-            "in-session flushes must collapse to one overlay, got {}",
-            block.update_overlays().len()
+        let overlays = block.update_overlays();
+        assert_eq!(
+            overlays.len(),
+            1,
+            "in-session flushes must collapse to exactly one overlay"
         );
+        let salary_id = crate::bundle::bundle_schema::parse_internal_name(&salary_col)
+            .expect("salary internal name");
+        let (values, is_set) = overlays[0].columns.get(&salary_id).expect("salary overlay");
+        assert_eq!(overlays[0].row_numbers.len(), 8);
+        let mut got: Vec<f64> = (0..8)
+            .map(|i| {
+                assert!(is_set.value(i));
+                match ScalarValue::try_from_array(values, i).unwrap() {
+                    ScalarValue::Float64(Some(v)) => v,
+                    other => panic!("unexpected overlay value {other:?}"),
+                }
+            })
+            .collect();
+        got.sort_by(f64::total_cmp);
+        let expected: Vec<f64> = (0..8).map(|i| 1000.0 + i as f64).collect();
+        assert_eq!(got, expected, "the session overlay must hold every update");
+    }
+
+    /// bb-8lk: undo after several changes restores the EXACT prior pending
+    /// state — deletes and overwritten update cells — from per-change deltas.
+    #[tokio::test]
+    async fn test_undo_restores_exact_prior_pending_edits() {
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        attach_userdata(&builder).await;
+        builder.commit("initial").await.unwrap();
+
+        let salary = builder.translate_sql("salary");
+        let run_update = |pred: &'static str, value: &'static str| {
+            let builder = builder.clone();
+            let salary = salary.clone();
+            async move {
+                let pred = builder.translate_sql(pred);
+                let b = builder.clone();
+                builder
+                    .run_command(format!("update {pred}"), async move {
+                        b.evaluate_update_cols(
+                            std::slice::from_ref(&salary),
+                            &[value.to_string()],
+                            &pred,
+                        )
+                        .await?;
+                        b.flush_pending_updates_to_blocks()
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
+        let run_delete = |pred: &'static str| {
+            let builder = builder.clone();
+            async move {
+                let pred = builder.translate_sql(pred);
+                let b = builder.clone();
+                builder
+                    .run_command(format!("delete {pred}"), async move {
+                        let rows = b.select_row_ids(&pred).await?;
+                        b.mark_deleted(rows, &pred);
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
+
+        // Change 1-3: update ids 1..=3, delete id 10, update id 2 again
+        // (overwriting a cell from change 1).
+        run_update("id <= 3", "111.0").await;
+        run_delete("id = 10").await;
+        let snapshot = {
+            let e = builder.edits.read();
+            (
+                e.deletes.clone(),
+                e.delete_wheres.clone(),
+                e.updates.clone(),
+                e.update_wheres.clone(),
+            )
+        };
+        run_update("id = 2 OR id = 4", "222.0").await;
+        run_delete("id = 11 OR id = 10").await;
+
+        // Undo the last two changes: exactly the state after change 2.
+        builder.undo().await.unwrap();
+        builder.undo().await.unwrap();
+        {
+            let e = builder.edits.read();
+            assert_eq!(e.deletes, snapshot.0, "deletes restored");
+            assert_eq!(e.delete_wheres, snapshot.1, "delete wheres restored");
+            assert_eq!(e.updates, snapshot.2, "overwritten cells restored");
+            assert_eq!(e.update_wheres, snapshot.3, "update wheres restored");
+        }
+
+        // Undo everything: no pending edits remain.
+        builder.undo().await.unwrap();
+        builder.undo().await.unwrap();
+        let e = builder.edits.read();
+        assert!(e.deletes.is_empty() && e.updates.is_empty());
+        assert!(e.delete_wheres.is_empty() && e.update_wheres.is_empty());
     }
 
     #[tokio::test]
