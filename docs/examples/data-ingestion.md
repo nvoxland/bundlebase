@@ -192,7 +192,7 @@ A source belongs to a pack: either the base pack or a joined pack (created with 
     })
 
     # Reference taxonomy joins as its own pack
-    bundle.join("ref", on="bundle.event_type_id = ref.id")
+    bundle.join("ref", "bundle.event_type_id = ref.id")
     bundle.create_source("http", {
         "url": "https://api.internal/taxonomy",
         "format": "json",

@@ -35,7 +35,7 @@ You can optionally specify a `location` for the initial data and a join type (`"
     bundle.attach("customers.parquet")
 
     # Join with orders data
-    bundle.join("orders", on="bundle.customer_id = orders.id",
+    bundle.join("orders", "bundle.customer_id = orders.id",
            location="s3://external/orders.parquet")
 
     print(bundle.to_pandas())
@@ -69,7 +69,7 @@ You can join with the query output of another committed bundle using a `bundle:/
 === "Sync API"
 
     ```python
-    bundle.join("other", on="bundle.id = other.id",
+    bundle.join("other", "bundle.id = other.id",
            location="bundle:///path/to/other/bundle")
     ```
 
@@ -91,7 +91,7 @@ You can join with the query output of another committed bundle using a `bundle:/
 === "Sync API"
 
     ```python
-    bundle.join("other", on="bundle.id = other.id",
+    bundle.join("other", "bundle.id = other.id",
            location="bundle+s3://bucket/path/to/bundle")
     ```
 
@@ -114,7 +114,7 @@ Create a join point without initial data. Data can be attached later using `atta
 === "Sync API"
 
     ```python
-    bundle.join("orders", on="bundle.customer_id = orders.id")
+    bundle.join("orders", "bundle.customer_id = orders.id")
 
     # Attach data to the join later
     bundle.attach("orders.parquet", pack="orders")

@@ -46,7 +46,7 @@ By default, data attaches to the base pack. Use the `pack` parameter to attach d
 === "Sync API"
 
     ```python
-    bundle.join("orders", on="customer_id = orders.id")
+    bundle.join("orders", "customer_id = orders.id")
     bundle.attach("orders.parquet", pack="orders")
     ```
 
