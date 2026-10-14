@@ -563,8 +563,7 @@ impl Bundle {
             .as_deref()
             .map(bundlebase_common::parse_format_version);
 
-        // Manifests directly in the manifest dir, in replay order. Subdirectories
-        // (such as view_* directories) are skipped.
+        // Manifests directly in the manifest dir, in replay order.
         let manifest_files = commit::list_manifest_files(manifest_dir.as_ref()).await?;
 
         if manifest_files.is_empty() {

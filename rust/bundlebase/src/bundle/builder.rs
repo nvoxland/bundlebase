@@ -2856,9 +2856,10 @@ mod tests {
         assert_eq!(manifest_numbers(real_dir.as_ref()).await, vec![1, 2, 3]);
     }
 
-    /// Files in subdirectories of `_bundlebase/` (such as future checkpoints)
-    /// are not commits and must not push up the next number, on either the
-    /// commit path or the upgrade path.
+    /// Files in subdirectories of `_bundlebase/` are not commits and must not
+    /// push up the next number, on either the commit path or the upgrade path.
+    /// Recursive listings return them, so the filter has to check the path
+    /// relative to the manifest dir, not just the last segment.
     #[tokio::test]
     async fn test_next_number_ignores_nested_files() {
         use crate::test_utils::{random_memory_url, test_config};
@@ -2872,7 +2873,7 @@ mod tests {
         data_dir
             .writable_subdir(META_DIR)
             .unwrap()
-            .writable_subdir("checkpoints")
+            .writable_subdir("nested")
             .unwrap()
             .writable_file("00009aaaaaaaaaaaa.yaml")
             .unwrap()
