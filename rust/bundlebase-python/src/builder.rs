@@ -342,6 +342,24 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Remove a named metric. Dropping a name that was never defined is a
+    /// no-op. Mutates the bundle in place and returns it for chaining.
+    fn drop_metric<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_metric(&name)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop metric", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }).map_err(|e| to_py_error(e)))
+        })
+    }
+
     /// Save a configuration value to the bundle manifest. Mutates the bundle in place and returns it for chaining.
     ///
     /// # Arguments
@@ -1854,6 +1872,43 @@ impl PyBundleBuilder {
             .into_iter()
             .map(|(id, name)| (id.to_string(), name))
             .collect()
+    }
+
+    /// Named metrics defined on the bundle, in definition order, as
+    /// `{"name", "expression", "description"}` dicts. Expressions use the
+    /// columns' current names.
+    fn metrics(&self) -> Vec<HashMap<String, Option<String>>> {
+        super::semantic::metrics(self.inner.as_ref())
+    }
+
+    /// Column descriptions (from `describe_column`) as `{column_name: description}`.
+    fn column_descriptions(&self) -> HashMap<String, String> {
+        super::semantic::column_descriptions(self.inner.as_ref())
+    }
+
+    /// Evaluate a named metric, optionally grouped by dimension columns.
+    /// Returns a stream of rows (one column per dimension plus the metric).
+    #[pyo3(signature = (name, dimensions=None, limit=None))]
+    fn compute_metric<'py>(
+        &self,
+        name: String,
+        dimensions: Option<Vec<String>>,
+        limit: Option<usize>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::compute_metric(
+            py,
+            self.inner.clone() as Arc<dyn BundleFacade>,
+            name,
+            dimensions.unwrap_or_default(),
+            limit,
+        )
+    }
+
+    /// Profile every column in one scan: null/distinct counts and, for text
+    /// columns, a suggested cast when every value parses as a number or date.
+    fn data_quality<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::data_quality(py, self.inner.clone() as Arc<dyn BundleFacade>)
     }
 
     fn operations(&self) -> Vec<super::operation::PyOperation> {

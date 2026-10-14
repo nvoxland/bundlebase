@@ -60,6 +60,15 @@ mod tests {
     }
 
     #[test]
+    fn test_version() {
+        let id = ColumnId::generate();
+        let op = DescribeColumnOp::setup(id, "a");
+        assert_eq!(op.version().len(), 12);
+        assert_eq!(op.version(), DescribeColumnOp::setup(id, "a").version());
+        assert_ne!(op.version(), DescribeColumnOp::setup(id, "b").version());
+    }
+
+    #[test]
     fn test_serialization_roundtrip() {
         let id = ColumnId::generate();
         let op = DescribeColumnOp::setup(id, "unit price in USD");

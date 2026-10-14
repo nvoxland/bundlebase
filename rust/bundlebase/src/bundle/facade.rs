@@ -20,6 +20,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
+mod data_quality;
+pub use data_quality::{ColumnQuality, DataQualityReport};
+
 #[async_trait]
 pub trait BundleFacade: Send + Sync {
     /// Returns self as `&dyn Any` for downcasting to concrete types.
@@ -62,10 +65,30 @@ pub trait BundleFacade: Send + Sync {
         self.bundle_schema().column_name(id)
     }
 
+    /// Rewrite SQL stored in an operation (which references columns as
+    /// `col_<id>` and imported functions as `fn_<id>`) to the *current*
+    /// user-visible names. The result is valid against the `bundle` table via
+    /// [`query`](Self::query), and reads correctly after renames.
+    fn display_sql(&self, sql: &str) -> String {
+        let columns_resolved = self.bundle_schema().display_sql(sql);
+        let fn_map: HashMap<String, String> = self
+            .function_registry()
+            .read()
+            .name_to_internal_name()
+            .into_iter()
+            .map(|(name, internal)| (internal, name))
+            .collect();
+        if fn_map.is_empty() {
+            return columns_resolved;
+        }
+        super::bundle_schema::translate_identifiers_in_sql(&columns_resolved, &fn_map)
+    }
+
     /// Resolve the bundle's metrics (from `DefineMetric` operations),
     /// last-write-wins by name, in definition order. Metrics are metadata
     /// replayed from the operation list, so this reflects committed +
-    /// in-session state.
+    /// in-session state. Expressions are stored against stable column ids and
+    /// returned here with the columns' *current* user-visible names.
     fn metrics(&self) -> Vec<super::operation::MetricDefinition> {
         use super::operation::MetricDefinition;
         let mut by_name: std::collections::HashMap<String, MetricDefinition> =
@@ -97,6 +120,10 @@ pub trait BundleFacade: Send + Sync {
         order
             .into_iter()
             .filter_map(|n| by_name.remove(&n))
+            .map(|m| MetricDefinition {
+                expression: self.display_sql(&m.expression),
+                ..m
+            })
             .collect()
     }
 
@@ -113,6 +140,93 @@ pub trait BundleFacade: Send + Sync {
         out
     }
 
+    /// Column descriptions keyed by each column's *current* user-visible name
+    /// (descriptions are stored by `ColumnId`, so they follow renames).
+    /// Columns that no longer exist are omitted.
+    fn column_descriptions_by_name(&self) -> HashMap<String, String> {
+        let descriptions = self.column_descriptions();
+        if descriptions.is_empty() {
+            return HashMap::new();
+        }
+        let bs = self.bundle_schema();
+        descriptions
+            .into_iter()
+            .filter_map(|(id, desc)| bs.column_name(&id).map(|name| (name, desc)))
+            .collect()
+    }
+
+    /// Evaluate a named metric, optionally grouped by `dimensions` (columns of
+    /// the bundle), returning a stream of rows: one column per dimension plus
+    /// a column named after the metric. Grouped results are ordered by the
+    /// dimensions. `limit` caps the number of rows returned.
+    async fn compute_metric(
+        &self,
+        name: &str,
+        dimensions: &[String],
+        limit: Option<usize>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let metrics = self.metrics();
+        let metric = metrics.iter().find(|m| m.name == name).ok_or_else(|| {
+            let available: Vec<&str> = metrics.iter().map(|m| m.name.as_str()).collect();
+            let msg = if available.is_empty() {
+                format!(
+                    "No metric named '{}'. This bundle defines no metrics; create one with \
+                     CREATE METRIC <name> AS '<expression>'.",
+                    name
+                )
+            } else {
+                format!(
+                    "No metric named '{}'. Available metrics: {}.",
+                    name,
+                    available.join(", ")
+                )
+            };
+            BundlebaseError::from(msg)
+        })?;
+
+        // Only real columns may be used as dimensions: this guards the
+        // generated SQL and gives a self-correcting error.
+        let schema = self.schema().await?;
+        for d in dimensions {
+            if schema.field_with_name(d).is_err() {
+                let mut cols: Vec<&str> =
+                    schema.fields().iter().map(|f| f.name().as_str()).collect();
+                cols.sort_unstable();
+                return Err(format!(
+                    "Unknown dimension column '{}'. Available columns: {}.",
+                    d,
+                    cols.join(", ")
+                )
+                .into());
+            }
+        }
+
+        let q = |ident: &str| format!("\"{}\"", ident.replace('"', "\"\""));
+        let dims: Vec<String> = dimensions.iter().map(|d| q(d)).collect();
+        let mut select_parts = dims.clone();
+        // `metrics()` already rendered the expression with current column names.
+        select_parts.push(format!("({}) AS {}", metric.expression, q(name)));
+
+        let mut sql = format!("SELECT {} FROM bundle", select_parts.join(", "));
+        if !dims.is_empty() {
+            let dims_sql = dims.join(", ");
+            sql.push_str(&format!(" GROUP BY {} ORDER BY {}", dims_sql, dims_sql));
+        }
+        if let Some(n) = limit {
+            sql.push_str(&format!(" LIMIT {}", n));
+        }
+        self.query(&sql, vec![], limit).await
+    }
+
+    /// Profile every column in one scan: null and distinct counts, plus — for
+    /// text columns — whether every value parses as a number or date (see
+    /// [`DataQualityReport`]). The empty-bundle sentinel column is skipped.
+    async fn data_quality(&self) -> Result<DataQualityReport, BundlebaseError> {
+        let schema = self.schema().await?;
+        let bs = self.bundle_schema();
+        data_quality::compute(self, &schema, &bs).await
+    }
+
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
 
     /// The user-visible schema with column descriptions (from `DescribeColumn`)
@@ -123,7 +237,7 @@ pub trait BundleFacade: Send + Sync {
     /// there is no cost or metadata drift on the common path.
     async fn described_schema(&self) -> Result<SchemaRef, BundlebaseError> {
         let schema = self.schema().await?;
-        let descriptions = self.column_descriptions();
+        let descriptions = self.column_descriptions_by_name();
         if descriptions.is_empty() {
             return Ok(schema);
         }
@@ -131,10 +245,7 @@ pub trait BundleFacade: Send + Sync {
             .fields()
             .iter()
             .map(|f| {
-                match self
-                    .column_id(f.name())
-                    .and_then(|id| descriptions.get(&id))
-                {
+                match descriptions.get(f.name()) {
                     Some(desc) => {
                         let mut metadata = f.metadata().clone();
                         metadata.insert("description".to_string(), desc.clone());

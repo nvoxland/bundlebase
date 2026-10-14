@@ -4,6 +4,7 @@
 //! to parse and execute commands, then formats results as JSON.
 
 use bundlebase::BundleFacade;
+use bundlebase_command::parser::quote_identifier;
 use bundlebase_command::OutputShape;
 use bundlebase_common::progress::ProgressScope;
 use serde_json::json;
@@ -41,29 +42,30 @@ pub async fn execute_query(bundle: &Arc<dyn BundleFacade>, sql: &str) -> Result<
     }
 }
 
-/// Get the bundle schema as a JSON string.
-pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
+/// Column list (name, type, nullability, description) shared by the
+/// `schema` and `describe` tools. Column descriptions (from DESCRIBE COLUMN)
+/// give an agent the semantic context that makes its SQL trustworthy.
+async fn columns_json(bundle: &Arc<dyn BundleFacade>) -> Result<Vec<serde_json::Value>, String> {
     let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
-
-    let descriptions = bundle.column_descriptions();
-    let columns: Vec<serde_json::Value> = schema
+    // Resolved once by current column name — no per-column schema lookups.
+    let descriptions = bundle.column_descriptions_by_name();
+    Ok(schema
         .fields()
         .iter()
         .map(|f| {
-            // Column descriptions (from DESCRIBE COLUMN) give an agent the
-            // semantic context that makes its SQL trustworthy.
-            let description = bundle
-                .column_id(f.name())
-                .and_then(|id| descriptions.get(&id).cloned());
             json!({
                 "name": f.name(),
                 "type": format!("{}", f.data_type()),
                 "nullable": f.is_nullable(),
-                "description": description,
+                "description": descriptions.get(f.name()),
             })
         })
-        .collect();
+        .collect())
+}
 
+/// Get the bundle schema as a JSON string.
+pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
+    let columns = columns_json(bundle).await?;
     serde_json::to_string_pretty(&columns).map_err(|e| format!("JSON error: {}", e))
 }
 
@@ -73,25 +75,7 @@ pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
 /// writing SQL is far less likely to hallucinate — it sees what the data *is*,
 /// where it came from, and how it was shaped, not just column names/types.
 pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
-    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
-    let descriptions = bundle.column_descriptions();
-    let columns: Vec<serde_json::Value> = schema
-        .fields()
-        .iter()
-        .map(|f| {
-            // Column descriptions (from DESCRIBE COLUMN) give an agent the
-            // semantic context that makes its SQL trustworthy.
-            let description = bundle
-                .column_id(f.name())
-                .and_then(|id| descriptions.get(&id).cloned());
-            json!({
-                "name": f.name(),
-                "type": format!("{}", f.data_type()),
-                "nullable": f.is_nullable(),
-                "description": description,
-            })
-        })
-        .collect();
+    let columns = columns_json(bundle).await?;
 
     let row_count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
 
@@ -173,262 +157,64 @@ pub async fn get_analyze(bundle: &Arc<dyn BundleFacade>, sample_limit: usize) ->
     serde_json::to_string_pretty(&result).map_err(|e| format!("JSON error: {}", e))
 }
 
-/// Where each column's aggregates land in the single-scan result row.
-struct ColSlots {
-    name: String,
-    is_text: bool,
-    non_null: usize,
-    distinct: usize,
-    /// Text-only probes: how many non-null values parse cleanly as each type,
-    /// plus a count of zero-padded values (e.g. "007") that must NOT be cast.
-    as_int: Option<usize>,
-    as_float: Option<usize>,
-    as_date: Option<usize>,
-    zero_padded: Option<usize>,
+/// Agent-facing remedy for a text column whose values all parse as `ty`.
+/// The command uses the REPL grammar's identifier quoting, which cannot
+/// express a name containing `"`; such columns get NORMALIZE COLUMN NAMES
+/// as the first step instead.
+fn cast_hint(column: &str, ty: &str) -> String {
+    let remedy = if column.contains('"') {
+        format!(
+            "NORMALIZE COLUMN NAMES, then CAST COLUMN <normalized name> TO {ty} \
+             (this column's name contains a double quote, which commands cannot reference)"
+        )
+    } else {
+        format!("CAST COLUMN {} TO {ty}", quote_identifier(column))
+    };
+    format!(
+        "Stored as text, but every value parses as {ty}. Comparing text numerically \
+         compares lexicographically (\"9\" > \"50\"), which is silently wrong, and \
+         aggregates like SUM fail outright. Cast before filtering or aggregating: {remedy}"
+    )
 }
 
-/// Automated data-quality report: per-column null counts/rates and distinct
-/// counts, with flags an agent can act on (all-null, constant).
-///
-/// For text columns this also answers the question the CSV/JSONL all-Utf8
-/// import raises: *is this text actually a number or a date?* Every CSV/TSV/
-/// JSONL column arrives as Utf8, and a numeric comparison on text compares
-/// lexicographically ("9" > "50") — wrong, and silently so, with no error to
-/// catch it. We probe each text column with TRY_CAST over the same scan (so it
-/// costs nothing extra) and, when *every* non-null value parses as one type,
-/// report a `suggested_cast` so an agent casts before it filters or aggregates.
-///
-/// Zero-padded values ("007", zip codes) are detected and suppress a numeric
-/// suggestion: casting them to a number silently destroys the padding.
+/// Automated data-quality report (see [`BundleFacade::data_quality`]): per-column
+/// null counts/rates and distinct counts, flags an agent can act on (all-null,
+/// constant), and cast suggestions for text columns that are really numbers or
+/// dates — with a ready-to-run remedy command.
 pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
-    use futures::StreamExt;
-
-    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
-    // Real columns (name, is_text), skipping the empty-bundle sentinel.
-    let cols: Vec<(String, bool)> = schema
-        .fields()
-        .iter()
-        .filter(|f| f.name() != "no_data")
-        .map(|f| {
-            let is_text = matches!(
-                f.data_type(),
-                arrow::datatypes::DataType::Utf8
-                    | arrow::datatypes::DataType::LargeUtf8
-                    | arrow::datatypes::DataType::Utf8View
-            );
-            (f.name().to_string(), is_text)
-        })
-        .collect();
-
-    if cols.is_empty() {
-        return serde_json::to_string_pretty(&json!({
-            "total_rows": 0,
-            "columns": [],
-        }))
-        .map_err(|e| format!("JSON error: {}", e));
-    }
-
-    // Quote a column name for SQL (double-quote, escape internal quotes).
-    let q = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
-
-    // DataFusion's expression naming is transparent to casts: COUNT(TRY_CAST(x AS t))
-    // and COUNT(x) both auto-name to `count(x)`, so several probes over one column
-    // collide as "duplicate unqualified field name". Project the casts into a
-    // subquery as distinctly *aliased* columns and aggregate those instead.
-    let mut inner: Vec<String> = Vec::new();
-    let mut selects = vec!["COUNT(*) AS c_total".to_string()];
-    let mut slot = 1usize;
-    let mut next = |selects: &mut Vec<String>, expr: String| -> usize {
-        selects.push(expr);
-        let s = slot;
-        slot += 1;
-        s
-    };
-
-    let mut layout: Vec<ColSlots> = Vec::with_capacity(cols.len());
-    for (i, (name, is_text)) in cols.iter().enumerate() {
-        inner.push(format!("{} AS c{}", q(name), i));
-        let non_null = next(&mut selects, format!("COUNT(c{}) AS c{}_nn", i, i));
-        let distinct = next(&mut selects, format!("COUNT(DISTINCT c{}) AS c{}_dc", i, i));
-        let (mut as_int, mut as_float, mut as_date, mut zero_padded) = (None, None, None, None);
-        if *is_text {
-            inner.push(format!("TRY_CAST({} AS BIGINT) AS c{}_i", q(name), i));
-            inner.push(format!("TRY_CAST({} AS DOUBLE) AS c{}_f", q(name), i));
-            inner.push(format!("TRY_CAST({} AS DATE) AS c{}_d", q(name), i));
-            // '0' followed by a digit — "007", "01234". Not "0.5", a real number.
-            inner.push(format!(
-                "CASE WHEN regexp_like({}, '^0[0-9]') THEN 1 END AS c{}_z",
-                q(name),
-                i
-            ));
-            as_int = Some(next(&mut selects, format!("COUNT(c{}_i) AS c{}_ci", i, i)));
-            as_float = Some(next(&mut selects, format!("COUNT(c{}_f) AS c{}_cf", i, i)));
-            as_date = Some(next(&mut selects, format!("COUNT(c{}_d) AS c{}_cd", i, i)));
-            zero_padded = Some(next(&mut selects, format!("COUNT(c{}_z) AS c{}_cz", i, i)));
-        }
-        layout.push(ColSlots {
-            name: name.clone(),
-            is_text: *is_text,
-            non_null,
-            distinct,
-            as_int,
-            as_float,
-            as_date,
-            zero_padded,
-        });
-    }
-    let sql = format!(
-        "SELECT {} FROM (SELECT {} FROM bundle)",
-        selects.join(", "),
-        inner.join(", ")
-    );
-
-    let mut stream = bundle
-        .query(&sql, vec![], None)
-        .await
-        .map_err(|e| format!("{}", e))?;
-    let mut batch = None;
-    while let Some(b) = stream.next().await {
-        let b = b.map_err(|e| format!("{}", e))?;
-        if b.num_rows() > 0 {
-            batch = Some(b);
-            break;
-        }
-    }
-    let batch = batch.ok_or_else(|| "data-quality query returned no rows".to_string())?;
-
-    let read_i64 = |col: usize| -> i64 {
-        batch
-            .column(col)
-            .as_any()
-            .downcast_ref::<arrow::array::Int64Array>()
-            .map(|a| a.value(0))
-            .unwrap_or(0)
-    };
-    let total = read_i64(0);
-
-    let columns: Vec<serde_json::Value> = layout
+    let report = bundle.data_quality().await.map_err(|e| format!("{}", e))?;
+    let columns: Vec<serde_json::Value> = report
+        .columns
         .iter()
         .map(|c| {
-            let non_null = read_i64(c.non_null);
-            let distinct = read_i64(c.distinct);
-            let null_count = total - non_null;
-            let null_rate = if total > 0 {
-                Some((null_count as f64) / (total as f64))
-            } else {
-                None
-            };
-
-            // Suggest a cast only when EVERY non-null value parses as that type.
-            let suggested_cast: Option<&str> = if c.is_text && non_null > 0 {
-                let all = |slot: Option<usize>| slot.map(read_i64).unwrap_or(0) == non_null;
-                let padded = c.zero_padded.map(read_i64).unwrap_or(0) > 0;
-                if !padded && all(c.as_int) {
-                    Some("BIGINT")
-                } else if !padded && all(c.as_float) {
-                    Some("DOUBLE")
-                } else if all(c.as_date) {
-                    Some("DATE")
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            json!({
-                "name": c.name,
-                "non_null": non_null,
-                "null_count": null_count,
-                "null_rate": null_rate,
-                "distinct": distinct,
-                "all_null": non_null == 0 && total > 0,
-                "constant": non_null > 0 && distinct == 1,
-                "suggested_cast": suggested_cast,
-                "cast_hint": suggested_cast.map(|t| format!(
-                    "Stored as text, but every value parses as {t}. Comparing text \
-                     numerically compares lexicographically (\"9\" > \"50\"), which is \
-                     silently wrong, and aggregates like SUM fail outright. Cast before \
-                     filtering or aggregating: CAST COLUMN {} TO {t}",
-                    q(&c.name)
-                )),
-            })
+            let mut v = serde_json::to_value(c).map_err(|e| format!("JSON error: {}", e))?;
+            v["cast_hint"] = json!(c
+                .suggested_cast
+                .as_deref()
+                .map(|t| cast_hint(&c.name, t)));
+            Ok(v)
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
 
     serde_json::to_string_pretty(&json!({
-        "total_rows": total,
+        "total_rows": report.total_rows,
         "columns": columns,
     }))
     .map_err(|e| format!("JSON error: {}", e))
 }
 
 /// Compute a bundle-defined named metric by name, optionally grouped by one or
-/// more dimension columns. This is the *executable* half of the semantic layer:
-/// the agent asks for a metric by name and gets the bundle author's canonical
-/// computation, rather than hand-writing an aggregate that may quietly diverge
-/// from the intended definition.
+/// more dimension columns (see [`BundleFacade::compute_metric`]). This is the
+/// *executable* half of the semantic layer: the agent asks for a metric by name
+/// and gets the bundle author's canonical computation.
 pub async fn get_metric(
     bundle: &Arc<dyn BundleFacade>,
     name: &str,
     dimensions: &[String],
     limit: usize,
 ) -> Result<String, String> {
-    // Resolve the metric definition (metrics() already applies last-write-wins).
-    let metrics = bundle.metrics();
-    let metric = metrics.iter().find(|m| m.name == name).ok_or_else(|| {
-        let available: Vec<&str> = metrics.iter().map(|m| m.name.as_str()).collect();
-        if available.is_empty() {
-            format!(
-                "No metric named '{}'. This bundle defines no metrics; create one with \
-                 CREATE METRIC <name> AS '<expression>'.",
-                name
-            )
-        } else {
-            format!(
-                "No metric named '{}'. Available metrics: {}.",
-                name,
-                available.join(", ")
-            )
-        }
-    })?;
-
-    // Validate dimensions against the real schema: an agent may only group by
-    // columns that exist. This guards the generated SQL and yields a clear,
-    // self-correcting error instead of an opaque query failure.
-    let schema = bundle.schema().await.map_err(|e| format!("{}", e))?;
-    let valid_cols: std::collections::HashSet<&str> =
-        schema.fields().iter().map(|f| f.name().as_str()).collect();
-    for d in dimensions {
-        if !valid_cols.contains(d.as_str()) {
-            let mut cols: Vec<&str> = valid_cols.iter().copied().collect();
-            cols.sort_unstable();
-            return Err(format!(
-                "Unknown dimension column '{}'. Available columns: {}.",
-                d,
-                cols.join(", ")
-            ));
-        }
-    }
-
-    // Quote an identifier for SQL (double-quote, escape internal quotes).
-    let q = |ident: &str| format!("\"{}\"", ident.replace('"', "\"\""));
-
-    let mut select_parts: Vec<String> = dimensions.iter().map(|d| q(d)).collect();
-    // The metric expression is bundle-author-defined (trusted, same provenance
-    // as any recorded operation); parenthesize and alias it with the metric name.
-    select_parts.push(format!("({}) AS {}", metric.expression, q(name)));
-
-    let mut sql = format!("SELECT {} FROM bundle", select_parts.join(", "));
-    if !dimensions.is_empty() {
-        let dims_sql = dimensions.iter().map(|d| q(d)).collect::<Vec<_>>().join(", ");
-        // GROUP BY the dimensions; ORDER BY them for stable, readable output.
-        sql.push_str(&format!(" GROUP BY {} ORDER BY {}", dims_sql, dims_sql));
-    }
-    sql.push_str(&format!(" LIMIT {}", limit));
-
     let stream = bundle
-        .query(&sql, vec![], Some(limit))
+        .compute_metric(name, dimensions, Some(limit))
         .await
         .map_err(|e| format!("{}", e))?;
     let rows = format_stream_json(stream, Some(OutputShape::Table), Some(limit))
@@ -437,10 +223,12 @@ pub async fn get_metric(
     let rows_json: serde_json::Value =
         serde_json::from_str(&rows).map_err(|e| format!("JSON error: {}", e))?;
 
+    // Echo the canonical definition so the agent sees what it computed.
+    let metric = bundle.metrics().into_iter().find(|m| m.name == name);
     let result = json!({
         "metric": name,
-        "expression": metric.expression,
-        "description": metric.description,
+        "expression": metric.as_ref().map(|m| m.expression.clone()),
+        "description": metric.and_then(|m| m.description),
         "dimensions": dimensions,
         "rows": rows_json,
     });
@@ -901,6 +689,83 @@ mod tests {
         );
         // A genuine decimal column is still suggested.
         assert_eq!(col("amount")["suggested_cast"], "DOUBLE");
+    }
+
+    /// The cast hint's remedy must be a command the REPL grammar can parse,
+    /// including for names that need quoting.
+    #[test]
+    fn test_cast_hint_emits_parseable_command() {
+        for name in ["Index", "Subscription Date", "weird-name"] {
+            let hint = cast_hint(name, "BIGINT");
+            let cmd = &hint[hint.find("CAST COLUMN").expect("has remedy")..];
+            match bundlebase_command::parser::parse_command(cmd)
+                .unwrap_or_else(|e| panic!("hint for {name:?} must parse: {cmd}: {e}"))
+            {
+                bundlebase_command::BundleCommand::CastColumn(c) => {
+                    assert_eq!(c.name, name)
+                }
+                _ => panic!("expected CAST COLUMN for {name:?}"),
+            }
+        }
+        // A name containing '"' cannot be referenced by any command, so the
+        // hint must not pretend otherwise.
+        let hint = cast_hint("say \"hi\"", "BIGINT");
+        assert!(hint.contains("NORMALIZE COLUMN NAMES"), "{hint}");
+        assert!(!hint.contains("\"say"), "{hint}");
+    }
+
+    /// A real column named `no_data` is profiled, not mistaken for the
+    /// empty-bundle sentinel.
+    #[tokio::test]
+    async fn test_data_quality_reports_real_no_data_column() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        builder.rename_column("gender", "no_data").await.expect("rename");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
+        let cols = json["columns"].as_array().expect("columns");
+        assert!(
+            cols.iter().any(|c| c["name"] == "no_data"),
+            "real no_data column must be reported: {cols:?}"
+        );
+    }
+
+    /// After RENAME COLUMN the metric tool still evaluates and echoes the
+    /// expression with the current column name.
+    #[tokio::test]
+    async fn test_metric_after_rename_column() {
+        use bundlebase_command::BundleBuilderExt;
+
+        let bundle = create_test_bundle().await;
+        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        builder
+            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .await
+            .expect("attach");
+        execute_query(&bundle, "CREATE METRIC payroll AS 'SUM(salary)'")
+            .await
+            .expect("create metric");
+        execute_query(&bundle, "RENAME COLUMN salary TO pay")
+            .await
+            .expect("rename");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &get_metric(&bundle, "payroll", &[], 10).await.expect("metric"),
+        )
+        .expect("json");
+        assert_eq!(json["expression"], "SUM(pay)");
+        assert!(json["rows"][0]["payroll"].is_number(), "{}", json["rows"]);
+
+        let desc: serde_json::Value =
+            serde_json::from_str(&get_describe(&bundle).await.expect("describe")).expect("json");
+        assert_eq!(desc["metrics"][0]["expression"], "SUM(pay)");
     }
 
     #[tokio::test]

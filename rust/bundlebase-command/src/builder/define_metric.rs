@@ -81,9 +81,12 @@ impl BundleBuilderCommand for DefineMetricCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        // Store column/function references by stable id (`col_<id>`/`fn_<id>`)
+        // so the metric survives renames; `metrics()` renders current names.
+        let translated = builder.translate_sql(&self.expression);
         builder
             .apply_operation(
-                DefineMetricOp::setup(&self.name, &self.expression, self.description.as_deref())
+                DefineMetricOp::setup(&self.name, &translated, self.description.as_deref())
                     .into(),
             )
             .await?;

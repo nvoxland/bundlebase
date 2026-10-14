@@ -57,4 +57,12 @@ mod tests {
         let op = DropMetricOp::setup("aov");
         assert_eq!(op.describe(), "DROP METRIC: aov");
     }
+
+    #[test]
+    fn test_version() {
+        let op = DropMetricOp::setup("aov");
+        assert_eq!(op.version().len(), 12);
+        assert_eq!(op.version(), DropMetricOp::setup("aov").version());
+        assert_ne!(op.version(), DropMetricOp::setup("other").version());
+    }
 }

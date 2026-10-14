@@ -362,6 +362,24 @@ class PyBundle:
         """Commit history of the bundle."""
         ...
 
+    def metrics(self) -> List[Dict[str, Optional[str]]]:
+        """Named metrics as ``{"name", "expression", "description"}`` dicts (current column names)."""
+        ...
+
+    def column_descriptions(self) -> Dict[str, str]:
+        """Column descriptions as ``{column_name: description}``."""
+        ...
+
+    async def compute_metric(
+        self, name: str, dimensions: Optional[List[str]] = None, limit: Optional[int] = None
+    ) -> "QueryResult":
+        """Evaluate a named metric, optionally grouped by dimension columns."""
+        ...
+
+    async def data_quality(self) -> Dict[str, Any]:
+        """Per-column null/distinct counts and suggested casts: ``{"total_rows", "columns"}``."""
+        ...
+
     def operations(self) -> List[Any]:
         """Operations recorded in the bundle definition."""
         ...
@@ -998,6 +1016,10 @@ class PyBundleBuilder:
         """
         ...
 
+    def drop_metric(self, name: str) -> "OperationChain":
+        """Queue a drop_metric operation (a no-op if the metric was never defined)."""
+        ...
+
     def set_description(self, description: str) -> "OperationChain":
         """
         Queue a set_description operation.
@@ -1564,6 +1586,24 @@ class PyBundleBuilder:
         """Commit history of the bundle."""
         ...
 
+    def metrics(self) -> List[Dict[str, Optional[str]]]:
+        """Named metrics as ``{"name", "expression", "description"}`` dicts (current column names)."""
+        ...
+
+    def column_descriptions(self) -> Dict[str, str]:
+        """Column descriptions as ``{column_name: description}``."""
+        ...
+
+    async def compute_metric(
+        self, name: str, dimensions: Optional[List[str]] = None, limit: Optional[int] = None
+    ) -> "QueryResult":
+        """Evaluate a named metric, optionally grouped by dimension columns."""
+        ...
+
+    async def data_quality(self) -> Dict[str, Any]:
+        """Per-column null/distinct counts and suggested casts: ``{"total_rows", "columns"}``."""
+        ...
+
     def operations(self) -> List[Any]:
         """Operations recorded in the bundle definition."""
         ...
@@ -1738,6 +1778,10 @@ class OperationChain:
         """Queue a define_metric operation."""
         ...
 
+    def drop_metric(self, name: str) -> "OperationChain":
+        """Queue a drop_metric operation (a no-op if the metric was never defined)."""
+        ...
+
     def save_config(self, scope: str, key: str, value: str) -> "OperationChain":
         """Queue a save_config operation."""
         ...
@@ -1910,6 +1954,10 @@ class CreateChain:
         """Queue a define_metric operation."""
         ...
 
+    def drop_metric(self, name: str) -> "CreateChain":
+        """Queue a drop_metric operation (a no-op if the metric was never defined)."""
+        ...
+
     def save_config(self, scope: str, key: str, value: str) -> "CreateChain":
         """Queue a save_config operation."""
         ...
@@ -2080,6 +2128,10 @@ class ExtendChain:
 
     def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "ExtendChain":
         """Queue a define_metric operation."""
+        ...
+
+    def drop_metric(self, name: str) -> "ExtendChain":
+        """Queue a drop_metric operation (a no-op if the metric was never defined)."""
         ...
 
     def save_config(self, scope: str, key: str, value: str) -> "ExtendChain":

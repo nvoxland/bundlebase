@@ -102,6 +102,7 @@ _original_methods = {
     "set_name": _PyBundleBuilder.set_name,
     "set_description": _PyBundleBuilder.set_description,
     "define_metric": _PyBundleBuilder.define_metric,
+    "drop_metric": _PyBundleBuilder.drop_metric,
     "save_config": _PyBundleBuilder.save_config,
     "set_config": _PyBundleBuilder.set_config,
 
@@ -177,7 +178,7 @@ mutation_methods = [
     "add_column", "cast_column", "drop_column", "rename_column", "describe_column", "filter", "join",
     "delete", "update", "always_delete", "drop_always_delete", "always_update", "drop_always_update",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "define_metric", "save_config", "set_config",
+    "set_name", "set_description", "define_metric", "drop_metric", "save_config", "set_config",
     "import_function", "import_temp_function", "rename_function", "drop_function",
     "rename_connector", "create_report", "drop_report",
     "create_index", "drop_index", "rebuild_index", "reindex",
@@ -316,6 +317,23 @@ async def _wrapped_builder_describe_data(self, columns) -> QueryResult:
 
 PyBundle.describe_data = _wrapped_bundle_describe_data
 PyBundleBuilder.describe_data = _wrapped_builder_describe_data
+
+# Wrap compute_metric() to return QueryResult
+_original_bundle_compute_metric = PyBundle.compute_metric
+_original_builder_compute_metric = PyBundleBuilder.compute_metric
+
+async def _wrapped_bundle_compute_metric(self, name, dimensions=None, limit=None) -> QueryResult:
+    """Evaluate a named metric, optionally grouped by dimension columns."""
+    stream = await _original_bundle_compute_metric(self, name, dimensions, limit)
+    return QueryResult(stream)
+
+async def _wrapped_builder_compute_metric(self, name, dimensions=None, limit=None) -> QueryResult:
+    """Evaluate a named metric, optionally grouped by dimension columns."""
+    stream = await _original_builder_compute_metric(self, name, dimensions, limit)
+    return QueryResult(stream)
+
+PyBundle.compute_metric = _wrapped_bundle_compute_metric
+PyBundleBuilder.compute_metric = _wrapped_builder_compute_metric
 
 # Wrap test_connector() and test_temp_connector() to return QueryResult
 _original_bundle_test_connector = PyBundle.test_connector

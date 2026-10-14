@@ -40,7 +40,7 @@ pub use bundlebase_common::command_response::{CommandResponse, OutputShape};
 pub use commit::{manifest_version, BundleCommit, CommitHistory};
 pub use connector_entry::ConnectorEntry;
 pub use data_block::DataBlock;
-pub use facade::BundleFacade;
+pub use facade::{BundleFacade, ColumnQuality, DataQualityReport};
 pub use function_entry::{
     validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry,
 };

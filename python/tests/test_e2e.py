@@ -2892,6 +2892,37 @@ async def test_describe_column_and_define_metric():
 
 
 @pytest.mark.asyncio
+async def test_semantic_layer_read_accessors():
+    """The semantic layer is readable from Python: metrics, column
+    descriptions, metric evaluation, data quality, and drop_metric chains."""
+    with tempfile.TemporaryDirectory() as temp:
+        c = await bundlebase.create(temp)
+        c = await (c.attach(datafile("userdata.parquet"))
+                   .describe_column("salary", "annual gross pay")
+                   .define_metric("headcount", "COUNT(*)", "people")
+                   .define_metric("tmp", "COUNT(*)")
+                   .drop_metric("tmp"))
+
+        assert c.metrics() == [
+            {"name": "headcount", "expression": "COUNT(*)", "description": "people"}
+        ]
+        assert c.column_descriptions() == {"salary": "annual gross pay"}
+
+        df = await (await c.compute_metric("headcount", ["gender"])).to_pandas()
+        assert list(df.columns) == ["gender", "headcount"]
+
+        report = await c.data_quality()
+        assert report["total_rows"] == 1000
+        assert any(col["name"] == "salary" for col in report["columns"])
+
+        await c.commit("semantic")
+        reopened = await bundlebase.open(temp)
+        assert [m["name"] for m in reopened.metrics()] == ["headcount"]
+        df = await (await reopened.compute_metric("headcount")).to_pandas()
+        assert df["headcount"].iloc[0] == 1000
+
+
+@pytest.mark.asyncio
 async def test_define_metric_without_description():
     """define_metric's description argument is optional."""
     with tempfile.TemporaryDirectory() as temp:

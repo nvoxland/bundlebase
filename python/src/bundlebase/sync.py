@@ -417,6 +417,55 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
 
+    def metrics(self) -> List[Dict[str, Optional[str]]]:
+        """Named metrics defined on the bundle, in definition order.
+
+        Returns:
+            List of ``{"name", "expression", "description"}`` dicts. Expressions
+            use the columns' current names.
+        """
+        return self._async.metrics()
+
+    def column_descriptions(self) -> Dict[str, str]:
+        """Column descriptions as ``{column_name: description}``."""
+        return self._async.column_descriptions()
+
+    def compute_metric(
+        self,
+        name: str,
+        dimensions: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+    ) -> SyncQueryResult:
+        """Evaluate a named metric, optionally grouped by dimension columns.
+
+        Args:
+            name: Metric name
+            dimensions: Optional columns to group by
+            limit: Optional maximum number of rows
+
+        Returns:
+            SyncQueryResult with one column per dimension plus the metric.
+
+        Example:
+            >>> bundle.compute_metric("revenue", ["region"]).to_pandas()
+        """
+        async def _compute():
+            return await self._async.compute_metric(name, dimensions, limit)
+
+        return SyncQueryResult(_loop_manager.run_sync(_compute()))
+
+    def data_quality(self) -> Dict[str, Any]:
+        """Profile every column: null/distinct counts and suggested casts.
+
+        Returns:
+            ``{"total_rows": int, "columns": [{"name", "non_null", "null_count",
+            "null_rate", "distinct", "all_null", "constant", "suggested_cast"}]}``
+        """
+        async def _profile():
+            return await self._async.data_quality()
+
+        return _loop_manager.run_sync(_profile())
+
     def describe_function(self, name: str) -> "SyncQueryResult":
         """Describe a registered function's metadata.
 
@@ -701,6 +750,16 @@ class SyncBundleBuilder(SyncBundle):
             description: Optional human/agent-readable description
         """
         coro = _call_original_method(self._async, "define_metric", name, expression, description)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_metric(self, name: str) -> "SyncBundleBuilder":
+        """Remove a named metric (a no-op if it was never defined).
+
+        Args:
+            name: Metric name
+        """
+        coro = _call_original_method(self._async, "drop_metric", name)
         self._async = _loop_manager.run_sync(coro)
         return self
 

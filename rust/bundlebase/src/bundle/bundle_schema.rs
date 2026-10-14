@@ -381,6 +381,20 @@ impl BundleSchema {
         translate_identifiers_in_sql(sql, &self.name_to_internal_name_map())
     }
 
+    /// Inverse of [`translate_sql`](Self::translate_sql): rewrite stored
+    /// `col_<id>` references back to the columns' *current* user-visible
+    /// names, so stored SQL (e.g. a metric expression) reads correctly after
+    /// RENAME COLUMN. Bare references whose name is not a plain lowercase
+    /// identifier are double-quoted so the result is still valid SQL.
+    pub fn display_sql(&self, sql: &str) -> String {
+        let map: HashMap<String, String> = self
+            .columns
+            .iter()
+            .map(|(id, user_name)| (generate_internal_name(id), user_name.clone()))
+            .collect();
+        rewrite_identifiers_in_sql(sql, &map, true)
+    }
+
     /// Rename DataFrame columns from internal names to user-visible names.
     pub fn rename_to_real_names(
         &self,
@@ -427,6 +441,36 @@ pub fn generate_internal_name(id: &ColumnId) -> String {
 /// Longer names are matched first so a shorter name that is a prefix of a
 /// longer identifier does not fire (e.g. `id` inside `identity`).
 pub fn translate_identifiers_in_sql(sql: &str, name_map: &HashMap<String, String>) -> String {
+    rewrite_identifiers_in_sql(sql, name_map, false)
+}
+
+/// Quote `name` as a SQL identifier unless it is a plain lowercase identifier
+/// (which DataFusion's identifier normalization leaves unchanged).
+pub fn quote_sql_identifier_if_needed(name: &str) -> String {
+    let plain = name
+        .bytes()
+        .next()
+        .map(|b| b.is_ascii_lowercase() || b == b'_')
+        .unwrap_or(false)
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if plain {
+        name.to_string()
+    } else {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    }
+}
+
+/// Shared walker behind [`translate_identifiers_in_sql`] and
+/// [`BundleSchema::display_sql`]. When `quote_bare` is set, a replacement
+/// for a *bare* identifier is quoted if needed (replacements inside an
+/// existing `"..."` are always inserted raw).
+fn rewrite_identifiers_in_sql(
+    sql: &str,
+    name_map: &HashMap<String, String>,
+    quote_bare: bool,
+) -> String {
     let mut names: Vec<(&String, &String)> = name_map.iter().collect();
     names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
@@ -490,7 +534,11 @@ pub fn translate_identifiers_in_sql(sql: &str, name_map: &HashMap<String, String
                     && &bytes[i..i + nb.len()] == nb
                     && (i + nb.len() == bytes.len() || !is_ident_char(bytes[i + nb.len()]))
                 {
-                    result.push_str(internal_name);
+                    if quote_bare {
+                        result.push_str(&quote_sql_identifier_if_needed(internal_name));
+                    } else {
+                        result.push_str(internal_name);
+                    }
                     i += nb.len();
                     matched = true;
                     break;
@@ -871,6 +919,30 @@ mod tests {
         assert_eq!(parse_internal_name("col_"), None);
         assert_eq!(parse_internal_name("col_zzzz"), None);
         assert_eq!(parse_internal_name(""), None);
+    }
+
+    // --- BundleSchema::display_sql tests ---
+
+    #[test]
+    fn test_display_sql_inverts_translate_and_follows_renames() {
+        let id_amount = ColumnId::generate();
+        let id_pay = ColumnId::generate();
+        let mut schema = BundleSchema::new();
+        schema.insert(id_amount, "amount".to_string());
+        schema.insert(id_pay, "Annual Pay".to_string());
+
+        let user_sql = "SUM(amount) + SUM(\"Annual Pay\") + COUNT('amount')";
+        let stored = schema.translate_sql(user_sql);
+        assert!(!stored.contains("SUM(amount)"));
+        assert_eq!(schema.display_sql(&stored), user_sql);
+
+        // After a rename the stored SQL displays with the new name, quoted
+        // when it is not a plain lowercase identifier.
+        schema.insert(id_amount, "Total Amount".to_string());
+        assert_eq!(
+            schema.display_sql(&stored),
+            "SUM(\"Total Amount\") + SUM(\"Annual Pay\") + COUNT('amount')"
+        );
     }
 
     // --- BundleSchema::translate_sql tests ---

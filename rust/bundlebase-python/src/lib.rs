@@ -8,6 +8,7 @@ mod progress;
 mod python_function;
 mod record_batch_stream;
 mod schema;
+mod semantic;
 mod session_context;
 mod utils;
 

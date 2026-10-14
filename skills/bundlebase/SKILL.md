@@ -157,11 +157,15 @@ bundlebase create --bundle ./analysis -m "Loaded sales data" "SET NAME 'Sales An
 | `--format json` | JSON output (default: `table`) |
 | `--config <path>` | YAML/JSON config file |
 
-**Idempotent create-or-open (`--exists-ok`):** By default `create` errors if a bundle already exists, so you don't silently append to the wrong one. When you're scripting a multi-step workflow and don't want to track whether the bundle exists yet, add `--exists-ok`: the first call creates it, and later calls open and extend it. Each call still auto-commits its changes.
+**Create-or-open (`--exists-ok`):** By default `create` errors if a bundle already exists, so you don't silently append to the wrong one. When you're scripting a workflow and don't want to track whether the bundle exists yet, add `--exists-ok`: the first call creates it, and later calls open and extend it. Each call still auto-commits its changes.
+
+`--exists-ok` only makes the *open* idempotent — the commands still run every time. Re-running `CREATE SOURCE` (or `ATTACH`) on an existing bundle adds a second source and fetches the same data again, duplicating every row. Keep one-time setup in its own call and only repeat commands that are safe to repeat, such as `FETCH base ADD` (which only picks up files not fetched before):
 
 ```bash
-# Safe to run on every step — creates the first time, extends thereafter:
-bundlebase create --bundle ./sales --exists-ok "SET NAME 'Sales'; CREATE SOURCE ..."
+# One-time setup — run once, not on every step:
+bundlebase create --bundle ./sales "SET NAME 'Sales'; CREATE SOURCE ..."
+
+# Safe to repeat — opens the bundle (creating it if missing) and fetches only new files:
 bundlebase create --bundle ./sales --exists-ok "FETCH base ADD"
 ```
 

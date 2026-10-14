@@ -204,3 +204,185 @@ async fn test_described_schema_carries_column_descriptions() -> Result<(), Bundl
     );
     Ok(())
 }
+
+/// Drain a query stream into the first value of the first column as f64.
+async fn first_f64(
+    mut stream: datafusion::execution::SendableRecordBatchStream,
+) -> Result<f64, BundlebaseError> {
+    use futures::StreamExt;
+    while let Some(batch) = stream.next().await {
+        let batch = batch?;
+        if batch.num_rows() == 0 {
+            continue;
+        }
+        let col = arrow::compute::cast(batch.column(batch.num_columns() - 1), &arrow::datatypes::DataType::Float64)?;
+        let arr = col
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .ok_or("expected a Float64 column")?;
+        return Ok(arr.value(0));
+    }
+    Err("query returned no rows".into())
+}
+
+/// Metric expressions reference columns by stable id, so a metric keeps
+/// evaluating after RENAME COLUMN, and listings show the *current* name.
+#[tokio::test]
+async fn test_metric_survives_rename_column() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder
+        .as_ref()
+        .execute("CREATE METRIC payroll AS 'SUM(salary)'", vec![])
+        .await?;
+    let before = first_f64(builder.compute_metric("payroll", &[], None).await?).await?;
+
+    builder
+        .as_ref()
+        .execute("RENAME COLUMN salary TO \"Annual Pay\"", vec![])
+        .await?;
+
+    let metrics = builder.metrics();
+    assert_eq!(
+        metrics[0].expression, "SUM(\"Annual Pay\")",
+        "listing must show the current user-visible column name"
+    );
+    let after = first_f64(builder.compute_metric("payroll", &[], None).await?).await?;
+    assert_eq!(before, after, "metric must still evaluate after the rename");
+
+    // And it survives commit + reopen.
+    builder.commit("rename").await?;
+    let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
+    assert_eq!(reopened.metrics()[0].expression, "SUM(\"Annual Pay\")");
+    let reopened_value =
+        first_f64(reopened.compute_metric("payroll", &[], None).await?).await?;
+    assert_eq!(before, reopened_value);
+    Ok(())
+}
+
+/// Metric expressions are planned against the bundle at definition time, so a
+/// typo'd column fails immediately instead of when an agent first uses it.
+#[tokio::test]
+async fn test_define_metric_rejects_unknown_column() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    let err = builder
+        .as_ref()
+        .execute("CREATE METRIC bad AS 'SUM(salaryy)'", vec![])
+        .await
+        .err()
+        .ok_or("unknown column must be rejected")?;
+    assert!(err.to_string().contains("salaryy"), "error names the bad column: {err}");
+
+    let err = builder
+        .as_ref()
+        .execute("CREATE METRIC bad AS 'SUM(salary'", vec![])
+        .await
+        .err()
+        .ok_or("syntax error must be rejected")?;
+    assert!(err.to_string().contains("bad"), "error names the metric: {err}");
+    assert!(builder.metrics().is_empty(), "a rejected metric is not recorded");
+    Ok(())
+}
+
+/// Column descriptions are keyed by ColumnId, so they follow the column
+/// through RENAME COLUMN.
+#[tokio::test]
+async fn test_column_description_survives_rename() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder.describe_column("salary", "annual gross pay").await?;
+    builder.rename_column("salary", "pay").await?;
+
+    let by_name = builder.column_descriptions_by_name();
+    assert_eq!(by_name.get("pay").map(|s| s.as_str()), Some("annual gross pay"));
+    assert!(!by_name.contains_key("salary"));
+    Ok(())
+}
+
+/// DROP METRIC is reachable from the Rust builder API, not just SQL.
+#[tokio::test]
+async fn test_drop_metric_builder_method() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .define_metric("headcount", "COUNT(*)", None)
+        .await?
+        .drop_metric("headcount")
+        .await?;
+    assert!(builder.metrics().is_empty());
+    Ok(())
+}
+
+/// compute_metric groups by dimensions and validates them.
+#[tokio::test]
+async fn test_compute_metric_grouped_and_errors() -> Result<(), BundlebaseError> {
+    use futures::StreamExt;
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder.define_metric("headcount", "COUNT(*)", None).await?;
+
+    let mut stream = builder
+        .compute_metric("headcount", &["gender".to_string()], Some(50))
+        .await?;
+    let mut rows = 0;
+    while let Some(b) = stream.next().await {
+        let b = b?;
+        assert!(b.schema().field_with_name("gender").is_ok());
+        assert!(b.schema().field_with_name("headcount").is_ok());
+        rows += b.num_rows();
+    }
+    assert!(rows >= 2, "grouping by gender yields several groups");
+
+    let err = builder
+        .compute_metric("nope", &[], None)
+        .await
+        .err()
+        .ok_or("unknown metric must error")?;
+    assert!(err.to_string().contains("headcount"), "lists available: {err}");
+
+    let err = builder
+        .compute_metric("headcount", &["not_a_col".to_string()], None)
+        .await
+        .err()
+        .ok_or("unknown dimension must error")?;
+    assert!(err.to_string().contains("not_a_col"), "{err}");
+    Ok(())
+}
+
+/// data_quality only skips the empty-bundle sentinel, never a real column
+/// that happens to be named `no_data`.
+#[tokio::test]
+async fn test_data_quality_keeps_real_no_data_column() -> Result<(), BundlebaseError> {
+    common::init_catalog();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    let empty = builder.data_quality().await?;
+    assert_eq!(empty.total_rows, 0);
+    assert!(empty.columns.is_empty(), "the empty-bundle sentinel is skipped");
+
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder.rename_column("gender", "no_data").await?;
+    let report = builder.data_quality().await?;
+    assert!(report.total_rows > 0);
+    let col = report
+        .columns
+        .iter()
+        .find(|c| c.name == "no_data")
+        .ok_or("a real column named no_data must be reported")?;
+    assert!(col.distinct >= 2);
+    Ok(())
+}

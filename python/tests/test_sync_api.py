@@ -123,6 +123,19 @@ class TestSyncOperations:
         assert "describeColumn" in op_types
         assert "defineMetric" in op_types
 
+    def test_sync_semantic_layer_read_accessors(self):
+        """The sync API exposes semantic-layer reads and drop_metric."""
+        c = bb.create(random_bundle())
+        c.attach(datafile("userdata.parquet"))
+        c.describe_column("salary", "annual gross pay")
+        c.define_metric("headcount", "COUNT(*)")
+        c.define_metric("tmp", "COUNT(*)").drop_metric("tmp")
+
+        assert [m["name"] for m in c.metrics()] == ["headcount"]
+        assert c.column_descriptions() == {"salary": "annual gross pay"}
+        assert c.compute_metric("headcount").to_pandas()["headcount"].iloc[0] == 1000
+        assert c.data_quality()["total_rows"] == 1000
+
 
 class TestSyncChaining:
     """Test fluent method chaining in synchronous mode."""

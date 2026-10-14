@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use crate::builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand,
-    CreateReportCommand, CreateSourceCommand, DefineMetricCommand, DeleteCommand,
+    CreateReportCommand, CreateSourceCommand, DefineMetricCommand, DeleteCommand, DropMetricCommand,
     DescribeColumnCommand, DetachBlockCommand,
     DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropColumnCommand, DropConnectorCommand,
     DropFunctionCommand, DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand,
@@ -262,6 +262,9 @@ pub trait BundleBuilderExt {
         expression: &str,
         description: Option<&str>,
     ) -> Result<&Self, BundlebaseError>;
+
+    /// Remove a named metric. Dropping a name that was never defined is a no-op.
+    async fn drop_metric(&self, name: &str) -> Result<&Self, BundlebaseError>;
 
     /// Save a configuration value to the bundle manifest.
     async fn save_config(
@@ -646,6 +649,11 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
+    async fn drop_metric(&self, name: &str) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, DropMetricCommand::new(name)).await?;
+        Ok(self)
+    }
+
     async fn save_config(
         &self,
         scope: &Scope,
@@ -925,6 +933,11 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         description: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         (**self).define_metric(name, expression, description).await?;
+        Ok(self)
+    }
+
+    async fn drop_metric(&self, name: &str) -> Result<&Self, BundlebaseError> {
+        (**self).drop_metric(name).await?;
         Ok(self)
     }
     async fn save_config(

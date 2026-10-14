@@ -46,6 +46,8 @@ Attach a description to any column. A later `DESCRIBE COLUMN` on the same column
 
 A metric is a named, reusable aggregate expression — a *measure*. Unlike a view (a whole query), a metric is a single expression meant to be composed with different dimensions: group it by region this time, by month the next. A later `CREATE METRIC` with the same name replaces the earlier one.
 
+The expression is checked against the bundle when you define it, so a misspelled column fails right away rather than the first time someone uses the metric. Column references follow the columns themselves: if you later `RENAME COLUMN amount TO total`, the metric keeps working and is listed as `SUM(total)`. Column descriptions follow renames the same way.
+
 === "SQL"
 
     ```sql
@@ -59,15 +61,40 @@ A metric is a named, reusable aggregate expression — a *measure*. Unlike a vie
 
     ```python
     c = await c.define_metric("total_revenue", "SUM(amount)", "gross revenue in USD")
+    c = await c.drop_metric("avg_order_value")
     ```
 
 === "Sync API"
 
     ```python
     c.define_metric("total_revenue", "SUM(amount)", "gross revenue in USD")
+    c.drop_metric("avg_order_value")
     ```
 
 ## How consumers see it
+
+**Python.** Any bundle, opened or being built, exposes the definitions and can evaluate them:
+
+=== "Async API"
+
+    ```python
+    bundle.metrics()              # [{"name": "total_revenue", "expression": "SUM(amount)", "description": ...}]
+    bundle.column_descriptions()  # {"amount": "order total in USD, net of refunds", ...}
+
+    result = await bundle.compute_metric("total_revenue", ["region"])
+    df = await result.to_pandas()
+
+    report = await bundle.data_quality()  # per-column null/distinct counts, suggested casts
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.metrics()
+    bundle.column_descriptions()
+    df = bundle.compute_metric("total_revenue", ["region"]).to_pandas()
+    report = bundle.data_quality()
+    ```
 
 **AI assistants (MCP).** The `describe` tool returns the schema *with* column descriptions, plus the list of metrics — so the assistant knows what the data is before it writes any SQL. The `metric` tool then computes a metric by name, using the bundle author's definition rather than one the assistant invented:
 
