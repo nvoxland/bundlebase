@@ -10,6 +10,13 @@ Bundlebase uses a versioned manifest system for persistence:
 - Example: `00001abc123def456.yaml` (version 1), `00042xyz789abc123.yaml` (version 42)
 - Init commit: `00000000000000000.yaml` (created when the bundle is created)
 
+**Numbering and replay order:**
+- `commit()` lists `_bundlebase/` at write time and uses `max(highest listed number, highest number this session loaded or wrote) + 1`. The in-memory term covers a listing that lags the session's own writes on an eventually-consistent store. The upgrade path uses the same helper (`commit::next_manifest_version`).
+- Concurrent writers can produce the same number. That is expected: the hash suffix keeps the names distinct, and there is no compare-and-swap step on any backend.
+- Replay order is the lexicographic order of the full filename (`commit::list_manifest_files`). The zero-padded number sorts first and the hash breaks ties, so every backend replays the same set of files in the same order.
+- Only files directly in `_bundlebase/` are commits. The init file and anything in a subdirectory are skipped.
+- Known limit: the five-digit prefix stops sorting correctly after 99999 commits to one directory.
+
 **Init commit structure** (`00000000000000000.yaml`):
 ```yaml
 id: 4f8a1c2e-...        # Bundle UUID (only when creating, not extending)

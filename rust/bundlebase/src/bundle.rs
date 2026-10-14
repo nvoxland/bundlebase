@@ -563,39 +563,13 @@ impl Bundle {
             .as_deref()
             .map(bundlebase_common::parse_format_version);
 
-        // List files in the manifest directory
-        let manifest_files = manifest_dir.list_files().await?;
-
-        // Filter out init file AND files from subdirectories (like view_* directories)
-        // We only want files directly in the manifest directory
-        let manifest_dir_url_str = manifest_dir.url().to_string();
-        let manifest_files = manifest_files
-            .iter()
-            .filter(|x| {
-                let file_url = x.url.to_string();
-                // File should start with manifest dir URL
-                if !file_url.starts_with(&manifest_dir_url_str) {
-                    return false;
-                }
-                // Get the path after the manifest dir
-                let relative_path = &file_url[manifest_dir_url_str.len()..];
-                // Skip init file
-                if x.filename() == Some(INIT_FILENAME) {
-                    return false;
-                }
-                // Only include files directly in manifest dir (no "/" in relative path except leading one)
-                !relative_path.trim_start_matches('/').contains('/')
-            })
-            .collect::<Vec<_>>();
+        // Manifests directly in the manifest dir, in replay order. Subdirectories
+        // (such as view_* directories) are skipped.
+        let manifest_files = commit::list_manifest_files(manifest_dir.as_ref()).await?;
 
         if manifest_files.is_empty() {
             return Err(format!("No data bundle in: {}", url).into());
         }
-
-        // Sort manifest files by version to ensure commits are loaded in chronological order
-        // ObjectStore.list() does not guarantee any particular ordering
-        let mut manifest_files = manifest_files.into_iter().cloned().collect::<Vec<_>>();
-        manifest_files.sort_by_key(|f| manifest_version(f.filename().unwrap_or("")));
 
         // Check format version compatibility before deserializing operations.
         // This uses raw YAML scanning so that unknown operation types from newer

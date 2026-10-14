@@ -3,6 +3,8 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 use crate::bundle::operation::{AnyOperation, BundleChange};
+use crate::bundle::INIT_FILENAME;
+use crate::io::{FileInfo, IOReadDir};
 use crate::BundlebaseError;
 use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
 use bundlebase_common::impl_dyn_command_response;
@@ -108,6 +110,55 @@ pub fn manifest_version(filename: &str) -> u32 {
     }
 
     filename[0..5].parse::<u32>().unwrap_or(1) // Default to version 1 if parsing fails
+}
+
+/// Lists the commit manifests in `manifest_dir`, in replay order.
+///
+/// Only files directly in the directory count; the init file and anything in a
+/// subdirectory are skipped. Concurrent writers can produce the same manifest
+/// number, so the order is the full filename: the zero-padded number first,
+/// then the hash breaking ties identically on every backend.
+pub(crate) async fn list_manifest_files(
+    manifest_dir: &dyn IOReadDir,
+) -> Result<Vec<FileInfo>, BundlebaseError> {
+    let dir_url = manifest_dir.url().to_string();
+    let mut files = manifest_dir
+        .list_files()
+        .await?
+        .into_iter()
+        .filter(|f| {
+            let Some(relative) = f.url.as_str().strip_prefix(&dir_url) else {
+                return false;
+            };
+            f.filename() != Some(INIT_FILENAME) && !relative.trim_start_matches('/').contains('/')
+        })
+        .collect::<Vec<_>>();
+    sort_manifest_files(&mut files);
+    Ok(files)
+}
+
+/// Sorts manifests into replay order by full filename. See [`list_manifest_files`].
+pub(crate) fn sort_manifest_files(files: &mut [FileInfo]) {
+    files.sort_by(|a, b| a.filename().unwrap_or("").cmp(b.filename().unwrap_or("")));
+}
+
+/// The number for the next manifest written to `manifest_dir`.
+///
+/// Taken from a fresh listing so a commit lands after commits other writers
+/// made since this session opened. `last_known` is the highest number this
+/// session has loaded or written; it covers a listing that lags behind the
+/// session's own writes on an eventually-consistent store.
+pub(crate) async fn next_manifest_version(
+    manifest_dir: &dyn IOReadDir,
+    last_known: u32,
+) -> Result<u32, BundlebaseError> {
+    let listed = list_manifest_files(manifest_dir)
+        .await?
+        .iter()
+        .map(|f| manifest_version(f.filename().unwrap_or("")))
+        .max()
+        .unwrap_or(0);
+    Ok(listed.max(last_known) + 1)
 }
 
 #[cfg(test)]

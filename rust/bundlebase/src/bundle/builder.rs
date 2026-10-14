@@ -454,18 +454,7 @@ impl BundleBuilder {
             return Err(format!("No bundle found at '{}'", path).into());
         }
 
-        // Find the latest manifest version
-        let manifest_files = manifest_dir.list_files().await?;
-        let last_version = manifest_files
-            .iter()
-            .filter(|f| f.filename() != Some(INIT_FILENAME))
-            .filter_map(|f| f.filename())
-            .filter(|name| !name.contains('/'))
-            .map(|name| commit::manifest_version(name))
-            .max()
-            .unwrap_or(0);
-
-        let next_version = last_version + 1;
+        let next_version = commit::next_manifest_version(manifest_dir.as_ref(), 0).await?;
         let version = bundlebase_common::format_version_string();
         let desc = format!("Upgrade bundle format to {}", version);
 
@@ -604,8 +593,10 @@ impl BundleBuilder {
             write_yaml(init_file.as_ref(), &init_commit).await?;
         };
 
-        // Calculate next version number
-        let next_version = last_manifest_version + 1;
+        // Number this commit after every manifest now in the directory, including
+        // ones other writers committed since this session opened.
+        let next_version =
+            commit::next_manifest_version(manifest_dir.as_ref(), last_manifest_version).await?;
 
         // Get current timestamp in UTC ISO format
         let now = std::time::SystemTime::now();
@@ -2245,6 +2236,7 @@ impl BundleFacade for BundleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle::commit::{list_manifest_files, sort_manifest_files};
     use crate::io::IOReadFile;
 
     #[tokio::test]
@@ -2754,5 +2746,187 @@ mod tests {
             "no_data",
             "schema must be restored to the empty-bundle sentinel"
         );
+    }
+
+    /// IOReadWriteDir wrapper whose listings come back empty, mimicking an
+    /// eventually-consistent store that has not caught up with recent writes.
+    #[derive(Debug)]
+    struct EmptyListingDir {
+        inner: Arc<dyn IOReadWriteDir>,
+    }
+
+    #[async_trait]
+    impl crate::io::IOReadDir for EmptyListingDir {
+        fn url(&self) -> &Url {
+            self.inner.url()
+        }
+
+        async fn list_files(&self) -> Result<Vec<crate::io::FileInfo>, BundlebaseError> {
+            Ok(vec![])
+        }
+
+        fn subdir(&self, name: &str) -> Result<Box<dyn crate::io::IOReadDir>, BundlebaseError> {
+            self.inner.subdir(name)
+        }
+
+        fn file(&self, name: &str) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
+            self.inner.file(name)
+        }
+    }
+
+    #[async_trait]
+    impl IOReadWriteDir for EmptyListingDir {
+        fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+            Ok(Box::new(EmptyListingDir {
+                inner: Arc::from(self.inner.writable_subdir(name)?),
+            }))
+        }
+
+        fn writable_file(
+            &self,
+            name: &str,
+        ) -> Result<Box<dyn crate::io::IOReadWriteFile>, BundlebaseError> {
+            self.inner.writable_file(name)
+        }
+
+        async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError> {
+            self.inner.rename(from, to).await
+        }
+    }
+
+    async fn set_name_change(builder: &BundleBuilder, name: &str) {
+        use crate::bundle::operation::SetNameOp;
+        let name = name.to_string();
+        builder
+            .do_change("set name", move |b| {
+                Box::pin(async move { b.apply_operation(SetNameOp::setup(&name).into()).await })
+            })
+            .await
+            .unwrap();
+    }
+
+    /// Manifest numbers present directly in `_bundlebase/`, sorted.
+    async fn manifest_numbers(dir: &dyn IOReadWriteDir) -> Vec<u32> {
+        let meta = dir.writable_subdir(META_DIR).unwrap();
+        let mut numbers = list_manifest_files(meta.as_ref())
+            .await
+            .unwrap()
+            .iter()
+            .map(|f| commit::manifest_version(f.filename().unwrap_or("")))
+            .collect::<Vec<_>>();
+        numbers.sort();
+        numbers
+    }
+
+    #[tokio::test]
+    async fn test_commit_counter_matches_written_manifest() {
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        set_name_change(&builder, "one").await;
+        builder.commit("one").await.unwrap();
+        set_name_change(&builder, "two").await;
+        builder.commit("two").await.unwrap();
+
+        let numbers = manifest_numbers(builder.bundle.data_dir().as_ref()).await;
+        assert_eq!(numbers, vec![1, 2]);
+        assert_eq!(*builder.bundle.last_manifest_version.read(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_commit_falls_back_to_counter_when_listing_lags() {
+        use crate::test_utils::empty_bundle;
+
+        let builder = empty_bundle().await;
+        set_name_change(&builder, "one").await;
+        builder.commit("one").await.unwrap();
+        set_name_change(&builder, "two").await;
+        builder.commit("two").await.unwrap();
+
+        // The store forgets everything it just listed; the session's own
+        // counter must still keep the next number above its own commits.
+        let real_dir = builder.bundle.data_dir();
+        *builder.bundle.data_dir.write() = Arc::new(EmptyListingDir {
+            inner: Arc::clone(&real_dir),
+        });
+        set_name_change(&builder, "three").await;
+        builder.commit("three").await.unwrap();
+
+        assert_eq!(*builder.bundle.last_manifest_version.read(), 3);
+        assert_eq!(manifest_numbers(real_dir.as_ref()).await, vec![1, 2, 3]);
+    }
+
+    /// Files in subdirectories of `_bundlebase/` (such as future checkpoints)
+    /// are not commits and must not push up the next number, on either the
+    /// commit path or the upgrade path.
+    #[tokio::test]
+    async fn test_next_number_ignores_nested_files() {
+        use crate::test_utils::{random_memory_url, test_config};
+
+        let url = random_memory_url().to_string();
+        let builder = BundleBuilder::create(&url, None).await.unwrap();
+        set_name_change(&builder, "one").await;
+        builder.commit("one").await.unwrap();
+
+        let data_dir = writable_dir_from_str(&url, test_config()).await.unwrap();
+        data_dir
+            .writable_subdir(META_DIR)
+            .unwrap()
+            .writable_subdir("checkpoints")
+            .unwrap()
+            .writable_file("00009aaaaaaaaaaaa.yaml")
+            .unwrap()
+            .write(bytes::Bytes::from_static(b"not a commit\n"))
+            .await
+            .unwrap();
+
+        set_name_change(&builder, "two").await;
+        builder.commit("two").await.unwrap();
+        assert_eq!(manifest_numbers(data_dir.as_ref()).await, vec![1, 2]);
+
+        BundleBuilder::upgrade_bundle(&url, None).await.unwrap();
+        assert_eq!(manifest_numbers(data_dir.as_ref()).await, vec![1, 2, 3]);
+    }
+
+    /// Replay order is the full filename, so manifests sharing a number are
+    /// ordered by their hash no matter what order the store lists them in.
+    #[test]
+    fn test_sort_manifest_files_uses_full_filename() {
+        use crate::io::FileInfo;
+
+        let names = [
+            "00002ffffffffffff.yaml",
+            "00001aaaaaaaaaaaa.yaml",
+            "00002000000000000.yaml",
+            "00010bbbbbbbbbbbb.yaml",
+        ];
+        let mut files = names
+            .iter()
+            .map(|n| FileInfo::new(Url::parse(&format!("memory:///b/_bundlebase/{n}")).unwrap()))
+            .collect::<Vec<_>>();
+        sort_manifest_files(&mut files);
+        let sorted = files
+            .iter()
+            .map(|f| f.filename().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sorted,
+            vec![
+                "00001aaaaaaaaaaaa.yaml",
+                "00002000000000000.yaml",
+                "00002ffffffffffff.yaml",
+                "00010bbbbbbbbbbbb.yaml",
+            ]
+        );
+    }
+
+    /// Documents the current limit: the five-digit prefix stops sorting
+    /// correctly after 99999 commits to one directory.
+    #[test]
+    #[ignore = "known limit: manifest numbers above 99999 no longer sort by name"]
+    fn test_manifest_number_limit() {
+        let last = format!("{:05}{}.yaml", 99999, "aaaaaaaaaaaa");
+        let next = format!("{:05}{}.yaml", 100000, "aaaaaaaaaaaa");
+        assert!(next > last, "{next} should sort after {last}");
     }
 }

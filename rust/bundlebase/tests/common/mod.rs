@@ -11,7 +11,7 @@ pub fn init_catalog() {
         bundlebase_catalog::init();
     });
 }
-use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
+use bundlebase::bundle::{BundleCommit, INIT_FILENAME};
 use bundlebase::BundleConfig;
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
@@ -41,7 +41,8 @@ pub async fn latest_commit(
         .filter(|x| x.filename() != Some(INIT_FILENAME))
         .collect::<Vec<_>>();
 
-    files.sort_by_key(|f| manifest_version(f.filename().unwrap_or("")));
+    // Replay order: full filename (zero-padded number, then hash).
+    files.sort_by_key(|f| f.filename().unwrap_or("").to_string());
 
     let last_file = files.iter().last();
 
