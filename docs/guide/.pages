@@ -1,3 +1,31 @@
 nav:
-  - attaching.md
-  - ...
+  - Building bundles:
+    - attaching.md
+    - sources.md
+    - columns.md
+    - filtering.md
+    - joins.md
+    - views.md
+    - extending.md
+    - querying.md
+  - Meaning and history:
+    - semantic-model.md
+    - metadata.md
+    - versioning.md
+    - bundle-format.md
+  - Agents and tools:
+    - cli-mcp.md
+    - cli-repl.md
+    - jupyter.md
+  - Operating:
+    - configuration.md
+    - performance.md
+    - logging.md
+  - Advanced:
+    - cli-serve.md
+    - git-integration.md
+    - Custom Connectors: custom-connectors
+    - functions.md
+    - indexing.md
+    - text-search.md
+    - reports.md

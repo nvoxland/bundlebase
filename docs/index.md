@@ -42,7 +42,22 @@ The agent calls `describe` once and gets the schema with those descriptions, the
 
 A bundle will also refuse to answer wrongly. CSV and JSONL columns import as text, so `data_quality` reports which of them actually hold numbers or dates and what to cast them to. And comparing a text column against a number is rejected rather than compared as strings — the failure where `WHERE amount > 50` quietly matches `"9"` and drops `"100"`.
 
-[The agent use case ->](use-cases/llm-agent.md) · [Semantic layer ->](guide/semantic-layer.md)
+[The agent use case ->](use-cases/llm-agent.md) · [Semantic model ->](guide/semantic-model.md)
+
+## Receipts for every number
+
+An answer is only as good as the data behind it. A bundle records where every row came from and everything that has happened to it since, so any number can be traced back.
+
+```sql
+SHOW HISTORY;        -- every commit: who, when, why, and the exact operations
+SELECT source_locations, source_versions, num_rows
+  FROM bundle_info.blocks;   -- the source files and versions behind fetched data
+VERIFY DATA;         -- confirm attached files still match the checksums recorded at attach
+```
+
+An agent gets the same record from `describe` and `history` over MCP. Ask it where a number came from and it can name the files, the commits that changed them, and the definition it used. Deletes and updates are recorded as changes with the `WHERE` clause that produced them, never as silent rewrites.
+
+The record is plain files in the bundle directory: YAML manifests and Parquet data, with no catalog service to keep running. [What a bundle looks like on disk ->](guide/bundle-format.md)
 
 ## Agents keep their context between sessions
 
@@ -115,7 +130,7 @@ Email a CSV and it's stale by Friday. Re-run the pipeline yourself, every time. 
 
 Commit once. Share the path. The consumer gets a DataFrame, a SQL connection, or a CLI session, whichever they prefer. The commit history *is* the changelog. No "which file is the latest?" conversations.
 
-[What makes a bundle different from a Parquet file ->](getting-started/why-bundlebase.md)
+[Sharing a dataset ->](use-cases/sharing-datasets.md) · [What makes a bundle different from a Parquet file ->](getting-started/why-bundlebase.md)
 
 ## Data hygiene rules that travel with the bundle
 
@@ -148,7 +163,7 @@ Your source data is dirty. You clean it every time, until you forget. `always_de
 
 No shared cleanup script. No "oops, I forgot the filter" incidents.
 
-[See the ETL use case ->](getting-started/why-bundlebase.md#persistent-pipeline-rules)
+[See the scheduled collection use case ->](use-cases/scheduled-collection.md)
 
 ## How it works
 
@@ -180,8 +195,7 @@ flowchart LR
 | **BI tools** | Metabase · DBeaver · R · Julia · Go -- anything with an Arrow Flight driver or native Arrow Flight support. Column descriptions travel as Arrow field metadata |
 | **Storage** | S3 · GCS · Azure Blob · local paths |
 | **Formats** | Parquet · CSV · JSONL (newline-delimited JSON) -- mixed sources union automatically; other JSON shapes via [connectors](guide/sources.md#json-options) |
-| **Custom connectors** | Pull from any source (Salesforce, internal APIs, custom databases) by writing a connector in Python, Go, Java, or any IPC-compatible language |
-| **Custom SQL functions** | Register Python callables as scalar or aggregate UDFs and call them directly in SQL queries |
+| **Extending** | [Custom connectors](guide/custom-connectors/index.md) for sources with no built-in support, and [custom SQL functions](guide/functions.md) |
 | **SQL** | Full Apache DataFusion syntax -- `SELECT * FROM bundle WHERE ...` |
 | **Scale** | Streaming execution -- datasets larger than RAM, constant memory |
 | **Core** | Rust + Apache Arrow -- columnar, fast |
@@ -189,6 +203,6 @@ flowchart LR
 ## Get started
 
 1. [Set up an AI assistant](use-cases/llm-agent.md) -- run `bundlebase setup-agent`, then ask questions about a bundle
-2. [Why Bundlebase?](getting-started/why-bundlebase.md) -- comparisons to DVC, Delta Lake, plain files, databases
+2. [Why Bundlebase?](getting-started/why-bundlebase.md) -- comparisons to plain files, DVC, and Delta Lake / Iceberg
 3. [Python](getting-started/python/install.md) -- pip install, then build your first bundle
 4. [CLI](getting-started/cli/install.md) -- download the binary, query interactively

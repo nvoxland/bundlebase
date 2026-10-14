@@ -1,6 +1,6 @@
 # Bundlebase
 
-> Docker for data — a versioned, self-describing bundle an AI agent can query correctly over MCP.
+> A versioned, self-describing dataset an AI agent can query correctly over MCP, with every number traceable to its source.
 
 Bundlebase packages data files (CSV, Parquet, JSONL) from any source (local, S3, HTTP, SFTP) into versioned bundles with a built-in SQL query engine, persistent data hygiene rules, custom connectors, custom SQL functions, and Python/CLI/MCP interfaces.
 
@@ -8,10 +8,12 @@ A bundle is self-describing: it carries its schema, what each column *means* (`D
 
 ## Docs
 
-- [Why Bundlebase?](https://nvoxland.github.io/bundlebase/getting-started/why-bundlebase/): Comparisons to DVC, Delta Lake, plain files, databases
+- [Why Bundlebase?](https://nvoxland.github.io/bundlebase/getting-started/why-bundlebase/): Comparisons to plain files, DVC, Delta Lake, and Iceberg
 - [Python Quick Start](https://nvoxland.github.io/bundlebase/getting-started/python/quick-start/): Create a bundle, attach data, query with SQL
 - [CLI Quick Start](https://nvoxland.github.io/bundlebase/getting-started/cli/quick-start/): Interactive REPL usage
 - [Basic Concepts](https://nvoxland.github.io/bundlebase/getting-started/basic-concepts/): Read-only vs mutable, lazy evaluation, sources, versioning
+- [Semantic Model](https://nvoxland.github.io/bundlebase/guide/semantic-model/): Column descriptions and named metrics
+- [Bundle Format](https://nvoxland.github.io/bundlebase/guide/bundle-format/): What a bundle looks like on disk
 - [SQL Reference](https://nvoxland.github.io/bundlebase/sql-reference/): Full command syntax
 - [Python API — Sync](https://nvoxland.github.io/bundlebase/api/python/sync-api/): Full sync API reference
 - [Python API — Async](https://nvoxland.github.io/bundlebase/api/python/async-api/): Full async API reference
@@ -22,7 +24,7 @@ A bundle is self-describing: it carries its schema, what each column *means* (`D
 - [Custom Connectors](https://nvoxland.github.io/bundlebase/guide/custom-connectors/): Python, Go, Java, native connector SDK
 - [Custom Functions](https://nvoxland.github.io/bundlebase/guide/functions/): Scalar and aggregate UDFs
 - [Examples](https://nvoxland.github.io/bundlebase/examples/): Copy-paste examples by task
-- [Use Cases](https://nvoxland.github.io/bundlebase/use-cases/): End-to-end scenarios by role
+- [Use Cases](https://nvoxland.github.io/bundlebase/use-cases/): Agents that answer correctly, agent workspaces, sharing a dataset, scheduled collection
 
 ## Quick Reference
 
@@ -147,7 +149,7 @@ ADD COLUMN <name> AS <expr>
 CREATE VIEW <name> AS <sql>
 DROP VIEW <name>
 
--- Semantic layer (travels in the bundle; surfaced to AI agents and BI tools)
+-- Semantic model (travels in the bundle; surfaced to AI agents and BI tools)
 DESCRIBE COLUMN <name> AS '<what the column means>'
 CREATE METRIC <name> AS '<expression>' [DESCRIPTION '<text>']
 DROP METRIC <name>

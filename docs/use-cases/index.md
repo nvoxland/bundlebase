@@ -1,20 +1,18 @@
 ---
 title: Use Cases — Bundlebase
-description: "Role-based use cases for Bundlebase: AI agents and assistants, data scientists, backend developers, data engineers, and analysts. Real-world scenarios end to end."
-seo_title: "Bundlebase Use Cases: AI Agents, Analysts, and Data Teams"
+description: "Four ways people use Bundlebase: agents that answer correctly, agent workspaces that persist across sessions, sharing a dataset without a database, and scheduled collection with an audit trail."
+seo_title: "Bundlebase Use Cases: AI Agents, Shared Datasets, and Scheduled Collection"
 ---
 
 # Use Cases
 
-Each use case covers a realistic scenario end-to-end — not just the syntax, but the thinking behind why each step matters.
+Each use case walks through a realistic scenario end to end, including why each step matters.
 
-Bundlebase is built first for AI agents. A bundle carries what its data means, so an agent's SQL reflects the data instead of a guess about it. Everything that gives an agent — the schema, the column meanings, the metric definitions, the provenance, the history — is the same thing it gives a person.
+They share one idea. A bundle carries its data together with what the data means and how it got that way: column meanings, metric definitions, the source of every file, and every change since. An agent needs that context because it cannot ask you. A person needs it for the same reason six months later.
 
-| Use Case | For you if... |
+| Use case | For you if... |
 |----------|---------------|
-| [AI Agents & Assistants](llm-agent.md) | You want an agent to explore, query, and update a bundle — and get the numbers right |
-| [Data Scientist](data-scientist.md) | You're cleaning and sharing research datasets with a team |
-| [Backend Developer](backend-developer.md) | Your service has data that analysts keep asking you to export |
-| [Data Engineer](data-engineer.md) | You're automating regular data pulls from multiple sources |
-| [ETL / Periodic Collection](etl-developer.md) | You pull from SFTP, S3, or APIs on a schedule and want downstream consumers insulated from upstream changes |
-| [Analyst](analyst.md) | You want to query shared datasets and generate reports without a database |
+| [Agents That Answer Correctly](llm-agent.md) | You want an AI assistant to query your data and get numbers you can trace back to the source |
+| [Agent Workspaces](agent-workspace.md) | You are building an agent that collects data over many sessions and needs to remember what it has |
+| [Sharing a Dataset](sharing-datasets.md) | You prepare data for other people, or you analyze data someone else prepared |
+| [Scheduled Collection](scheduled-collection.md) | You pull from SFTP, S3, APIs, or databases on a schedule and want every run on record |

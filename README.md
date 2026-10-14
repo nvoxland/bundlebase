@@ -1,6 +1,6 @@
 # Bundlebase
 
-Like Docker, but for data — and built so an AI agent can query it correctly.
+A versioned dataset that carries its own context, so an AI agent can query it correctly and every number can be traced back to its source.
 
 Hand an agent a CSV and it writes SQL that looks right. A schema says a column is called `amt` and holds a number; it doesn't say the value is net of refunds, or what your company means by "revenue". A bundle carries that context with the data: what each column means, how your metrics are defined, where every row came from, and every transformation applied. Serve it over MCP and an agent reads all of it in one call.
 
@@ -12,13 +12,14 @@ The same bundle works for people — Python, the CLI, or any BI tool over Arrow 
 
 ## Features
 
+- **Provenance**: Every commit records who changed what, when, and how. Every attached file keeps its source and checksum, so any number can be traced back
+- **Semantic model**: Column descriptions and named metrics travel in the bundle, so everyone (and every agent) computes a number the same way
 - **Agent-native**: MCP server with `describe`, `analyze`, `data_quality`, and `metric` tools. `bundlebase setup-agent` writes the config
-- **Semantic layer**: Column descriptions and named metrics travel in the bundle, so everyone (and every agent) computes a number the same way
-- **Self-describing**: Schema, provenance, transformation record, and commit history live with the data
-- **Version Control**: Built-in commit system for data pipeline versioning
-- **Multiple Formats**: Parquet, CSV, JSONL, and more, from local files, S3, HTTP, or SFTP
-- **Python Native**: Async and sync APIs with type hints
-- **High Performance**: Rust core with Apache Arrow columnar format, streaming execution
+- **Version history**: Commit, undo, and reset. History is append-only and never rewritten
+- **Zero infrastructure**: A bundle is a directory of YAML manifests and Parquet files, on local disk, S3, GCS, or Azure. No server, no catalog
+- **Works with your tools**: Python (pandas, polars, pyarrow), a CLI, and BI tools over Arrow Flight SQL
+- **Many sources**: Parquet, CSV, and JSONL from local files, S3, HTTP, SFTP, FTP, Kaggle, or PostgreSQL
+- **Streaming**: Rust core on Apache Arrow and DataFusion. Datasets larger than RAM, constant memory
 
 ## Installation
 

@@ -1,8 +1,6 @@
 nav:
   - Overview: index.md
-  - AI Agents & Assistants: llm-agent.md
-  - Data Scientist: data-scientist.md
-  - Backend Developer: backend-developer.md
-  - Data Engineer: data-engineer.md
-  - ETL / Periodic Collection: etl-developer.md
-  - Analyst: analyst.md
+  - Agents That Answer Correctly: llm-agent.md
+  - Agent Workspaces: agent-workspace.md
+  - Sharing a Dataset: sharing-datasets.md
+  - Scheduled Collection: scheduled-collection.md

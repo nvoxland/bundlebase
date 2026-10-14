@@ -1,15 +1,17 @@
 ---
-seo_title: "Semantic Layer: Column Descriptions and Named Metrics for AI Agents - Bundlebase"
+seo_title: "Semantic Model: Column Descriptions and Named Metrics That Travel With the Data - Bundlebase"
 ---
 
-# Semantic Layer
+# Semantic Model
 
-A bundle can carry what its data *means*, not just its shape. Two things make up the semantic layer:
+A bundle can carry what its data *means*, not just its shape. Two things make up its semantic model:
 
 - **Column descriptions** — what a column actually is (`amt` is "order total in USD, net of refunds").
 - **Named metrics** — the canonical way to compute a number (`total_revenue` is `SUM(amount)`, and nothing else).
 
-Both are recorded as operations, so they travel inside the bundle, are versioned like any other change, and survive commit and reopen. Anyone who opens the bundle — a teammate, a BI tool, or an AI agent — gets the same definitions.
+Both are recorded as operations, so they travel inside the bundle, are versioned like any other change, and survive commit and reopen. Anyone who opens the bundle — a teammate, a BI tool, or an AI agent — gets the same definitions, along with the history of who set each one and when.
+
+This is not a semantic layer in the dbt or Cube sense. There is no query gateway in front of your warehouse. The definitions are stored with the data, in the same versioned directory, and go wherever the bundle goes.
 
 ## Why it matters
 

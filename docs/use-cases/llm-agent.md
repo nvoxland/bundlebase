@@ -1,12 +1,16 @@
 ---
-title: Bundlebase for AI Assistant Users — Query Bundles in Natural Language
-description: Use an AI assistant to explore, query, and update Bundlebase bundles without writing code. Set up the MCP server and your assistant gets describe, schema, history, sample, and query as native tools.
+title: Bundlebase for AI Agents — Answers You Can Trace Back to the Data
+description: Give an AI assistant a bundle over MCP and it reads what the columns mean, how the metrics are defined, and where every row came from before it writes SQL. Every answer can be traced to a source file and a commit.
 seo_title: "Bundlebase for AI Agents — Query Your Data over MCP, Correctly"
 ---
 
-# Use Case: AI Assistant User
+# Use Case: Agents That Answer Correctly
 
-You have a bundle. You want to ask questions about the data, explore it, and get answers — without writing SQL or Python yourself. Set up the MCP server once and your AI assistant (Claude, ChatGPT, or any MCP-compatible assistant) gets direct access to the bundle.
+You have a bundle. You want to ask an AI assistant questions about it and trust the numbers that come back.
+
+An assistant given a bare table writes SQL that parses and runs. Whether the result means what you asked is a separate question, and a schema can't answer it. A bundle carries the missing context: what each column means, how each metric is defined, which files every row came from, and every change made since. Over MCP the assistant reads all of it before it writes a query, and it can show you where any number came from.
+
+If the agent is the one building the data up over many sessions, see [Agent Workspaces](agent-workspace.md).
 
 ## Setup
 
@@ -153,67 +157,46 @@ Committed as v4: "April refresh"
 ```
 
 ```
-Add an index on region so regional queries are faster.
+Note that customer_tier is null for trial accounts, and define revenue as the sum of amount.
 ```
 
 ```
-Index created on 'region'. Queries filtering by region will now use the
-index instead of scanning the full dataset.
+Recorded:
+  DESCRIBE COLUMN customer_tier AS 'null for trial accounts'
+  CREATE METRIC revenue AS 'SUM(amount)'
+Committed as v5: "Document customer_tier and revenue"
+
+Any assistant or person that opens this bundle will see both.
 ```
 
-## Generating reports
+## Showing where a number came from
 
-Ask the assistant to produce a formatted PDF report from the bundle — it writes the report template and runs `bundlebase generate-report` for you:
-
-```
-Generate a PDF report on Q1 sales performance. Include a bar chart of deals by region,
-a trend line of deal size over the quarter, and a table of the top 20 deals by amount.
-Save it as q1-sales-report.pdf.
-```
+Any answer can be traced back. Ask:
 
 ```
-I'll create a report from the sales-q1 bundle. Here's what I'm generating:
-
-  - Bar chart: deal count by region
-  - Line chart: average deal size by week across Q1
-  - Table: top 20 deals by amount with account name and close date
-
-Writing report template and running bundlebase generate-report...
-
-Done. q1-sales-report.pdf saved — 3 charts, 18,423 rows of live data,
-generated at 2026-04-05 14:32.
-```
-
-You can be more specific about what you want:
-
-```
-Add a section breaking down deals by customer tier, and filter the trend chart
-to North America only. Regenerate the report.
+Where does the EMEA average come from? Which files, and has anything changed them?
 ```
 
 ```
-Updated report generated. Changes applied:
-  - Added "Deals by Customer Tier" horizontal bar chart after the region chart
-  - Trend line now filters to region = 'NA' (8,841 deals)
+The EMEA figure is AVG(amount) over 3,102 rows from three attached files:
+  exports/2026-01.csv, exports/2026-02.csv, exports/2026-03.csv
 
-q1-sales-report.pdf overwritten.
+Changes since they were attached:
+  v3 "Drop test deals" removed 47 rows WHERE amount = 0
+  amount is described as "order total in USD, net of refunds"
+
+VERIFY DATA: all three files still match the checksums recorded at attach.
 ```
 
-Reports pull live data from the bundle at generation time — if the bundle is updated next month, regenerating the report picks up the new data automatically.
+The assistant gets this from `describe` and `history`, which return the source of every attached file and every operation applied, with who committed it and when. Nothing here depends on the assistant's memory of a previous conversation. It is read from the bundle each time.
+
+## Producing a report
+
+The assistant can also write a PDF report from the bundle with `generate_report`, pulling live data at generation time. See [Reports](../guide/reports.md) for the template format.
 
 ## Session recovery
 
-If a previous session failed mid-run, the bundle is always in the last committed state — no partial data to clean up. Just ask:
-
-```
-What's the current state of the bundle? Did the last update complete?
-```
-
-```
-Bundle is at v3 (2026-04-01): "Added March data" — 18,423 rows.
-This is a clean committed state. If a previous session failed, it left no
-partial data behind.
-```
+If a previous session failed mid-run, the bundle is still at its last commit, with no partial data to clean up. [Agent Workspaces](agent-workspace.md) covers building a bundle up across many sessions.
 
 ## When to use MCP vs. the Python API
 
@@ -231,7 +214,8 @@ partial data behind.
 
 ## Next steps
 
+- [Semantic Model](../guide/semantic-model.md) — column descriptions and named metrics
+- [Agent Workspaces](agent-workspace.md) — an agent that accumulates data across sessions
 - [Python Quick Start](../getting-started/python/quick-start.md) — if you want to build bundles programmatically
-- [Reports](../guide/reports.md) — chart types and report template options
 - [SQL Reference](../sql-reference/index.md) — full SQL syntax the assistant uses under the hood
 - [Why Bundlebase?](../getting-started/why-bundlebase.md#ai-assistant-integration-mcp) — how MCP compares to other approaches

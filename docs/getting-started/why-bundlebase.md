@@ -1,12 +1,12 @@
 ---
-title: Why Bundlebase? -- DVC vs Delta Lake vs Plain Files vs Databases
-description: Honest comparison of Bundlebase against DVC, Delta Lake, Iceberg, PostgreSQL, and raw S3 files. Covers two core use cases -- data an AI agent can query correctly, and analytics dataset sharing.
-seo_title: "Why Bundlebase? DVC vs Delta Lake vs Plain Files vs Databases"
+title: Why Bundlebase? -- Compared With Plain Files, DVC, Delta Lake, and Iceberg
+description: Honest comparison of Bundlebase against raw files, DVC, Delta Lake, and Iceberg. Covers the core use cases -- data an AI agent can query correctly, and sharing a dataset without a database.
+seo_title: "Why Bundlebase? Compared With Plain Files, DVC, Delta Lake, and Iceberg"
 ---
 
 # Why Bundlebase?
 
-If you know Docker, the mental model is the same: the artifact carries its own context, opening the bundle is the pull, and consumers don't need to know how it was built, whether they're using Python, the CLI, a BI tool, or an AI agent. Whether that fits your situation is what this page covers.
+A bundle is a dataset that carries its own context: what the columns mean, how the metrics are defined, where every row came from, and every change since. It lives at a path, with no server or catalog, and anyone who opens it gets all of that, whether they use Python, the CLI, a BI tool, or an AI agent. Whether that fits your situation is what this page covers.
 
 The context an artifact carries matters most to an agent, because an agent can't ask you what a column means. It will write SQL against whatever it's given, and a schema alone is not enough to make the answer right. That's the first use case below.
 
@@ -133,7 +133,7 @@ Three specific things this enables:
 
 ### Why the agent's numbers come out right
 
-Durable context stops the agent re-fetching. It doesn't stop it guessing at what the columns mean. That's what the semantic layer is for:
+Durable context stops the agent re-fetching. It doesn't stop it guessing at what the columns mean. That's what the bundle's semantic model is for:
 
 ```sql
 DESCRIBE COLUMN amount AS 'order total in USD, net of refunds';
@@ -146,7 +146,7 @@ Both are recorded as operations, so they're versioned and travel inside the bund
 - `metric(name="total_revenue")` computes your definition, optionally grouped by dimensions. The agent asks for revenue by name instead of assembling its own aggregate.
 - `data_quality` reports which text columns actually hold numbers or dates, with a suggested cast. CSV and JSONL columns all import as text, and this is where an agent would otherwise go wrong.
 
-Bundlebase also refuses the silent failure. Comparing a text column against a number (`WHERE amount > 100` on a CSV column) is rejected rather than compared as strings — the case where `"9" > "50"` is true and the query quietly returns the wrong rows. See the [semantic layer guide](../guide/semantic-layer.md).
+Bundlebase also refuses the silent failure. Comparing a text column against a number (`WHERE amount > 100` on a CSV column) is rejected rather than compared as strings — the case where `"9" > "50"` is true and the query quietly returns the wrong rows. See the [semantic model guide](../guide/semantic-model.md).
 
 ### Session flow
 
@@ -307,7 +307,6 @@ Raw files are the right default for one-off work. The gap shows up when: the sch
 | Version history | None (or `_v2` in filename) | Built-in commits |
 | Transformation record | Separate script | Stored in manifest |
 | SQL queries | Requires separate tool | Built-in |
-| Indexing | None | Optional |
 
 **When to keep using raw files:** one-off exports, single consumer, small files, no need for history, or you control both sides of the pipeline and change nothing.
 
@@ -340,21 +339,6 @@ Delta Lake and Iceberg solve table format problems at warehouse scale: concurren
 | Setup | Significant | `pip install bundlebase` |
 
 **When to use Delta/Iceberg instead:** you're building a production data platform, you need concurrent writes from multiple processes, you're already running Spark, or your dataset is too large for a single machine.
-
-#### vs. PostgreSQL / SQLite
-
-A database is right when you need concurrent writes, long-lived operational storage, or row-level access control. For read-heavy analytical sharing, you're adding a server process, connection management, and import/export steps that Bundlebase skips entirely.
-
-| | PostgreSQL / SQLite | Bundlebase |
-|---|---|---|
-| Concurrent writes | Yes | No |
-| Server required | Yes / No (SQLite) | No |
-| Data portability | SQL dump | Single directory / S3 path |
-| Schema migrations | Yes (alembic, etc.) | No |
-| Full SQL | Yes | DataFusion SQL |
-| pandas integration | Via SQLAlchemy | Direct |
-
-**When to use a database instead:** write-heavy workloads, row-level permissions, long-running operational storage, or you're building an application backend.
 
 ---
 
@@ -490,65 +474,7 @@ Last commit: "Daily refresh -- 2026-04-03"
 
 ## Extending Bundlebase
 
-Built-in sources (S3, HTTP, SFTP, local files) and SQL cover most cases. When they don't, Bundlebase has two extension points.
-
-### Custom connectors
-
-Write a connector in Python, Go, Java, or any IPC-compatible language to attach data from sources that have no built-in support -- Salesforce, an internal database, a proprietary API. Connectors implement a simple `Discover` + `Data` interface and register as a named source:
-
-=== "Python"
-
-    ```python
-    import bundlebase.sync as bb
-
-    bundle = bb.open("s3://analytics/crm-export").extend()
-
-    # Register a Python connector (session-only)
-    bundle.import_temp_connector('acme.salesforce', 'python::salesforce_connector:SalesforceSource')
-
-    # Use it exactly like any built-in source
-    bundle.create_source('acme.salesforce', {'object': 'opportunities', 'stage': 'closed_won'})
-    bundle.commit("Q1 opportunities from Salesforce")
-    ```
-
-=== "SQL"
-
-    ```sql
-    IMPORT TEMP CONNECTOR acme.salesforce FROM 'python::salesforce_connector:SalesforceSource';
-    CREATE SOURCE USING acme.salesforce WITH (object = 'opportunities', stage = 'closed_won');
-    COMMIT 'Q1 opportunities from Salesforce';
-    ```
-
-Connectors built with non-Python runtimes (Go, Java, IPC binary) can be registered persistently -- the connector definition is stored in the bundle manifest, so anyone who opens the bundle gets it automatically.
-
-### Custom SQL functions
-
-Register Python callables as scalar or aggregate UDFs and call them from any SQL query -- `SELECT`, `FILTER`, `ALWAYS_DELETE`, wherever SQL runs:
-
-=== "Python"
-
-    ```python
-    import bundlebase.sync as bb
-
-    bundle = bb.open("s3://analytics/crm-export")
-
-    # Register a Python scalar function
-    bundle.import_temp_function('acme.risk_score', 'python::risk_model:score')
-
-    # Call it in any SQL
-    results = bundle.query(
-        "SELECT id, amount, acme.risk_score(revenue, churn_prob) AS risk FROM bundle"
-    )
-    ```
-
-=== "SQL"
-
-    ```sql
-    IMPORT TEMP FUNCTION acme.risk_score FROM 'python::risk_model:score';
-    SELECT id, amount, acme.risk_score(revenue, churn_prob) AS risk FROM bundle;
-    ```
-
-Both scalar and aggregate functions are supported. Aggregate UDFs work with `GROUP BY` and `OVER()` window clauses automatically.
+Built-in sources (S3, GCS, Azure, HTTP, SFTP, FTP, Kaggle, PostgreSQL, local files) and SQL cover most cases. When they don't, you can write a [custom connector](../guide/custom-connectors/index.md) in Python, Go, Java, or Rust, or register [custom SQL functions](../guide/functions.md).
 
 ---
 
@@ -564,7 +490,7 @@ Use this as a quick filter, not a definitive answer.
 - You want to share a versioned dataset with no infrastructure setup
 - Consumers use Python, a BI tool, the CLI, or an AI assistant -- any or all of these
 - You have recurring dirty source data that needs consistent, automatic cleanup
-- You need a custom data source or custom SQL logic -- connectors and UDFs extend both
+- You want every number traceable to a source file and a commit
 - Your dataset fits comfortably in a single directory (local or cloud)
 - SQL queries are useful but you don't need a full database
 
@@ -575,8 +501,8 @@ Use this as a quick filter, not a definitive answer.
 - You need ML experiment metrics tied to code commits -> use DVC
 - You need semantic search over unstructured text -> use a vector database
 - You need row-level access control -> use a database
-- You need a long-running operational data store with schema migrations -> use a database
+- You need a long-running operational data store, an application backend, or schema migrations -> use a database
 
 ## What Bundlebase is not
 
-Bundlebase is not a database, not a data warehouse, and not a replacement for Spark at scale. It doesn't support concurrent writes, row-level permissions, or complex schema migrations. It's a format for packaging and sharing analytical datasets and giving them a minimal identity and history. If you need something it doesn't do, the alternatives above are better choices -- and knowing that upfront saves everyone time.
+Bundlebase is not a database, not a data warehouse, not a query engine you point at your warehouse, and not a replacement for Spark at scale. It doesn't support concurrent writes, row-level permissions, or complex schema migrations. It's a format for packaging and sharing analytical datasets and giving them a minimal identity and history. If you need something it doesn't do, the alternatives above are better choices -- and knowing that upfront saves everyone time.

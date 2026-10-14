@@ -76,7 +76,7 @@ The SQL server supports the full set of Bundlebase SQL commands:
 - **Schema changes**: `JOIN`, `DROP JOIN`, `DROP COLUMN`, `RENAME COLUMN`, `CREATE VIEW`, etc.
 - **Version control**: `COMMIT`, `RESET`, `UNDO`, `VERIFY DATA`
 - **Metadata**: `SET NAME`, `SET DESCRIPTION`, `SAVE CONFIG`, `SET CONFIG`
-- **Semantic layer**: `DESCRIBE COLUMN`, `CREATE METRIC`, `DROP METRIC`
+- **Semantic model**: `DESCRIBE COLUMN`, `CREATE METRIC`, `DROP METRIC`
 - **Introspection**: `SHOW HISTORY`, `SHOW STATUS`, `SHOW CONFIG`, etc.
 - **Help**: `SYNTAX` to list all commands, `SYNTAX <command>` for detailed syntax
 - **Prepared statements**: Create, execute, and close prepared statements
