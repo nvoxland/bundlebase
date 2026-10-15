@@ -130,7 +130,7 @@ Creates a named connector. The connector definition is **persisted** into the bu
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
-    `IMPORT CONNECTOR` rejects `runtime='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for Python connectors.
+    Python connectors can be persisted when the entrypoint is a file: `python::./my_connector.py:MyConnector`. The file is copied into the bundle and runs in a subprocess, which needs `bundlebase-sdk` and `pyarrow` installed. A module-backed entrypoint (`python::my_module:MyConnector`) cannot be bundled; use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for those.
 
 Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization to prevent naming collisions when sharing bundles. For example:
 

@@ -38,7 +38,7 @@ bundle.create_source('example.connector', {})
 bundle.fetch("base", "add")
 ```
 
-The `Connector` class is identical whether you use native or IPC mode. The only difference is how you create the connector: `runtime='python'` with a `module:Class` value instead of `runtime='ipc'` with a command. Python connectors use `IMPORT TEMP CONNECTOR` since Python code is runtime-only and cannot be bundled.
+The `Connector` class is identical whether you use native or IPC mode. The only difference is how you create the connector: `runtime='python'` with a `module:Class` value instead of `runtime='ipc'` with a command. A module-backed connector (`python::module:Class`) runs in-process and cannot be bundled, so it uses `IMPORT TEMP CONNECTOR`. To persist a Python connector in the bundle, point at a file instead (`python::./my_connector.py:MyConnector`) and use `IMPORT CONNECTOR`; the file is copied into the bundle and runs in a subprocess.
 
 ### Shared Libraries (Rust, Go, Java)
 

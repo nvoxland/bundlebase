@@ -118,9 +118,14 @@ impl UdfEntrypoint for PythonRuntime {
 
     fn build_call_string(&self) -> String {
         if self.is_file_backed() {
-            // IPC harness: `python -m bundlebase_sdk._ipc_harness <script.py>`
+            // IPC harness: `python -m bundlebase_sdk._ipc_harness <script.py> --entry <name>`
             // parse_call splits on whitespace, so space-delimited is correct.
-            format!("python -m bundlebase_sdk._ipc_harness {}", self.module)
+            // `--entry` lets the harness serve a Connector subclass as a connector;
+            // for functions it is ignored and the IPC messages name the function.
+            format!(
+                "python -m bundlebase_sdk._ipc_harness {} --entry {}",
+                self.module, self.function
+            )
         } else {
             format!("python:{}:{}", self.module, self.function)
         }

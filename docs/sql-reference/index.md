@@ -612,7 +612,7 @@ For fat connectors that ship binaries for several OS/arch targets, use the **pla
 - `src = '<path-to-archive>'` -- optional path to a source archive (e.g. a zip). Copied into the bundle (content-addressed) and shared by every entry produced by this statement. Recipients can extract it with [`EXPORT SOURCE`](#export-source).
 
 !!! note
-    The `python` runtime is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
+    The `python` runtime can be persisted only when the entrypoint is a file (`python::./my_connector.py:MyConnector`); the file is copied into the bundle. A module-backed entrypoint (`python::my_module:MyConnector`) cannot be bundled; use `IMPORT TEMP CONNECTOR` for those.
 
 **Examples:**
 
@@ -628,6 +628,9 @@ IMPORT CONNECTOR example.connector FROM 'docker::myorg/example-connector:latest'
 
 -- IPC subprocess
 IMPORT CONNECTOR example.connector FROM 'ipc::./example_connector'
+
+-- Python file, copied into the bundle
+IMPORT CONNECTOR example.connector FROM 'python::./example_connector.py:ExampleConnector'
 
 -- Platform-specific
 IMPORT CONNECTOR example.connector FROM 'ffi::./libexample_connector.so' WITH (platform = 'linux/amd64')
@@ -827,7 +830,7 @@ IMPORT FUNCTION <namespace.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '
 An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runtime is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMP FUNCTION` instead.
+    The `python` runtime can be persisted only when the entrypoint is a file (`python::./script.py:func`); the file is copied into the bundle. A module-backed entrypoint (`python::my_module:func`) cannot be bundled; use `IMPORT TEMP FUNCTION` for those.
 
 **Scalar function examples:**
 

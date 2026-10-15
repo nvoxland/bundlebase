@@ -5,6 +5,7 @@ versioning, and persistence. Source creation and data querying tests
 live in test_source.py.
 """
 
+import os
 import tempfile
 
 import pytest
@@ -88,6 +89,44 @@ async def test_import_connector_rejects_python_calls():
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     with pytest.raises(ValueError, match="'python' runtime cannot be bundled"):
         await c.import_connector("test.my_source", "python::test_function_helpers:double_val")
+
+
+FILE_BACKED_CONNECTOR_SCRIPT = """\
+import pyarrow as pa
+from bundlebase_sdk import Connector, Location
+
+
+class TwoRows(Connector):
+    def discover(self, attached_locations, **kwargs):
+        return [Location("rows.parquet", must_copy=True, format="parquet", version="v1")]
+
+    def data(self, location, **kwargs):
+        return pa.table({"id": [1, 2]})
+"""
+
+
+@pytest.mark.asyncio
+async def test_import_connector_file_backed_python_fetches():
+    """A file-backed Python connector is persisted and can fetch after reopening."""
+    # Bundled code runs from a local path, so the bundle must be on local disk.
+    with tempfile.TemporaryDirectory() as bundle_dir:
+        with tempfile.TemporaryDirectory() as script_dir:
+            script = os.path.join(script_dir, "two_rows.py")
+            with open(script, "w") as f:
+                f.write(FILE_BACKED_CONNECTOR_SCRIPT)
+
+            c = await bundlebase.create(bundle_dir, config=ALLOW_EXTERNAL_CODE_CONFIG)
+            c = await c.import_connector("test.two_rows", f"python::{script}:TwoRows")
+            await c.commit("import connector")
+
+        # The script's original location is gone; the bundled copy must be used.
+        c = await bundlebase.open(bundle_dir, config=ALLOW_EXTERNAL_CODE_CONFIG)
+        c = await c.extend()
+        c = await c.create_source("test.two_rows", {})
+        await c.commit("fetched")
+
+        reopened = await bundlebase.open(bundle_dir, config=ALLOW_EXTERNAL_CODE_CONFIG)
+        assert await reopened.num_rows() == 2
 
 
 @pytest.mark.asyncio
