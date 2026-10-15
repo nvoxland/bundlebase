@@ -490,3 +490,45 @@ async fn test_import_connector_ffi_into_tar_bundle_rejected() -> Result<(), Bund
 
     Ok(())
 }
+
+/// bb-0k2: with `allow_external_code` off (the default), IMPORT CONNECTOR must
+/// not run an IPC connector to verify it, matching the FFI header-only check.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_import_ipc_connector_does_not_run_code_when_external_code_disabled(
+) -> Result<(), BundlebaseError> {
+    use std::os::unix::fs::PermissionsExt;
+    init();
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("ran");
+    let script = dir.path().join("connector.sh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let bundle_dir = tempfile::tempdir().unwrap();
+    let builder = BundleBuilder::create(
+        &format!("file://{}/b", bundle_dir.path().display()),
+        None,
+    )
+    .await?;
+
+    let sql = format!(
+        "IMPORT CONNECTOR acme.marker FROM 'ipc::{}'",
+        script.display()
+    );
+    let cmd = match parse_command(&sql).expect("parse") {
+        BundleCommand::ImportConnector(c) => c,
+        other => panic!("expected ImportConnector, got {:?}", other),
+    };
+    Box::new(cmd).execute(&builder).await?;
+
+    assert!(
+        !marker.exists(),
+        "IMPORT CONNECTOR ran the connector although external code is disabled"
+    );
+    Ok(())
+}

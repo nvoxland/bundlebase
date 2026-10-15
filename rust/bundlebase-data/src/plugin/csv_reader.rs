@@ -379,7 +379,8 @@ impl DataReader for CsvReader {
                 byte_offsets,
                 projection.cloned(),
                 LineOrientedFormat::Csv,
-            )));
+            )
+            .with_delimiter(self.inner.config().delimiter)));
         }
         self.inner.data_source(projection, filters, limit).await
     }
@@ -667,7 +668,8 @@ impl DataReader for CsvReader {
             page_ranges,
             projection.cloned(),
             LineOrientedFormat::Csv,
-        ))))
+        )
+        .with_delimiter(self.inner.config().delimiter))))
     }
 }
 

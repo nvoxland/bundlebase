@@ -942,6 +942,34 @@ impl BundleBuilder {
         self.bundle.always_update_rules()
     }
 
+    /// Record a completed change in the status, unless it did nothing.
+    ///
+    /// A change with no operations and no pending delete/update edits (COMMIT
+    /// itself, VERIFY DATA) is dropped, so callers that commit "uncommitted
+    /// changes" don't write an empty commit. The edits delta stays aligned
+    /// with the status changes for undo.
+    fn finish_change(&self, change: BundleChange) {
+        let keep = {
+            let mut edits = self.edits.write();
+            if change.operations.is_empty() && edits.current_is_empty() {
+                // Nothing to keep: discard the (empty) in-progress delta.
+                edits.rollback_current();
+                false
+            } else {
+                edits.complete_change();
+                true
+            }
+        };
+        if keep {
+            self.status.write().push_change(change);
+        }
+        // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
+        self.bundle
+            .function_registry()
+            .read()
+            .refresh_version_udf(self.version());
+    }
+
     /// Execute a closure within a change context, managing the change lifecycle automatically.
     ///
     /// This method creates a new change, executes the provided closure, and adds the change
@@ -991,13 +1019,7 @@ impl BundleBuilder {
                     }
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.status.write().push_change(change);
-                        self.edits.write().complete_change();
-                        // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle
-                            .function_registry()
-                            .read()
-                            .refresh_version_udf(self.version());
+                        self.finish_change(change);
                     }
                 }
                 Ok(())
@@ -1067,13 +1089,7 @@ impl BundleBuilder {
                     }
                     self.prune_stale_index_entries_if_block_versions_changed();
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.status.write().push_change(change);
-                        self.edits.write().complete_change();
-                        // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle
-                            .function_registry()
-                            .read()
-                            .refresh_version_udf(self.version());
+                        self.finish_change(change);
                     }
                 }
             }
@@ -1340,6 +1356,12 @@ impl BundleBuilder {
 impl BundleFacade for BundleBuilder {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    async fn verify_data(
+        &self,
+    ) -> Result<crate::bundle::verification::VerificationResults, BundlebaseError> {
+        self.bundle.verify_data().await
     }
 
     fn id(&self) -> String {

@@ -434,3 +434,64 @@ async fn test_reset_after_commit_preserves_init_file_and_data() {
         .expect("Bundle must be reopenable after RESET");
     assert_eq!(1000, reopened.num_rows().await.unwrap());
 }
+
+/// bb-5y8: a command that records no operations and no edits (COMMIT itself,
+/// VERIFY DATA) must not leave a change behind, or callers that auto-commit
+/// "uncommitted changes" write an empty extra commit.
+#[tokio::test]
+async fn test_commands_without_operations_leave_no_status_change() -> Result<(), BundlebaseError> {
+    use bundlebase_command::parser::parse_command;
+    init();
+    let url = bundlebase::test_utils::random_memory_url();
+    let builder = BundleBuilder::create(url.as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    assert_eq!(builder.status_changes().len(), 1);
+
+    builder
+        .execute_command(parse_command("COMMIT 'first'")?)
+        .await?;
+    assert!(
+        builder.status_changes().is_empty(),
+        "COMMIT left a change: {:?}",
+        builder.status_changes()
+    );
+
+    builder.execute_command(parse_command("VERIFY DATA")?).await?;
+    assert!(
+        builder.status_changes().is_empty(),
+        "VERIFY DATA left a change: {:?}",
+        builder.status_changes()
+    );
+
+    // DELETE records edits but no operations until commit; it must still count.
+    assert_eq!(builder.delete("\"Index\" = '1'").await?, 1);
+    assert_eq!(builder.status_changes().len(), 1);
+    Ok(())
+}
+
+/// bb-69o: VERIFY DATA changes nothing, so it runs on a read-only bundle;
+/// VERIFY DATA UPDATE still needs a builder.
+#[tokio::test]
+async fn test_verify_data_runs_on_read_only_bundle() -> Result<(), BundlebaseError> {
+    use bundlebase_command::parser::parse_command;
+    init();
+    let url = bundlebase::test_utils::random_memory_url();
+    let builder = BundleBuilder::create(url.as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder.commit("initial").await?;
+
+    let bundle = bundlebase::Bundle::open(url.as_str(), None).await?;
+    bundle.execute_command(parse_command("VERIFY DATA")?).await?;
+
+    let err = bundle
+        .execute_command(parse_command("VERIFY DATA UPDATE")?)
+        .await
+        .err()
+        .expect("VERIFY DATA UPDATE must be refused on a read-only bundle");
+    assert!(err.to_string().contains("read-only"), "{}", err);
+    Ok(())
+}

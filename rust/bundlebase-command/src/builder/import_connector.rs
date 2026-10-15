@@ -383,13 +383,18 @@ impl BundleBuilderCommand for ImportConnectorCommand {
                         verify_shared_lib_header(path, &platform.os, &platform.arch)?;
                     }
                 }
-            } else {
+            } else if is_external_code_allowed(builder.config().as_ref())? {
                 // Non-FFI runtimes (ipc, java, etc.) don't have foreign-platform
-                // binaries to validate; the existing per-runtime check works
-                // for any platform.
+                // binaries to validate; spawning the connector for a protocol
+                // handshake works for any platform.
                 resolved
                     .verify_bundled_connector(&builder.data_dir())
                     .await?;
+            } else {
+                // External code disabled: the handshake would run the connector,
+                // so only confirm the bundled file is there (like the FFI
+                // header-only check).
+                resolved.validate_entrypoint()?;
             }
 
             prepared.push((platform, bundled_from));

@@ -317,6 +317,12 @@ pub trait BundleFacade: Send + Sync {
     /// Exports the bundle's data directory to an uncompressed tar archive.
     async fn export_tar(&self, tar_path: &str, gzip: bool) -> Result<String, BundlebaseError>;
 
+    /// Check every data file's hash against the one recorded when it was
+    /// attached, and that index files exist. Changes nothing.
+    async fn verify_data(
+        &self,
+    ) -> Result<crate::bundle::verification::VerificationResults, BundlebaseError>;
+
     /// Returns uncommitted changes (empty for Bundle, populated for BundleBuilder)
     fn status_changes(&self) -> Vec<BundleChange>;
 

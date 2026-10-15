@@ -69,6 +69,8 @@ pub struct PageMapDataSource {
     object_store: Arc<dyn ObjectStore>,
     /// File format (CSV or JSON Lines)
     format: LineOrientedFormat,
+    /// Field delimiter for CSV-style formats (`,` for CSV, `\t` for TSV).
+    delimiter: u8,
     /// Optional row fetch limit to apply after selective scan pushdown.
     fetch: Option<usize>,
 }
@@ -107,6 +109,7 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
+            delimiter: b',',
             fetch: None,
         }
     }
@@ -145,8 +148,15 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
+            delimiter: b',',
             fetch: None,
         }
+    }
+
+    /// Set the field delimiter for CSV-style formats (defaults to `,`).
+    pub fn with_delimiter(mut self, delimiter: u8) -> Self {
+        self.delimiter = delimiter;
+        self
     }
 
     /// Extract lines at specific byte offsets from a fetched byte range.
@@ -315,6 +325,7 @@ impl PageMapDataSource {
             projection,
             object_store: self.object_store.clone(),
             format: self.format,
+            delimiter: self.delimiter,
             fetch,
         }
     }
@@ -401,6 +412,7 @@ impl DataSource for PageMapDataSource {
         let file_path = self.file.store_path().clone();
         let projection = self.projection.clone();
         let format = self.format;
+        let delimiter = self.delimiter;
         let fetch = self.fetch;
 
         if !self.page_ranges.is_empty() {
@@ -448,7 +460,7 @@ impl DataSource for PageMapDataSource {
                         }
 
                         // Parse all lines in the range; format dictates whether to add a header.
-                        parse_bytes_to_batch(&bytes, &schema, &projection, format).and_then(
+                        parse_bytes_to_batch(&bytes, &schema, &projection, format, delimiter).and_then(
                             |batch| {
                                 let mut remaining = remaining_fetch.lock();
                                 Self::apply_fetch_limit(batch, &mut remaining)
@@ -567,7 +579,7 @@ impl DataSource for PageMapDataSource {
                                 let mut first = true;
                                 for field in schema.fields() {
                                     if !first {
-                                        csv_data.push(',');
+                                        csv_data.push(delimiter as char);
                                     }
                                     csv_data.push_str(field.name());
                                     first = false;
@@ -578,8 +590,9 @@ impl DataSource for PageMapDataSource {
                                     csv_data.push('\n');
                                 }
                                 let cursor = Cursor::new(csv_data.as_bytes());
-                                let mut builder =
-                                    CsvReaderBuilder::new(schema.clone()).with_header(true);
+                                let mut builder = CsvReaderBuilder::new(schema.clone())
+                                    .with_header(true)
+                                    .with_delimiter(delimiter);
                                 if let Some(proj) = &projection {
                                     builder = builder.with_projection(proj.clone());
                                 }
@@ -734,7 +747,7 @@ fn line_text(line: &[u8], format: LineOrientedFormat) -> Option<String> {
 
 /// Parse raw line-oriented bytes into a RecordBatch.
 ///
-/// For CSV: all lines are data rows (no header); the schema is used directly.
+/// For CSV (and TSV, via `delimiter`): all lines are data rows (no header); the schema is used directly.
 /// For JSONL: each non-empty line is a JSON object.
 /// Applies column projection if provided.
 fn parse_bytes_to_batch(
@@ -742,6 +755,7 @@ fn parse_bytes_to_batch(
     schema: &SchemaRef,
     projection: &Option<Vec<usize>>,
     format: LineOrientedFormat,
+    delimiter: u8,
 ) -> datafusion::common::Result<RecordBatch> {
     let projected_schema: SchemaRef = match projection.as_ref() {
         Some(proj) => Arc::new(schema.project(proj)?),
@@ -757,7 +771,7 @@ fn parse_bytes_to_batch(
                 let mut first = true;
                 for field in schema.fields() {
                     if !first {
-                        h.push(',');
+                        h.push(delimiter as char);
                     }
                     h.push_str(field.name());
                     first = false;
@@ -768,7 +782,9 @@ fn parse_bytes_to_batch(
             let mut csv_data = header;
             csv_data.push_str(&String::from_utf8_lossy(bytes.as_ref()));
             let cursor = Cursor::new(csv_data.as_bytes());
-            let mut builder = CsvReaderBuilder::new(schema.clone()).with_header(true);
+            let mut builder = CsvReaderBuilder::new(schema.clone())
+                .with_header(true)
+                .with_delimiter(delimiter);
             if let Some(proj) = projection {
                 builder = builder.with_projection(proj.clone());
             }
@@ -855,6 +871,26 @@ mod tests {
     use datafusion::physical_expr::projection::ProjectionExprs;
 
     use url::Url;
+
+    #[test]
+    fn test_parse_page_bytes_honors_tab_delimiter() {
+        // bb-afm: page-range reads of a TSV must split on tabs.
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, true),
+            arrow::datatypes::Field::new("city", arrow::datatypes::DataType::Utf8, true),
+        ]));
+        let bytes = bytes::Bytes::from_static(b"1\tParis, FR\n2\tRome, IT\n");
+        let batch = parse_bytes_to_batch(&bytes, &schema, &None, LineOrientedFormat::Csv, b'\t')
+            .expect("parse");
+        let city = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("utf8");
+        assert_eq!(batch.num_rows(), 2);
+        assert_eq!(city.value(0), "Paris, FR");
+        assert_eq!(city.value(1), "Rome, IT");
+    }
 
     #[test]
     fn test_byte_offset_sorting() {

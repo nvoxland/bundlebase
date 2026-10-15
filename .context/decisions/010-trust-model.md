@@ -46,10 +46,13 @@ in a manifest) is the single opt-in for running external code:
   invocation and errors while it is off. Module-backed Python
   (`python::module:f`) runs in-process from the user's own environment, can't
   be bundled, and is not gated.
-- **FFI connector verification at import.** `dlopen` runs a library's
-  initializers, so full load-and-verify happens only when external code is
+- **Connector verification at import.** `dlopen` runs a library's
+  initializers, so full FFI load-and-verify happens only when external code is
   allowed (and the library targets the host platform); otherwise only the
-  file header is checked.
+  file header is checked. Other runtimes (`ipc`, `java`, file-backed `python`)
+  are verified by spawning the connector for a protocol handshake, which also
+  happens only when external code is allowed; otherwise only the bundled
+  file's presence is checked.
 
 ### Credentials are runtime-only
 

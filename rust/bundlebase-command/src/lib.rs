@@ -155,6 +155,8 @@ pub enum FacadeCommand {
     ShowFunctions(ShowFunctionsCommand),
     ShowColumns(ShowColumnsCommand),
     ShowCount(ShowCountCommand),
+    /// Verify data file hashes (read-only form, without UPDATE)
+    VerifyData(VerifyDataCommand),
     /// Show syntax and usage for bundlebase commands
     Syntax(SyntaxCommand),
     /// Describe data quality and statistics for specified columns
@@ -288,6 +290,17 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::VerifyData(cmd) => {
+                // Only the read-only form (no UPDATE) is routed here; it
+                // changes nothing, so it runs on any facade.
+                if cmd.update_versions {
+                    return Err(
+                        "VERIFY DATA UPDATE changes the bundle; run it on a writable bundle"
+                            .into(),
+                    );
+                }
+                Ok(Box::new(facade.verify_data().await?))
+            }
             FacadeCommand::Syntax(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -346,6 +359,7 @@ impl FacadeCommand {
             FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_schema(),
             FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_schema(),
             FacadeCommand::ShowCount(_) => ShowCountCommand::output_schema(),
+            FacadeCommand::VerifyData(_) => VerificationResults::schema(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_schema(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_schema(),
@@ -386,6 +400,7 @@ impl FacadeCommand {
             FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_shape(),
             FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_shape(),
             FacadeCommand::ShowCount(_) => ShowCountCommand::output_shape(),
+            FacadeCommand::VerifyData(_) => VerificationResults::output_shape(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_shape(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_shape(),
@@ -431,6 +446,9 @@ impl BundleCommand {
             BundleCommand::ShowFunctions(cmd) => Ok(FacadeCommand::ShowFunctions(cmd)),
             BundleCommand::ShowColumns(cmd) => Ok(FacadeCommand::ShowColumns(cmd)),
             BundleCommand::ShowCount(cmd) => Ok(FacadeCommand::ShowCount(cmd)),
+            BundleCommand::VerifyData(cmd) if !cmd.update_versions => {
+                Ok(FacadeCommand::VerifyData(cmd))
+            }
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             BundleCommand::DescribeData(cmd) => Ok(FacadeCommand::DescribeData(cmd)),
             BundleCommand::TestConnector(cmd) => Ok(FacadeCommand::TestConnector(cmd)),
@@ -486,7 +504,7 @@ impl BundleCommand {
                     BundleCommand::Undo(_) => "UNDO",
                     BundleCommand::Fetch(_) => "FETCH",
                     BundleCommand::FetchAll(_) => "FETCH ALL",
-                    BundleCommand::VerifyData(_) => "VERIFY DATA",
+                    BundleCommand::VerifyData(_) => "VERIFY DATA UPDATE",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportEmpty(_) => "EXPORT EMPTY",
                     BundleCommand::ExportData(_)
@@ -570,6 +588,9 @@ impl BundleCommand {
                 | BundleCommand::DescribeData(_)
                 | BundleCommand::TestConnector(_)
                 | BundleCommand::ProfileColumn(_)
+                | BundleCommand::VerifyData(VerifyDataCommand {
+                    update_versions: false
+                })
         )
     }
 }

@@ -2671,3 +2671,68 @@ async fn test_rebuild_index_without_index_errors() -> Result<(), BundlebaseError
     bundle.rebuild_index("id").await?;
     Ok(())
 }
+
+/// bb-afm: the index fast path re-parses fetched rows; for a TSV file it must
+/// split on tabs, not commas.
+#[tokio::test]
+async fn test_index_lookup_on_tsv_returns_correct_columns() -> Result<(), BundlebaseError> {
+    init();
+    let dir = tempfile::tempdir().map_err(|e| BundlebaseError::from(e.to_string()))?;
+    let path = dir.path().join("people.tsv");
+    let mut tsv = String::from("id\tname\tcity\n");
+    for i in 0..50 {
+        tsv.push_str(&format!("{}\tperson{}\tcity, {}\n", i, i, i));
+    }
+    std::fs::write(&path, tsv).map_err(|e| BundlebaseError::from(e.to_string()))?;
+
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle
+        .attach(&format!("file://{}", path.display()), None)
+        .await?;
+    bundle.create_index(&["name"], IndexType::BTree, None).await?;
+    bundle.commit("Index on name").await?;
+
+    let sql = "SELECT id, city FROM bundle WHERE name = 'person7'";
+    let plan = get_physical_plan(bundle.as_ref(), Some(sql)).await?;
+    assert!(
+        plan.contains("PageMapDataSource"),
+        "expected the index path, got:\n{}",
+        plan
+    );
+
+    let rs: Vec<RecordBatch> = bundle.query(sql, vec![], None).await?.try_collect().await?;
+    let rows: usize = rs.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(1, rows);
+    let batch = rs.iter().find(|b| b.num_rows() > 0).unwrap();
+    let id = batch
+        .column_by_name("id")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    let city = batch
+        .column_by_name("city")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(id.value(0), "7");
+    assert_eq!(city.value(0), "city, 7");
+
+    // The TSV block must also load back when the bundle is reopened.
+    let reopened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let rs: Vec<RecordBatch> = reopened
+        .query("SELECT count(*) AS n FROM bundle", vec![], None)
+        .await?
+        .try_collect()
+        .await?;
+    let n = rs[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap()
+        .value(0);
+    assert_eq!(n, 50);
+    Ok(())
+}

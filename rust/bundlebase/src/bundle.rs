@@ -405,6 +405,7 @@ impl Bundle {
                 Arc::clone(&storage),
                 vec![
                     Arc::new(crate::data::plugin::CsvPlugin::default()),
+                    Arc::new(crate::data::plugin::TsvPlugin::default()),
                     Arc::new(crate::data::plugin::BundlebasePlugin),
                     Arc::new(crate::data::plugin::JsonlPlugin::default()),
                     Arc::new(crate::data::plugin::ParquetPlugin::default()),
@@ -1636,6 +1637,10 @@ fn add_utf8_cast_hint(err: datafusion::error::DataFusionError) -> BundlebaseErro
 impl BundleFacade for Bundle {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    async fn verify_data(&self) -> Result<VerificationResults, BundlebaseError> {
+        Bundle::verify_data(self).await
     }
 
     fn id(&self) -> String {

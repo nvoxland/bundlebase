@@ -100,6 +100,15 @@ impl PendingEdits {
         self.current.update_wheres_added += 1;
     }
 
+    /// Whether the change in progress has added any delete or update.
+    pub(super) fn current_is_empty(&self) -> bool {
+        let c = &self.current;
+        c.added_deletes.is_empty()
+            && c.delete_wheres_added == 0
+            && c.overwritten_cells.is_empty()
+            && c.update_wheres_added == 0
+    }
+
     /// The change in progress completed: keep its delta for undo.
     pub(super) fn complete_change(&mut self) {
         let delta = std::mem::take(&mut self.current);

@@ -178,8 +178,9 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     ```
 
 !!! note
-    `update_versions=True` requires a builder (`create()`/`extend()`); bundles
-    opened read-only can verify but not update version metadata.
+    `update_versions=True` (`VERIFY DATA UPDATE` in SQL) requires a builder
+    (`create()`/`extend()`); bundles opened read-only can verify but not update
+    version metadata.
 
 ## Format Compatibility
 

@@ -1194,7 +1194,7 @@ See [Versioning](../guide/versioning.md) for details.
 
 ### VERIFY DATA
 
-Verifies the integrity of attached data. Use `UPDATE` to fix issues.
+Checks every attached file against the checksum recorded when it was attached, and that index files exist. `VERIFY DATA` changes nothing, so it also runs on a bundle opened read-only (for example `bundlebase query --bundle X "VERIFY DATA"`). `UPDATE` also refreshes the stored version metadata of files whose checksums still match; it needs a writable bundle.
 
 ```sql
 VERIFY DATA [UPDATE]
