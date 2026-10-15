@@ -130,8 +130,16 @@ Custom SQL function system supporting both scalar and aggregate functions.
 
 3. **Temporary vs persistent**:
    - `IMPORT TEMP FUNCTION` — session-only, not persisted, allows Python runtime
-   - `IMPORT FUNCTION` — persisted as operation, rejects Python runtime (can't be bundled)
+   - `IMPORT FUNCTION` — persisted as operation, rejects module-backed Python (file-backed `python::./x.py:f` is bundled)
    - Temporary overrides persistent at resolution time
+
+4. **Bundled entrypoint files**: `copy_into_bundle()` stores the file content-addressed in the data dir
+   and records the relative hash path (`ab/cdef0123456789.udf.bin`). `UdfRuntime::resolve_path()`
+   maps it to a local path: the data dir itself for `file://` bundles, otherwise a per-user cache
+   (`{cache_dir}/bundlebase/udf/{xxh3(data_dir url)}/{rel}`). `resolve_local()` (async) also
+   downloads into that cache and verifies the content hash. Call `resolve_local()` at an async
+   point before anything spawns or `dlopen`s the file; `ImportFunctionOp::apply` does it before
+   the synchronous `FunctionRegistry` registration.
 
 **Python Aggregate Interface:**
 - Class with four methods: `create_state()`, `accumulate(state, values)`, `merge(state1, state2)`, `evaluate(state)`

@@ -129,6 +129,13 @@ impl Operation for ImportFunctionOp {
             );
         }
 
+        // Registration resolves bundled paths synchronously; make sure a bundled
+        // file is on local disk first (a no-op for local bundles).
+        self.from
+            .resolve_local(&bundle.data_dir())
+            .await
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+
         bundle
             .function_registry()
             .write()

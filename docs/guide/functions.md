@@ -22,6 +22,8 @@ Custom functions let you extend bundlebase's SQL with high-performance scalar an
 - **Temporary** (`IMPORT TEMP FUNCTION`): Session-scoped, supports all runtimes including `python`. Great for iterative development.
 - **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runtime (`ipc`, `ffi`, `java`, `docker`, or file-backed `python::./script.py:func` -- not module-backed `python`).
 
+A persistent function's file is copied into the bundle. When the bundle lives somewhere other than local disk, that file is downloaded to a local cache and checked against its content hash before it runs, the same as for [connectors](custom-connectors/index.md#import-connector).
+
 ### External code is off by default
 
 Every runtime except module-backed `python` runs code that is not part of bundlebase: `ffi` loads a shared library, and `ipc`, `java`, `docker` and file-backed `python` start a subprocess. Bundles can ship that code, so opening a bundle you did not build should not run it. These functions are therefore gated behind the `system.allow_external_code` setting, which defaults to `false`.

@@ -226,33 +226,54 @@ impl UdfRuntime {
         }
     }
 
-    /// Resolve an entrypoint path that may be bundle-relative against the bundle's data directory.
+    /// Resolve an entrypoint path that may be bundle-relative to a local filesystem path.
     ///
-    /// If the runtime references a file and the path is relative (bundle-internal hash path),
-    /// it's resolved against the data_dir's filesystem path.
-    /// Absolute paths and non-file runtimes are returned as-is.
+    /// Bundle-relative paths (content-addressed hash paths like `ab/cdef12345678.so`)
+    /// resolve against the data directory for `file://` bundles. For every other
+    /// backend (memory, tar, object stores) they resolve to a local cache location,
+    /// which [`resolve_local`](Self::resolve_local) fills. Absolute paths, `./` paths
+    /// and runtimes without a file are returned as-is.
     pub fn resolve_path(&self, data_dir: &Arc<dyn IOReadWriteDir>) -> UdfRuntime {
-        let file_path = match self.file_path() {
-            Some(p) => p,
-            None => return self.clone(),
+        let Some(file_path) = self.file_path() else {
+            return self.clone();
+        };
+        if !is_bundle_relative(file_path) {
+            return self.clone();
+        }
+
+        let url = data_dir.url();
+        let resolved = if url.scheme() == "file" {
+            format!("{}/{}", url.path().trim_end_matches('/'), file_path)
+        } else {
+            match local_cache_path(url, file_path) {
+                Some(p) => p.to_string_lossy().to_string(),
+                None => return self.clone(),
+            }
         };
 
-        // Only resolve relative paths (bundle-internal hash paths like "ab/cdef12345678.so")
-        if file_path.starts_with('/') || file_path.starts_with("./") || file_path.starts_with("../")
-        {
-            return self.clone();
-        }
-
-        // Extract filesystem path from data_dir URL
-        let url = data_dir.url();
-        if url.scheme() != "file" {
-            return self.clone();
-        }
-
-        let dir_path = url.path();
-        let resolved = format!("{}/{}", dir_path, file_path);
-
         self.clone().with_path(resolved)
+    }
+
+    /// Like [`resolve_path`](Self::resolve_path), but also makes sure the file exists
+    /// locally. For bundles not on local disk, the bundled file is downloaded into the
+    /// local cache (verifying its content hash) so a subprocess or `dlopen` can use it.
+    pub async fn resolve_local(
+        &self,
+        data_dir: &Arc<dyn IOReadWriteDir>,
+    ) -> Result<UdfRuntime, BundlebaseError> {
+        let resolved = self.resolve_path(data_dir);
+        if let Some(rel) = self.file_path() {
+            if is_bundle_relative(rel) && data_dir.url().scheme() != "file" {
+                let dest = local_cache_path(data_dir.url(), rel).ok_or_else(|| {
+                    BundlebaseError::from(format!(
+                        "Bundled entrypoint path '{}' is not a valid bundle-relative path",
+                        rel
+                    ))
+                })?;
+                materialize_bundled_file(data_dir, rel, &dest).await?;
+            }
+        }
+        Ok(resolved)
     }
 
     /// Verify that a bundled function binary is functional from its new location.
@@ -268,7 +289,7 @@ impl UdfRuntime {
             return Ok(());
         }
 
-        let resolved = self.resolve_path(data_dir);
+        let resolved = self.resolve_local(data_dir).await?;
         resolved.verify_loadable()
     }
 
@@ -285,7 +306,7 @@ impl UdfRuntime {
             return Ok(());
         }
 
-        let resolved = self.resolve_path(data_dir);
+        let resolved = self.resolve_local(data_dir).await?;
         if resolved.runtime_type() == super::entrypoint::RuntimeType::Internal {
             return resolved.validate_entrypoint();
         }
@@ -293,6 +314,149 @@ impl UdfRuntime {
 
         super::ipc_utils::verify_ipc_handshake(&call_string).await
     }
+}
+
+/// Whether an entrypoint path points inside the bundle (a content-addressed hash
+/// path) rather than at a file on the local machine.
+fn is_bundle_relative(path: &str) -> bool {
+    !(path.starts_with('/') || path.starts_with("./") || path.starts_with("../"))
+}
+
+/// Where a bundled file from a non-`file://` bundle is materialized locally.
+///
+/// Keyed by the data directory URL so one bundle's files can never stand in for
+/// another's. Returns `None` if `rel` could escape the cache directory.
+fn local_cache_path(data_dir_url: &url::Url, rel: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Component, Path};
+    let rel_path = Path::new(rel);
+    if !rel_path
+        .components()
+        .all(|c| matches!(c, Component::Normal(_)))
+    {
+        return None;
+    }
+    let root = dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("bundlebase")
+        .join("udf");
+    let key = format!(
+        "{:016x}",
+        xxhash_rust::xxh3::xxh3_64(data_dir_url.as_str().as_bytes())
+    );
+    Some(root.join(key).join(rel_path))
+}
+
+/// Split a content-addressed path `ab/cdef0123456789.ext` into the hash prefix it
+/// claims (`abcdef0123456789`).
+fn claimed_hash_prefix(rel: &str) -> Option<String> {
+    let (dir, file) = rel.split_once('/')?;
+    let stem = file.split('.').next()?;
+    if dir.len() != 2 || stem.len() != 14 || file.contains('/') {
+        return None;
+    }
+    Some(format!("{}{}", dir, stem))
+}
+
+/// Stream a bundled file into `dest`, verifying that its content matches the hash
+/// in its name. Reuses `dest` if it already holds matching content.
+async fn materialize_bundled_file(
+    data_dir: &Arc<dyn IOReadWriteDir>,
+    rel: &str,
+    dest: &std::path::Path,
+) -> Result<(), BundlebaseError> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let expected = claimed_hash_prefix(rel).ok_or_else(|| {
+        BundlebaseError::from(format!(
+            "Bundled entrypoint path '{}' is not a content-addressed path",
+            rel
+        ))
+    })?;
+    let hash_prefix = |hasher: &xxhash_rust::xxh3::Xxh3| -> String {
+        format!("{:032x}", hasher.digest128())[..16].to_string()
+    };
+
+    if let Ok(existing) = tokio::fs::read(dest).await {
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+        hasher.update(&existing);
+        if hash_prefix(&hasher) == expected {
+            return Ok(());
+        }
+    }
+
+    let mut stream = data_dir.file(rel)?.read_stream().await?.ok_or_else(|| {
+        BundlebaseError::from(format!(
+            "Bundled entrypoint file '{}' not found in {}",
+            rel,
+            data_dir.url()
+        ))
+    })?;
+
+    let parent = dest.parent().ok_or_else(|| {
+        BundlebaseError::from(format!("Invalid cache path '{}'", dest.display()))
+    })?;
+    tokio::fs::create_dir_all(parent).await.map_err(|e| {
+        BundlebaseError::from(format!(
+            "Failed to create cache directory '{}': {}",
+            parent.display(),
+            e
+        ))
+    })?;
+
+    // Write to a unique temp name, then rename, so concurrent materializations
+    // never expose a partially written file.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = parent.join(format!(".tmp-{}-{}", std::process::id(), nanos));
+    let io_err = |e: std::io::Error| {
+        BundlebaseError::from(format!(
+            "Failed to write bundled file to '{}': {}",
+            dest.display(),
+            e
+        ))
+    };
+
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    let write_result: Result<(), BundlebaseError> = async {
+        let mut out = tokio::fs::File::create(&tmp).await.map_err(io_err)?;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            hasher.update(&chunk);
+            out.write_all(&chunk).await.map_err(io_err)?;
+        }
+        out.flush().await.map_err(io_err)?;
+        Ok(())
+    }
+    .await;
+    if let Err(e) = write_result {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
+    }
+
+    let actual = hash_prefix(&hasher);
+    if actual != expected {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!(
+            "Bundled entrypoint file '{}' does not match its content hash (got {}); \
+             the bundle may be corrupt",
+            rel, actual
+        )
+        .into());
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+            .await
+            .map_err(io_err)?;
+    }
+
+    tokio::fs::rename(&tmp, dest).await.map_err(io_err)?;
+    Ok(())
 }
 
 impl fmt::Display for UdfRuntime {
@@ -646,6 +810,67 @@ mod tests {
     fn test_validate_entrypoint_docker_always_ok() {
         let rt = UdfRuntime::parse_from("docker::any-image:latest").unwrap();
         assert!(rt.validate_entrypoint().is_ok());
+    }
+
+    /// Bundle a small script into a non-file data dir (memory://) and return
+    /// the bundled runtime plus the data dir.
+    async fn bundle_script_into_memory(
+        content: &str,
+    ) -> (UdfRuntime, Arc<dyn IOReadWriteDir>, tempfile::TempDir) {
+        let src = tempdir().unwrap();
+        let script = src.path().join("my_func.sh");
+        std::fs::write(&script, content).unwrap();
+        let rt = UdfRuntime::parse_from(&format!("ipc::{}", script.display())).unwrap();
+
+        // The source tempdir's name is unique, so reuse it for the bundle URL.
+        let unique = src.path().file_name().unwrap().to_string_lossy().to_string();
+        let url = Url::parse(&format!("memory:///resolve_local_{}", unique)).unwrap();
+        let data_dir = writable_dir_from_url(&url, Arc::new(EmptyConfig))
+            .await
+            .expect("create memory data dir");
+        let bundled = rt.copy_into_bundle(&data_dir).await.expect("bundle");
+        (bundled, data_dir, src)
+    }
+
+    #[tokio::test]
+    async fn test_resolve_local_materializes_from_non_file_bundle() {
+        let content = "#!/bin/sh\necho hi\n";
+        let (bundled, data_dir, _src) = bundle_script_into_memory(content).await;
+
+        let resolved = bundled.resolve_local(&data_dir).await.expect("resolve");
+        let path = resolved.file_path().expect("ipc has a path").to_string();
+        assert!(
+            std::path::Path::new(&path).is_absolute(),
+            "resolved path should be a local absolute path: {}",
+            path
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert!(mode & 0o100 != 0, "materialized file should be executable");
+        }
+
+        // Synchronous resolve_path agrees with the materialized location.
+        assert_eq!(bundled.resolve_path(&data_dir).file_path(), Some(path.as_str()));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_local_rejects_content_not_matching_its_hash() {
+        let (bundled, data_dir, _src) = bundle_script_into_memory("#!/bin/sh\n").await;
+        let rel = bundled.file_path().unwrap().to_string();
+
+        // Overwrite the bundled file in place with different bytes.
+        let tampered = data_dir.writable_file(&rel).unwrap();
+        let stream = futures::stream::once(async {
+            Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::from_static(b"evil"))
+        });
+        tampered.write_stream(Box::pin(stream)).await.unwrap();
+
+        let err = bundled.resolve_local(&data_dir).await.unwrap_err().to_string();
+        assert!(err.contains("hash"), "expected a hash mismatch error: {}", err);
     }
 
     #[test]

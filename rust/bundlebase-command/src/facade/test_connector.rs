@@ -184,14 +184,17 @@ impl BundleFacadeCommand for TestConnectorCommand {
         } else if let Some(ref name) = self.name {
             if name.contains('.') {
                 // Custom connector — resolve from registry
-                let registry = facade.connector_registry();
-                let reg = registry.read();
-                let entry = reg.resolve_entry(name)?;
-                let runtime_type = entry.from.runtime_type();
-                let func = reg
-                    .create_instance(runtime_type)
-                    .ok_or_else(|| format!("Unknown connector type for '{}'", name))?;
-                let resolved_from = entry.from.resolve_path(&facade.data_dir());
+                let (func, from) = {
+                    let registry = facade.connector_registry();
+                    let reg = registry.read();
+                    let entry = reg.resolve_entry(name)?;
+                    let runtime_type = entry.from.runtime_type();
+                    let func = reg
+                        .create_instance(runtime_type)
+                        .ok_or_else(|| format!("Unknown connector type for '{}'", name))?;
+                    (func, entry.from.clone())
+                };
+                let resolved_from = from.resolve_local(&facade.data_dir()).await?;
                 let mut merged = self.args.clone();
                 merged.insert("call".to_string(), resolved_from.build_call_string());
                 (func, merged)

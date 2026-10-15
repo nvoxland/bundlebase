@@ -148,15 +148,16 @@ impl Source {
                     ))
                 })?;
 
+            // Resolve bundle-relative entrypoint paths to a local file, downloading
+            // it first when the bundle is not on local disk.
+            let resolved_from = entry.from.resolve_local(&bundle.data_dir()).await?;
+
             let runtime_type = entry.from.runtime_type();
             let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
                 .create_instance(runtime_type)
                 .ok_or_else(|| format!("Unknown connector type '{:?}'", runtime_type))?;
-
-            // Resolve bundle-relative entrypoint paths against the data directory
-            let resolved_from = entry.from.resolve_path(&bundle.data_dir());
 
             // Merge: inject "call" from entrypoint (reconstructed with prefix), then overlay user args
             let mut merged_args = self.args.clone();

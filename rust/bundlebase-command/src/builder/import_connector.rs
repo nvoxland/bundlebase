@@ -364,7 +364,7 @@ impl BundleBuilderCommand for ImportConnectorCommand {
             }
 
             let bundled_from = runtime.copy_into_bundle(&builder.data_dir()).await?;
-            let resolved = bundled_from.resolve_path(&builder.data_dir());
+            let resolved = bundled_from.resolve_local(&builder.data_dir()).await?;
 
             if resolved.runtime_name() == "ffi" {
                 let path = resolved.file_path().ok_or_else(|| -> BundlebaseError {

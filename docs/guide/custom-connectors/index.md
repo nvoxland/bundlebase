@@ -65,7 +65,7 @@ To remove or rename connectors:
 
 - Your source is a Python class in the same project
 - You need maximum performance with zero serialization overhead
-- Note: requires [`IMPORT TEMP CONNECTOR`](#import-temp-connector) since Python code can't be bundled
+- Note: a module entrypoint (`python::my_module:MyConnector`) requires [`IMPORT TEMP CONNECTOR`](#import-temp-connector). To ship the connector with the bundle, point at a file instead (`python::./my_connector.py:MyConnector`)
 
 **Use `ffi` when:**
 
@@ -96,6 +96,8 @@ To remove or rename connectors:
 ### IMPORT CONNECTOR
 
 Creates a named connector. The connector definition is **persisted** into the bundle's commit history, making the bundle portable.
+
+When the entrypoint is a file (a shared library, executable, JAR, or `.py` script), the file is copied into the bundle. If the bundle is not on local disk (S3, GCS, Azure, a tar archive), bundlebase downloads that file to a local cache the first time it runs, checks it against its content hash, and runs it from there. The cache is `bundlebase/udf` under your user cache directory (`~/.cache` on Linux, `~/Library/Caches` on macOS).
 
 === "Async API"
 
