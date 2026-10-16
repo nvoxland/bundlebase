@@ -11,7 +11,7 @@ This page describes what is in that directory. You never need to edit these file
 
 ## A bundle on disk
 
-This is a real bundle after four commits: attach a CSV, describe a column, delete some rows, and update a value.
+A bundle after four commits—attaching a CSV, describing a column, deleting rows, and updating a value—has this structure:
 
 ```
 sales/
@@ -24,7 +24,7 @@ sales/
 ├── 5d/fac2a5a8ed1b0b.block.schema.yaml      schema of an attached file
 ├── 85/dd8f5860f1d48f.block.columns.yaml     stable column ids for that file
 ├── b1/bb977e3b2f2d33.block.layout.pagemap   row-to-byte map for fast lookups
-├── a0/b206e3459a78ff.overlay.tomb.rowids    rows removed by the delete
+├── a0/b206e3459a78ff.overlay.tomb.puffin   rows removed by the delete
 └── d3/a61581e6b324c9.overlay.update.parquet values changed by the update
 ```
 
@@ -51,7 +51,7 @@ changes:
 - description: DELETE FROM bundle WHERE sales_region = 'Africa'
   operations:
   - type: delete
-    tombstone: a0/b206e3459a78ff.overlay.tomb.rowids
+    tombstone: a0/b206e3459a78ff.overlay.tomb.puffin
     where: col_74ec8b3e36709b6a = 'Africa'
 ```
 
@@ -67,7 +67,9 @@ That is also why history is never lost. The manifests are the only source of tru
 
 **Block sidecars.** Each attached file gets a small schema file and a column id file. Column ids are what keep descriptions, updates, and metrics attached to the right column after a rename. Some formats also get a layout file that maps row numbers to byte positions.
 
-**Deletes and updates.** A `DELETE` does not rewrite data. It writes a small file listing the rows it removed, and the scan skips them. An `UPDATE` writes a Parquet file holding only the changed cells, keyed by row and column id, and the scan merges them in. Both are recorded in the commit that made them, so every change to a value can be traced back to a commit, an author, and the `WHERE` clause that selected it.
+**Deletes and updates.** A `DELETE` does not rewrite data. A commit with pending deletes writes one content-addressed Puffin file, with a standard deletion-vector blob for each affected block version. Each blob records the stable block ID and version as Bundlebase properties and lists deleted row positions in a portable Roaring vector protected by CRC-32. The scan skips those rows. The manifest still records the operation as `DeleteOp` with `tombstone` and `where`; the predicate is retained for history. An `UPDATE` writes a Parquet file holding only the changed cells, keyed by stable block version, row, and column id, and the scan merges them in. Both are recorded in the commit that made them, so edits can be traced to a commit, author, and (for DELETE) the `WHERE` clause.
+
+Puffin standardizes the deletion-file container and the Roaring deletion-vector encoding, with potential disk-size savings for suitable row patterns. It does not promise faster queries or make a bundle an Iceberg table. The old Bundlebase tombstone format has no migration or legacy-reader path; old tombstone files, missing files, and corrupt files must fail clearly during replay rather than silently expose deleted rows. Replaced or detached block versions no longer receive their old deletes. Checkpoints are not implemented.
 
 ## Reading a bundle's history yourself
 
@@ -95,7 +97,7 @@ SELECT id, num_rows, source_locations, source_versions FROM bundle_info.blocks; 
 | Copied data | Apache Parquet |
 | Update overlays | Apache Parquet |
 | Manifests and sidecars | YAML |
-| Delete files | Bundlebase binary format |
+| Delete files | Apache Iceberg Puffin container with deletion-vector blobs |
 | Layout files | Bundlebase binary format |
 
 The data itself, and every changed value, is standard Parquet that any Arrow or Parquet reader can open.

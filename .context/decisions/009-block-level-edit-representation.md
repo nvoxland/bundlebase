@@ -1,6 +1,6 @@
 # ADR-009: Block-Level Tombstones/Overlays Are the Sole Representation of DELETE/UPDATE
 
-**Status:** Accepted
+**Status:** Amended 2026-10-16
 
 **Date:** July 2026
 
@@ -49,9 +49,9 @@ No compact/optimize step exists, and none could fix in-session accumulation.
 **`DELETE` and `UPDATE` record only the block-level representation.**
 
 - DELETE: `select_row_ids` → `mark_deleted`, which stores RowIds for the
-  commit-time tombstone/`DeleteOp` AND mirrors the row numbers into the
-  blocks immediately (`flush_pending_deletes_to_blocks`) for in-session
-  visibility.
+  commit-time Puffin deletion vector/`DeleteOp` AND mirrors the row numbers
+  into the blocks immediately (`flush_pending_deletes_to_blocks`) for
+  in-session visibility.
 - UPDATE: `evaluate_update_cols` → `flush_pending_updates_to_blocks`; the
   commit writes the overlay parquet/`UpdateDataOp`. Each flush rebuilds the
   in-session overlay from the **full** pending accumulator and stores it in a
@@ -74,8 +74,8 @@ No compact/optimize step exists, and none could fix in-session accumulation.
 
 ### Edits apply beneath every user `filter()`
 
-Tombstones and overlays live in the blocks, so they take effect at scan time,
-*below* every query-level operation — including user `filter()`s recorded
+Deletion vectors and overlays live in the blocks, so they take effect at scan
+time, *below* every query-level operation — including user `filter()`s recorded
 **before** the edit. An earlier filter is therefore evaluated against the
 updated values:
 
@@ -94,13 +94,15 @@ as it does for queries. Pinned by `test_filter_then_update_filter_sees_updated_v
 
 ### Edits are keyed by `(BlockId, version)`, not block position
 
-Tombstone files (`BBTOMB02`) and overlay parquet row groups (`block` metadata)
-name the block as `<block_id>@<version>`, plus the row number within it; the
-builder's pending edits use the same key. Block *positions* in the base pack
-are not stable: DETACH removes a block, REPLACE re-appends one, and since
-commits are numbered from a fresh listing (bff1a16) another writer's DETACH or
-REPLACE can be replayed before this writer's tombstone. A positional key then
-silently drops the edit or applies it to the wrong block.
+Puffin deletion-vector blobs store `bundlebase.block-id` and
+`bundlebase.block-version` properties; Parquet overlay row groups name the
+block as `<block_id>@<version>`. Both identify row numbers within that exact
+block version, and the builder's pending edits use the same key. Block
+*positions* in the base pack are not stable:
+DETACH removes a block, REPLACE re-appends one, and since commits are numbered
+from a fresh listing (bff1a16) another writer's DETACH or REPLACE can be
+replayed before this writer's edit. A positional key then silently drops the
+edit or applies it to the wrong block.
 
 Keying by version also defines REPLACE: a replaced block gets a new version,
 and edits recorded against the old version (committed or still pending) no
@@ -164,6 +166,15 @@ salaries now correctly leaves the NULL rows in place.
   dropped and the query is re-run over those rows' current text with a small
   throwaway index (those rows' BM25 scores come from that small corpus). Text
   indexes over computed columns are not re-evaluated.
+
+## Decision History
+
+- 2026-10-16: Amended the persisted DELETE representation to use Puffin
+  deletion-vector blobs, as specified in [ADR-011](011-puffin-deletion-vectors.md).
+  Stable versioned block identities shipped already and remain unchanged.
+  UPDATE continues to use Parquet overlays. This amendment records the
+  design change; details of the Puffin wire format, compatibility
+  break, and failure behavior are in ADR-011.
 
 ## References
 

@@ -508,7 +508,7 @@ async fn test_update_csv() -> Result<(), BundlebaseError> {
 }
 
 /// DELETE → COMMIT → REOPEN must persist the row exclusion via the
-/// tombstone file path: `commit()` writes a `.tomb`, the manifest
+/// deletion vector file path: `commit()` writes a `.overlay.tomb.puffin`, the manifest
 /// records a `DeleteOp`, and on `Bundle::open` the op replays
 /// `add_deleted_rows` onto each `DataBlock` so `DataBlock::scan`'s
 /// `DeletedRowFilterDataSource` keeps them out of every query.
@@ -530,10 +530,7 @@ async fn test_delete_persists_across_reopen() -> Result<(), BundlebaseError> {
     );
     builder.commit("delete high salaries").await?;
 
-    // Reopen and verify deletes still apply (the FilterOp from the
-    // session is also persisted, but we want the assertion to fail if
-    // either side stops working — so probe a query whose answer can
-    // only come out right when the tombstone is consulted at scan).
+    // Reopen and probe a query that requires the deletion vector at scan time.
     let bundle = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
     assert_eq!(
         bundle.num_rows().await?,
@@ -566,8 +563,8 @@ async fn test_delete_persists_across_reopen() -> Result<(), BundlebaseError> {
         yaml
     );
     assert!(
-        yaml.contains(".tomb"),
-        "delete op should reference a tombstone file:\n{}",
+        yaml.contains(".overlay.tomb.puffin"),
+        "delete op should reference a Puffin deletion vector file:\n{}",
         yaml
     );
 

@@ -8,6 +8,7 @@ pub mod page_filter;
 pub mod page_map;
 mod page_map_data_source;
 pub mod plugin;
+pub mod puffin;
 pub mod reader_factory;
 mod rowid_stream;
 mod streaming_jsonl_data_source;

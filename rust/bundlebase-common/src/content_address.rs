@@ -49,8 +49,8 @@ pub enum ContentFormat {
     Pagemap,
     /// Sorted value→RowId mapping format
     Rowmap,
-    /// Serialized RowId set format
-    Rowids,
+    /// Puffin deletion-vector container
+    Puffin,
     Yaml,
 }
 
@@ -72,7 +72,7 @@ impl fmt::Display for ContentFormat {
             ContentFormat::Dat => write!(f, "dat"),
             ContentFormat::Pagemap => write!(f, "pagemap"),
             ContentFormat::Rowmap => write!(f, "rowmap"),
-            ContentFormat::Rowids => write!(f, "rowids"),
+            ContentFormat::Puffin => write!(f, "puffin"),
             ContentFormat::Yaml => write!(f, "yaml"),
         }
     }
@@ -97,7 +97,7 @@ impl ContentFormat {
             "dat" => Ok(ContentFormat::Dat),
             "pagemap" => Ok(ContentFormat::Pagemap),
             "rowmap" => Ok(ContentFormat::Rowmap),
-            "rowids" => Ok(ContentFormat::Rowids),
+            "puffin" => Ok(ContentFormat::Puffin),
             "yaml" => Ok(ContentFormat::Yaml),
             _ => Err(format!("Unknown content format: {}", ext).into()),
         }
@@ -226,11 +226,11 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_tomb_rowids() {
+    fn test_overlay_tomb_puffin() {
         let addr =
-            ContentAddress::with_sub_type(ContentCategory::Overlay, "tomb", ContentFormat::Rowids)
+            ContentAddress::with_sub_type(ContentCategory::Overlay, "tomb", ContentFormat::Puffin)
                 .unwrap();
-        assert_eq!(addr.extension(), "overlay.tomb.rowids");
+        assert_eq!(addr.extension(), "overlay.tomb.puffin");
     }
 
     #[test]

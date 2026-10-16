@@ -52,6 +52,30 @@ Bundles record which bundlebase versions can read them:
 - `bundlebase upgrade-bundle` upgrades a bundle's format version to the
   current bundlebase version.
 
+## Persisted DELETE and UPDATE edits
+
+DELETE edits are stored in one content-addressed Puffin file per commit that
+contains pending deletes. The file uses the existing sharded `ContentAddress`
+layout and the `.overlay.tomb.puffin` suffix. It contains one standard
+deletion-vector blob per affected `(BlockId, version)`. Each blob carries the
+stable block ID and version as Bundlebase properties, and stores deleted row
+positions in the standard Puffin deletion-vector encoding. `DeleteOp` keeps
+the manifest fields `tombstone` and `where`; `where` records the predicate for
+history.
+
+On replay, vectors are unioned for the matching block version. A detached or
+replaced version that is no longer live is skipped, so a delete cannot attach
+to different content that reused the block ID. UPDATE remains a Parquet
+overlay keyed by the same stable block version; when concurrent commits update
+the same cell, the last overlay in manifest filename replay order wins.
+
+Bundles written with the previous tombstone container have no migration or
+legacy-reader path. Opening one must report an unsupported tombstone format.
+Missing or corrupt deletion files also fail replay clearly rather than
+silently restoring deleted rows. Puffin standardization and Roaring encoding
+may reduce delete-file size, but make no query-performance promise. This does
+not implement checkpoints or make bundles Iceberg tables.
+
 ## Commit Workflow
 
 ```python

@@ -14,17 +14,18 @@ use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Operation that records a tombstone file for deleted rows.
 ///
-/// The tombstone file contains the RowIds of deleted rows in binary format.
+/// The Puffin file contains deletion vectors keyed by block ID and version.
 /// Row exclusion happens at the DataBlock/reader scan level, so `apply_dataframe()`
 /// is a no-op.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteOp {
-    /// Filename of the tombstone file (e.g., "a3f8b2c1d4e5.tomb")
+    /// Filename of the tombstone file (e.g., "a3f8b2c1d4e5.overlay.tomb.puffin")
     pub tombstone: String,
     /// The WHERE clause(s) that produced this delete, stored for historical reference only.
     #[serde(rename = "where")]
@@ -73,33 +74,51 @@ impl Operation for DeleteOp {
             .await
             .map_err(|e| DataFusionError::External(e))?;
 
-        let bytes = match bytes {
-            Some(b) => b,
-            None => {
-                log::warn!("Tombstone file not found: {}", self.tombstone);
-                return Ok(());
-            }
-        };
+        let bytes = bytes.ok_or_else(|| {
+            DataFusionError::Execution(format!("DELETE Puffin file not found: {}", self.tombstone))
+        })?;
+        let deletions = tombstone::deserialize(&bytes).map_err(|error| {
+            DataFusionError::Execution(format!("Invalid DELETE file '{}': {error}", self.tombstone))
+        })?;
 
-        let selection =
-            tombstone::deserialize(&bytes).map_err(|e| DataFusionError::External(e))?;
-
-        // Distribute to the matching base-pack blocks by (BlockId, version) —
-        // never by position, which DETACH/REPLACE shift. Rows recorded against
-        // a version that is no longer attached don't apply (ADR-009).
+        // Validate every matching block before mutating any of them. Stale
+        // versions are skipped; their ordinals do not describe live content.
         let packs = bundle.packs().read().clone();
+        let mut pending = Vec::new();
         if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
-            for block in pack.blocks() {
-                let key = VersionedBlockId::new(*block.id(), block.version());
-                if let Some(rows) = selection.rows_for(&key) {
-                    block.add_deleted_rows(rows.iter().copied());
+            let blocks: HashMap<_, _> = pack
+                .blocks()
+                .into_iter()
+                .map(|block| (VersionedBlockId::new(*block.id(), block.version()), block))
+                .collect();
+            for deletion in &deletions {
+                if let Some(block) = blocks.get(&deletion.block) {
+                    if let (Some(rows), Some(last)) = (block.num_rows(), deletion.rows.max()) {
+                        if last >= rows as u64 {
+                            return Err(DataFusionError::Execution(format!(
+                                "DELETE vector for {} references row {last} outside block with {rows} rows",
+                                deletion.block
+                            )));
+                        }
+                    }
+                    pending.push((block.clone(), &deletion.rows));
+                } else {
+                    log::debug!(
+                        "Skipping DELETE vector for inactive block {}",
+                        deletion.block
+                    );
                 }
             }
+        }
+        let deleted_count: u64 = deletions.iter().map(|d| d.rows.len()).sum();
+        for (block, rows) in pending {
+            // deserialize checked every ordinal fits u32 before any expansion.
+            block.add_deleted_rows(rows.iter().map(|row| row as u32));
         }
 
         log::debug!(
             "Loaded {} deleted rows from {}",
-            selection.len(),
+            deleted_count,
             self.tombstone
         );
 
@@ -128,21 +147,21 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DeleteOp::new("a3f8b2c1d4e5.tomb", "id = 1");
-        assert_eq!(op.describe(), "DELETE: a3f8b2c1d4e5.tomb");
+        let op = DeleteOp::new("a3f8b2c1d4e5.overlay.tomb.puffin", "id = 1");
+        assert_eq!(op.describe(), "DELETE: a3f8b2c1d4e5.overlay.tomb.puffin");
     }
 
     #[test]
     fn test_serialization() {
-        let op = DeleteOp::new("abc123def456.tomb", "salary < 0");
+        let op = DeleteOp::new("abc123def456.overlay.tomb.puffin", "salary < 0");
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(yaml.contains("tombstone"));
-        assert!(yaml.contains("abc123def456.tomb"));
+        assert!(yaml.contains("abc123def456.overlay.tomb.puffin"));
         assert!(yaml.contains("where"));
         assert!(yaml.contains("salary < 0"));
 
         let deserialized: DeleteOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
-        assert_eq!(deserialized.tombstone, "abc123def456.tomb");
+        assert_eq!(deserialized.tombstone, "abc123def456.overlay.tomb.puffin");
         assert_eq!(deserialized.where_clause, "salary < 0");
     }
 }

@@ -40,6 +40,8 @@ log = "0.4"
 lazy_static = "1.5"
 lru = "0.18"
 memchr = "2"
+roaring = "0.11.5"
+crc32fast = "1"
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 

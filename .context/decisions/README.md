@@ -64,7 +64,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 - `002-datafusion-arrow.md`
 - `010-some-future-decision.md`
 
-**Next available number:** 011
+**Next available number:** 012
 
 ## Process
 
@@ -89,6 +89,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 | [008](008-no-mod-rs.md) | No mod.rs Files | Accepted |
 | [009](009-block-level-edit-representation.md) | Block-Level Tombstones/Overlays Are the Sole Edit Representation | Accepted |
 | [010](010-trust-model.md) | Trust Model: Trusted Client, Untrusted Bundle Data | Accepted |
+| [011](011-puffin-deletion-vectors.md) | Puffin Deletion Vectors for DELETE Persistence | Accepted |
 
 ## References
 

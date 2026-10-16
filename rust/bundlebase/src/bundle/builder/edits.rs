@@ -299,7 +299,10 @@ impl BundleBuilder {
     /// Collect the live rows matching a WHERE clause (internal names) across
     /// all base-pack blocks, evaluated against current (overlay-applied)
     /// values. Already-deleted rows are never re-selected (bb-nt8).
-    pub async fn select_row_ids(&self, where_clause: &str) -> Result<RowSelection, BundlebaseError> {
+    pub async fn select_row_ids(
+        &self,
+        where_clause: &str,
+    ) -> Result<RowSelection, BundlebaseError> {
         self.select_row_ids_impl(where_clause, None).await
     }
 
@@ -445,13 +448,14 @@ impl BundleBuilder {
         let data_dir = self.bundle.data_dir();
 
         if !deletes.is_empty() {
-            let bytes = tombstone::serialize(&deletes)?;
+            let locations = self.bundle.build_block_location_map();
+            let bytes = tombstone::serialize(&deletes, &locations)?;
             debug!("[DELETE] Writing tombstone file ({} bytes)", bytes.len());
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(bytes)]);
             let address = bundlebase_common::ContentAddress::with_sub_type(
                 bundlebase_common::ContentCategory::Overlay,
                 "tomb",
-                bundlebase_common::ContentFormat::Rowids,
+                bundlebase_common::ContentFormat::Puffin,
             )?;
             let written = data_dir.write_stream(Box::pin(stream), &address).await?;
             let filename = data_dir.relative_path(written.file.as_ref())?;
@@ -556,18 +560,17 @@ impl BundleBuilder {
             .await?;
         while let Some(batch_result) = stream.next().await {
             let rowid_batch = batch_result?;
-            let row_numbers: Vec<u32> = rowid_batch
-                .row_ids
-                .iter()
-                .map(|r| r.row_number())
-                .collect();
+            let row_numbers: Vec<u32> =
+                rowid_batch.row_ids.iter().map(|r| r.row_number()).collect();
             let batch = DataBlock::rename_batch_to_internal_names(&rowid_batch.batch, &column_ids)?;
-            let batch = UpdateOverlay::apply_to_batch(&overlays, &batch, &column_ids, &row_numbers)?;
+            let batch =
+                UpdateOverlay::apply_to_batch(&overlays, &batch, &column_ids, &row_numbers)?;
             let input_schema = batch.schema();
 
             let mut config = SessionConfig::new();
             config.options_mut().sql_parser.enable_ident_normalization = false;
-            let temp_ctx = SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
+            let temp_ctx =
+                SessionContext::new_with_config_rt(config, self.bundle.ctx().runtime_env());
             temp_ctx.register_batch("__edit_batch", batch)?;
 
             let df = temp_ctx.sql(&sql).await.map_err(|e| {

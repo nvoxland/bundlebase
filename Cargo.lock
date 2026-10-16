@@ -1135,6 +1135,7 @@ dependencies = [
  "bundlebase-index",
  "bundlebase-io",
  "bytes",
+ "crc32fast",
  "datafusion",
  "futures",
  "lazy_static",
@@ -1146,6 +1147,7 @@ dependencies = [
  "parking_lot",
  "parquet",
  "postcard",
+ "roaring",
  "serde",
  "serde_json",
  "tempfile",
@@ -6761,6 +6763,16 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "roaring"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18bd8a37d17a58532776dcdf6041ce64929adca78e8489d5cacbafe99229d3e1"
+dependencies = [
+ "bytemuck",
+ "byteorder",
 ]
 
 [[package]]
