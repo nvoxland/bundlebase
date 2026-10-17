@@ -69,6 +69,29 @@ pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
     serde_json::to_string_pretty(&columns).map_err(|e| format!("JSON error: {}", e))
 }
 
+/// The same validated document returned by Rust and Python semantic_model().
+pub async fn get_semantic_model(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
+    let document = bundle.semantic_model().await.map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&document).map_err(|e| e.to_string())
+}
+
+/// Apply through the builder's normal granular edit lifecycle.
+pub async fn apply_semantic_model(
+    bundle: &Arc<dyn BundleFacade>,
+    document: &serde_json::Value,
+    replace: bool,
+) -> Result<String, String> {
+    let builder = bundle
+        .as_any()
+        .downcast_ref::<bundlebase::BundleBuilder>()
+        .ok_or("Cannot apply a semantic model to a read-only bundle")?;
+    builder
+        .apply_semantic_model(document, replace)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok("Applied semantic model as native metadata edits".to_string())
+}
+
 /// Assemble a bundle's full self-description into one agent-facing JSON blob:
 /// name, description, lineage, provenance (sources), the transformation record,
 /// commit history, and the column schema. An agent that reads this before
@@ -76,6 +99,13 @@ pub async fn get_schema(bundle: &Arc<dyn BundleFacade>) -> Result<String, String
 /// where it came from, and how it was shaped, not just column names/types.
 pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, String> {
     let columns = columns_json(bundle).await?;
+
+    // Native introspection remains available when strict portable projection
+    // rejects an unsupported expression, dialect, or physical type.
+    let (semantic_model, semantic_model_error) = match bundle.semantic_model().await {
+        Ok(document) => (Some(document), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
 
     let row_count = bundle.num_rows().await.map_err(|e| format!("{}", e))?;
 
@@ -107,8 +137,11 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
         .collect();
 
     // The transformation record — how the data was shaped, in order.
-    let transformations: Vec<String> =
-        bundle.operations().iter().map(|op| op.to_string()).collect();
+    let transformations: Vec<String> = bundle
+        .operations()
+        .iter()
+        .map(|op| op.to_string())
+        .collect();
 
     let history = bundle.history();
     let latest_commit = history.last().map(|c| {
@@ -129,6 +162,8 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
         "row_count": row_count,
         "columns": columns,
         "metrics": metrics,
+        "semantic_model": semantic_model,
+        "semantic_model_error": semantic_model_error,
         "sources": sources,
         "transformations": transformations,
         "history": {
@@ -144,7 +179,10 @@ pub async fn get_describe(bundle: &Arc<dyn BundleFacade>) -> Result<String, Stri
 /// data sample, in one call. This is the ideal first thing an agent reads
 /// after opening a bundle — it gets what the data is (describe) and what it
 /// looks like (sample) together.
-pub async fn get_analyze(bundle: &Arc<dyn BundleFacade>, sample_limit: usize) -> Result<String, String> {
+pub async fn get_analyze(
+    bundle: &Arc<dyn BundleFacade>,
+    sample_limit: usize,
+) -> Result<String, String> {
     let describe: serde_json::Value = serde_json::from_str(&get_describe(bundle).await?)
         .map_err(|e| format!("JSON error: {}", e))?;
     let sample: serde_json::Value = serde_json::from_str(&get_sample(bundle, sample_limit).await?)
@@ -188,10 +226,7 @@ pub async fn get_data_quality(bundle: &Arc<dyn BundleFacade>) -> Result<String, 
         .iter()
         .map(|c| {
             let mut v = serde_json::to_value(c).map_err(|e| format!("JSON error: {}", e))?;
-            v["cast_hint"] = json!(c
-                .suggested_cast
-                .as_deref()
-                .map(|t| cast_hint(&c.name, t)));
+            v["cast_hint"] = json!(c.suggested_cast.as_deref().map(|t| cast_hint(&c.name, t)));
             Ok(v)
         })
         .collect::<Result<_, String>>()?;
@@ -448,12 +483,17 @@ mod tests {
             .await
             .expect("set description");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
 
         let json: serde_json::Value = serde_json::from_str(
-            &get_describe(&bundle).await.expect("describe should succeed"),
+            &get_describe(&bundle)
+                .await
+                .expect("describe should succeed"),
         )
         .expect("valid JSON");
 
@@ -471,7 +511,9 @@ mod tests {
         // The ATTACH is part of the transformation record.
         let transforms = json["transformations"].as_array().expect("transformations");
         assert!(
-            transforms.iter().any(|t| t.as_str().unwrap_or("").contains("ATTACH")),
+            transforms
+                .iter()
+                .any(|t| t.as_str().unwrap_or("").contains("ATTACH")),
             "transformation record must include the ATTACH, got: {transforms:?}"
         );
         assert!(json["history"]["commit_count"].is_number());
@@ -487,14 +529,20 @@ mod tests {
             .downcast_ref::<BundleBuilder>()
             .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
 
         // Set a column description via the SQL command through the MCP query path.
-        execute_query(&bundle, "DESCRIBE COLUMN salary AS 'annual gross pay in USD'")
-            .await
-            .expect("describe column");
+        execute_query(
+            &bundle,
+            "DESCRIBE COLUMN salary AS 'annual gross pay in USD'",
+        )
+        .await
+        .expect("describe column");
 
         // schema tool surfaces it.
         let schema: Vec<serde_json::Value> =
@@ -529,9 +577,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
 
@@ -565,20 +619,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_semantic_tools_share_projection_and_native_edits() {
+        let bundle = create_test_bundle().await;
+        let mut document = bundle.semantic_model().await.expect("projection");
+        let projected: serde_json::Value =
+            serde_json::from_str(&get_semantic_model(&bundle).await.expect("semantic tool"))
+                .expect("JSON");
+        assert_eq!(projected, document);
+
+        document["ai_context"] = json!({"instructions": "Use declared metrics"});
+        apply_semantic_model(&bundle, &document, false)
+            .await
+            .expect("native apply");
+        let description: serde_json::Value =
+            serde_json::from_str(&get_describe(&bundle).await.expect("describe")).expect("JSON");
+        assert_eq!(
+            description["semantic_model"],
+            bundle.semantic_model().await.expect("current projection")
+        );
+        assert!(description["semantic_model_error"].is_null());
+
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
+        builder.commit("semantic model").await.expect("commit");
+        let readonly: Arc<dyn BundleFacade> = bundlebase::Bundle::open(bundle.url().as_str(), None)
+            .await
+            .expect("open");
+        assert!(apply_semantic_model(&readonly, &document, false)
+            .await
+            .expect_err("read-only write must fail")
+            .contains("read-only"));
+    }
+
+    #[tokio::test]
     async fn test_analyze_combines_describe_and_sample() {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
 
         let json: serde_json::Value =
             serde_json::from_str(&get_analyze(&bundle, 3).await.expect("analyze")).expect("json");
         // Has both the describe blob and a bounded sample.
-        assert!(json["describe"]["columns"].as_array().expect("columns").len() > 1);
+        assert!(
+            json["describe"]["columns"]
+                .as_array()
+                .expect("columns")
+                .len()
+                > 1
+        );
         let sample = json["sample"].as_array().expect("sample");
         assert!(sample.len() <= 3 && !sample.is_empty());
     }
@@ -588,16 +689,21 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
 
-        let json: serde_json::Value = serde_json::from_str(
-            &get_data_quality(&bundle).await.expect("data_quality"),
-        )
-        .expect("json");
+        let json: serde_json::Value =
+            serde_json::from_str(&get_data_quality(&bundle).await.expect("data_quality"))
+                .expect("json");
 
         let total = json["total_rows"].as_i64().expect("total");
         assert!(total > 0);
@@ -629,7 +735,10 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
             .attach(
                 bundlebase::test_utils::test_datafile("customers-0-100.csv"),
@@ -641,7 +750,11 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
         let cols = json["columns"].as_array().expect("columns");
-        let col = |n: &str| cols.iter().find(|c| c["name"] == n).expect("column present");
+        let col = |n: &str| {
+            cols.iter()
+                .find(|c| c["name"] == n)
+                .expect("column present")
+        };
 
         // Numeric-looking text -> suggest an integer cast, with an actionable hint.
         assert_eq!(col("Index")["suggested_cast"], "BIGINT");
@@ -668,7 +781,10 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
             .attach(
                 bundlebase::test_utils::test_datafile("zero-padded.csv"),
@@ -680,7 +796,11 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
         let cols = json["columns"].as_array().expect("columns");
-        let col = |n: &str| cols.iter().find(|c| c["name"] == n).expect("column present");
+        let col = |n: &str| {
+            cols.iter()
+                .find(|c| c["name"] == n)
+                .expect("column present")
+        };
 
         // "007"/"012" would cast cleanly to BIGINT -- but the padding is meaningful.
         assert!(
@@ -721,12 +841,21 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
-        builder.rename_column("gender", "no_data").await.expect("rename");
+        builder
+            .rename_column("gender", "no_data")
+            .await
+            .expect("rename");
 
         let json: serde_json::Value =
             serde_json::from_str(&get_data_quality(&bundle).await.expect("dq")).expect("json");
@@ -744,9 +873,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
         execute_query(&bundle, "CREATE METRIC payroll AS 'SUM(salary)'")
@@ -757,7 +892,9 @@ mod tests {
             .expect("rename");
 
         let json: serde_json::Value = serde_json::from_str(
-            &get_metric(&bundle, "payroll", &[], 10).await.expect("metric"),
+            &get_metric(&bundle, "payroll", &[], 10)
+                .await
+                .expect("metric"),
         )
         .expect("json");
         assert_eq!(json["expression"], "SUM(pay)");
@@ -773,9 +910,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
         execute_query(
@@ -786,7 +929,9 @@ mod tests {
         .expect("create metric");
 
         let json: serde_json::Value = serde_json::from_str(
-            &get_metric(&bundle, "avg_salary", &[], 10).await.expect("metric"),
+            &get_metric(&bundle, "avg_salary", &[], 10)
+                .await
+                .expect("metric"),
         )
         .expect("json");
 
@@ -809,9 +954,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
         execute_query(&bundle, "CREATE METRIC headcount AS 'COUNT(*)'")
@@ -829,7 +980,10 @@ mod tests {
         assert!(rows.len() >= 2, "grouping by gender yields multiple groups");
         // Each row carries the dimension value plus the metric.
         for row in rows {
-            assert!(row.get("gender").is_some(), "dimension column present: {row}");
+            assert!(
+                row.get("gender").is_some(),
+                "dimension column present: {row}"
+            );
             assert!(row["headcount"].is_number(), "metric present: {row}");
         }
         assert_eq!(json["dimensions"][0], "gender");
@@ -840,9 +994,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
         execute_query(&bundle, "CREATE METRIC avg_salary AS 'AVG(salary)'")
@@ -863,9 +1023,15 @@ mod tests {
         use bundlebase_command::BundleBuilderExt;
 
         let bundle = create_test_bundle().await;
-        let builder = bundle.as_any().downcast_ref::<BundleBuilder>().expect("builder");
+        let builder = bundle
+            .as_any()
+            .downcast_ref::<BundleBuilder>()
+            .expect("builder");
         builder
-            .attach(bundlebase::test_utils::test_datafile("userdata.parquet"), None)
+            .attach(
+                bundlebase::test_utils::test_datafile("userdata.parquet"),
+                None,
+            )
             .await
             .expect("attach");
         execute_query(&bundle, "CREATE METRIC headcount AS 'COUNT(*)'")
@@ -875,7 +1041,10 @@ mod tests {
         let err = get_metric(&bundle, "headcount", &["not_a_column".to_string()], 10)
             .await
             .expect_err("unknown dimension must error");
-        assert!(err.contains("not_a_column"), "names the bad dimension: {err}");
+        assert!(
+            err.contains("not_a_column"),
+            "names the bad dimension: {err}"
+        );
     }
 
     #[tokio::test]

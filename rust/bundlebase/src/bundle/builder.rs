@@ -676,7 +676,7 @@ impl BundleBuilder {
                 let is_commit_time_op =
                     matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
                 if is_commit_time_op {
-                    self.bundle.apply_operation(op.clone()).await?;
+                    Box::pin(self.bundle.apply_operation(op.clone())).await?;
                     applied = true;
                 }
             }
@@ -779,7 +779,7 @@ impl BundleBuilder {
         let changes = self.status.read().changes().clone();
         for change in &changes {
             for op in &change.operations {
-                self.bundle.apply_operation(op.clone()).await?;
+                Box::pin(self.bundle.apply_operation(op.clone())).await?;
             }
         }
 
@@ -920,7 +920,7 @@ impl BundleBuilder {
             return Err(format!("Operation '{}' is not allowed on a view", op.describe()).into());
         }
 
-        self.bundle.apply_operation(op.clone()).await?;
+        Box::pin(self.bundle.apply_operation(op.clone())).await?;
 
         self.in_progress_change
             .write()
@@ -1141,19 +1141,15 @@ impl BundleBuilder {
     /// change. Called once per user-facing command at the outermost
     /// finalize point of `do_change` / `run_command` — never mid-command.
     async fn auto_reindex_if_attach_or_replace(&self) -> Result<(), BundlebaseError> {
-        let needs = self
-            .in_progress_change
-            .read()
-            .as_ref()
-            .is_some_and(|c| {
-                !c.suppress_auto_reindex
-                    && c.operations.iter().any(|op| {
-                        matches!(
-                            op,
-                            AnyOperation::AttachBlock(_) | AnyOperation::ReplaceBlock(_)
-                        )
-                    })
-            });
+        let needs = self.in_progress_change.read().as_ref().is_some_and(|c| {
+            !c.suppress_auto_reindex
+                && c.operations.iter().any(|op| {
+                    matches!(
+                        op,
+                        AnyOperation::AttachBlock(_) | AnyOperation::ReplaceBlock(_)
+                    )
+                })
+        });
         if !needs {
             return Ok(());
         }

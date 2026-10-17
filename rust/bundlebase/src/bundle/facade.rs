@@ -84,60 +84,37 @@ pub trait BundleFacade: Send + Sync {
         super::bundle_schema::translate_identifiers_in_sql(&columns_resolved, &fn_map)
     }
 
-    /// Resolve the bundle's metrics (from `DefineMetric` operations),
-    /// last-write-wins by name, in definition order. Metrics are metadata
-    /// replayed from the operation list, so this reflects committed +
-    /// in-session state. Expressions are stored against stable column ids and
-    /// returned here with the columns' *current* user-visible names.
+    /// Resolve semantic metadata from committed and pending operations.
+    fn semantic_state(&self) -> super::semantic_state::SemanticState {
+        let live_columns = self.bundle_schema().columns().keys().copied().collect();
+        super::semantic_state::SemanticState::resolve(&self.operations(), &live_columns)
+    }
+
+    /// A valid Ossie view of the bundle's current semantic metadata.
+    async fn semantic_model(&self) -> Result<serde_json::Value, BundlebaseError> {
+        super::semantic_model::semantic_model(self).await
+    }
+
+    /// Named metrics with expressions rendered using current public names.
     fn metrics(&self) -> Vec<super::operation::MetricDefinition> {
-        use super::operation::MetricDefinition;
-        let mut by_name: std::collections::HashMap<String, MetricDefinition> =
-            std::collections::HashMap::new();
-        let mut order: Vec<String> = Vec::new();
-        for op in self.operations() {
-            match op {
-                AnyOperation::DefineMetric(m) => {
-                    if !by_name.contains_key(&m.name) {
-                        order.push(m.name.clone());
-                    }
-                    by_name.insert(
-                        m.name.clone(),
-                        MetricDefinition {
-                            name: m.name,
-                            expression: m.expression,
-                            description: m.description,
-                        },
-                    );
-                }
-                // A DROP removes the name; a later DEFINE can re-add it (the
-                // trailing filter_map drops any `order` entry no longer present).
-                AnyOperation::DropMetric(d) => {
-                    by_name.remove(&d.name);
-                }
-                _ => {}
-            }
-        }
-        order
+        self.semantic_state()
+            .metrics
             .into_iter()
-            .filter_map(|n| by_name.remove(&n))
-            .map(|m| MetricDefinition {
-                expression: self.display_sql(&m.expression),
-                ..m
+            .map(|(name, metric)| super::operation::MetricDefinition {
+                name,
+                expression: self.display_sql(&metric.expression),
+                description: metric.description,
             })
             .collect()
     }
 
-    /// Resolve column descriptions (from `DescribeColumn` operations) keyed by
-    /// `ColumnId`, last-write-wins. Descriptions are metadata replayed from the
-    /// operation list, so this reflects the current committed + in-session state.
+    /// Descriptions keyed by live, stable column IDs.
     fn column_descriptions(&self) -> HashMap<ColumnId, String> {
-        let mut out = HashMap::new();
-        for op in self.operations() {
-            if let AnyOperation::DescribeColumn(d) = op {
-                out.insert(d.id, d.description);
-            }
-        }
-        out
+        self.semantic_state()
+            .columns
+            .into_iter()
+            .filter_map(|(id, column)| column.description.map(|description| (id, description)))
+            .collect()
     }
 
     /// Column descriptions keyed by each column's *current* user-visible name

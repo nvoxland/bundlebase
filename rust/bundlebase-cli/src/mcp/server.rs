@@ -117,6 +117,17 @@ pub struct BundleKeyParams {
     pub bundle: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ApplySemanticModelParams {
+    /// Identifier of an open writable bundle.
+    pub bundle: String,
+    /// Valid Apache Ossie document; supported metadata becomes native edits.
+    pub document: serde_json::Value,
+    /// Clear omitted supported metadata when true (default false).
+    #[serde(default)]
+    pub replace: bool,
+}
+
 /// Parameter struct for the `generate_report` tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GenerateReportParams {
@@ -344,6 +355,42 @@ impl BundlebaseMcpServer {
         match result {
             Ok(json) => Ok(CallToolResult::success(vec![ContentBlock::text(json)])),
             Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e)])),
+        }
+    }
+
+    #[tool(
+        name = "semantic_model",
+        description = "Get the validated Apache Ossie semantic model projected from current native metadata. Uses the same document as Rust and Python; unsupported portable expressions return an error."
+    )]
+    async fn semantic_model(
+        &self,
+        Parameters(params): Parameters<BundleKeyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(bundle) => bundle,
+            Err(error) => return Ok(CallToolResult::error(vec![ContentBlock::text(error)])),
+        };
+        match tools::get_semantic_model(&bundle).await {
+            Ok(document) => Ok(CallToolResult::success(vec![ContentBlock::text(document)])),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(error)])),
+        }
+    }
+
+    #[tool(
+        name = "apply_semantic_model",
+        description = "Apply supported metadata from an Apache Ossie document as native granular edits on a writable bundle. replace=true also clears omitted supported metadata. Dataset schema and data are unchanged."
+    )]
+    async fn apply_semantic_model(
+        &self,
+        Parameters(params): Parameters<ApplySemanticModelParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = match self.get_bundle(&params.bundle).await {
+            Ok(bundle) => bundle,
+            Err(error) => return Ok(CallToolResult::error(vec![ContentBlock::text(error)])),
+        };
+        match tools::apply_semantic_model(&bundle, &params.document, params.replace).await {
+            Ok(message) => Ok(CallToolResult::success(vec![ContentBlock::text(message)])),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(error)])),
         }
     }
 

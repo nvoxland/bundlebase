@@ -19,6 +19,7 @@ connector-kaggle = ["bundlebase-connector/connector-kaggle"]
 connector-web-scrape = ["bundlebase-connector/connector-web-scrape"]
 
 [dependencies]
+bundlebase-ossie = { workspace = true }
 bundlebase-common = { workspace = true }
 bundlebase-connector = { workspace = true }
 bundlebase-data = { workspace = true }

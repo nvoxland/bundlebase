@@ -77,6 +77,13 @@ pub use builder::{
     SetDescriptionCommand, SetNameCommand, UndoCommand, UpdateCommand, VerifyDataCommand,
 };
 
+pub use builder::{
+    AlterColumnCommand, AlterDatasetCommand, AlterMetricCommand, AlterSemanticModelCommand,
+    DeclarePrimaryKeyCommand, DeclareUniqueKeyCommand, DropPrimaryKeyCommand, DropUniqueKeyCommand,
+    ImportSemanticModelCommand, SemanticPropertyChange,
+};
+pub use facade::{ExportSemanticModelCommand, ShowSemanticModelCommand};
+
 // Re-export verification result types
 pub use builder::{FileVerificationResult, VerificationResults};
 
@@ -115,6 +122,8 @@ pub use facade_ext::BundleFacadeCommandExt;
 /// It's a subset of `BundleCommand` that can be executed on a read-only `Bundle`.
 #[derive(Debug, Clone)]
 pub enum FacadeCommand {
+    ShowSemanticModel(ShowSemanticModelCommand),
+    ExportSemanticModel(ExportSemanticModelCommand),
     /// Export query results to a file
     ExportData(ExportDataCommand),
     /// Export the bundled source archive of a connector to a file
@@ -178,6 +187,14 @@ impl FacadeCommand {
         facade: &dyn BundleFacade,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
+            FacadeCommand::ShowSemanticModel(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ExportSemanticModel(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::ExportData(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -331,6 +348,8 @@ impl FacadeCommand {
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
+            FacadeCommand::ShowSemanticModel(_) => ShowSemanticModelCommand::output_schema(),
+            FacadeCommand::ExportSemanticModel(_) => ExportSemanticModelCommand::output_schema(),
             FacadeCommand::ExportData(_) => ExportDataCommand::output_schema(),
             FacadeCommand::ExportSource(_) => ExportSourceCommand::output_schema(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_schema(),
@@ -372,6 +391,8 @@ impl FacadeCommand {
     /// Returns the expected output shape for display formatting.
     pub fn output_shape(&self) -> OutputShape {
         match self {
+            FacadeCommand::ShowSemanticModel(_) => ShowSemanticModelCommand::output_shape(),
+            FacadeCommand::ExportSemanticModel(_) => ExportSemanticModelCommand::output_shape(),
             FacadeCommand::ExportData(_) => ExportDataCommand::output_shape(),
             FacadeCommand::ExportSource(_) => ExportSourceCommand::output_shape(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_shape(),
@@ -418,6 +439,8 @@ impl BundleCommand {
     /// Returns `Err` with a descriptive error message if this is a mutating command.
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
+            BundleCommand::ShowSemanticModel(cmd) => Ok(FacadeCommand::ShowSemanticModel(cmd)),
+            BundleCommand::ExportSemanticModel(cmd) => Ok(FacadeCommand::ExportSemanticModel(cmd)),
             BundleCommand::ExportData(cmd) => Ok(FacadeCommand::ExportData(cmd)),
             BundleCommand::ExportSource(cmd) => Ok(FacadeCommand::ExportSource(cmd)),
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
@@ -475,6 +498,15 @@ impl BundleCommand {
                     BundleCommand::DropCastColumn(_) => "DROP CAST COLUMN",
                     BundleCommand::DropColumn(_) => "ALTER TABLE DROP COLUMN",
                     BundleCommand::RenameColumn(_) => "ALTER TABLE RENAME COLUMN",
+                    BundleCommand::AlterColumn(_) => "ALTER COLUMN",
+                    BundleCommand::AlterMetric(_) => "ALTER METRIC",
+                    BundleCommand::AlterSemanticModel(_) => "ALTER SEMANTIC MODEL",
+                    BundleCommand::AlterDataset(_) => "ALTER DATASET",
+                    BundleCommand::DeclarePrimaryKey(_) => "DECLARE PRIMARY KEY",
+                    BundleCommand::DeclareUniqueKey(_) => "DECLARE UNIQUE KEY",
+                    BundleCommand::DropPrimaryKey(_) => "DROP PRIMARY KEY",
+                    BundleCommand::DropUniqueKey(_) => "DROP UNIQUE KEY",
+                    BundleCommand::ImportSemanticModel(_) => "IMPORT SEMANTIC MODEL",
                     BundleCommand::DescribeColumn(_) => "DESCRIBE COLUMN",
                     BundleCommand::DefineMetric(_) => "CREATE METRIC",
                     BundleCommand::DropMetric(_) => "DROP METRIC",
@@ -507,7 +539,9 @@ impl BundleCommand {
                     BundleCommand::VerifyData(_) => "VERIFY DATA UPDATE",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportEmpty(_) => "EXPORT EMPTY",
-                    BundleCommand::ExportData(_)
+                    BundleCommand::ShowSemanticModel(_)
+                    | BundleCommand::ExportSemanticModel(_)
+                    | BundleCommand::ExportData(_)
                     | BundleCommand::ExportSource(_)
                     | BundleCommand::DescribeConnector(_)
                     | BundleCommand::DescribeFunction(_)
@@ -556,7 +590,9 @@ impl BundleCommand {
     pub fn is_facade_command(&self) -> bool {
         matches!(
             self,
-            BundleCommand::ExportData(_)
+            BundleCommand::ShowSemanticModel(_)
+                | BundleCommand::ExportSemanticModel(_)
+                | BundleCommand::ExportData(_)
                 | BundleCommand::ExportSource(_)
                 | BundleCommand::DescribeConnector(_)
                 | BundleCommand::DescribeFunction(_)
@@ -864,6 +900,26 @@ register_commands! {
         ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
             "REPLACE" => "REPLACE '<old_location>' WITH '<new_location>'",
 
+        // Native semantic property commands
+        AlterColumn(AlterColumnCommand) => Rule::alter_column_stmt,
+            "ALTER COLUMN" => "ALTER COLUMN <name> SET|DROP DESCRIPTION|LABEL|AI CONTEXT [MEMBER <name>] ['<value>']",
+        AlterMetric(AlterMetricCommand) => Rule::alter_metric_stmt,
+            "ALTER METRIC" => "ALTER METRIC <name> SET EXPRESSION|DESCRIPTION|AI CONTEXT [MEMBER <name>] '<value>' | DROP DESCRIPTION|AI CONTEXT [MEMBER <name>]",
+        AlterSemanticModel(AlterSemanticModelCommand) => Rule::alter_semantic_model_stmt,
+            "ALTER SEMANTIC MODEL" => "ALTER SEMANTIC MODEL SET|DROP DESCRIPTION|AI CONTEXT [MEMBER <name>] ['<value>']",
+        AlterDataset(AlterDatasetCommand) => Rule::alter_dataset_stmt,
+            "ALTER DATASET" => "ALTER DATASET bundle SET|DROP DESCRIPTION|AI CONTEXT [MEMBER <name>] ['<value>']",
+        DeclarePrimaryKey(DeclarePrimaryKeyCommand) => Rule::declare_primary_key_stmt,
+            "DECLARE PRIMARY KEY" => "DECLARE PRIMARY KEY (<column>, ...)",
+        DeclareUniqueKey(DeclareUniqueKeyCommand) => Rule::declare_unique_key_stmt,
+            "DECLARE UNIQUE KEY" => "DECLARE UNIQUE KEY (<column>, ...)",
+        DropPrimaryKey(DropPrimaryKeyCommand) => Rule::drop_primary_key_stmt,
+            "DROP PRIMARY KEY" => "DROP PRIMARY KEY",
+        DropUniqueKey(DropUniqueKeyCommand) => Rule::drop_unique_key_stmt,
+            "DROP UNIQUE KEY" => "DROP UNIQUE KEY (<column>, ...)",
+        ImportSemanticModel(ImportSemanticModelCommand) => Rule::import_semantic_model_stmt,
+            "IMPORT SEMANTIC MODEL" => "IMPORT SEMANTIC MODEL FROM '<path>' [MERGE|REPLACE]",
+
         // Schema commands
         AddColumn(AddColumnCommand) => Rule::add_column_stmt,
             "ADD COLUMN" => "ADD COLUMN <name> AS <expression>",
@@ -960,6 +1016,10 @@ register_commands! {
             "VERIFY DATA" => "VERIFY DATA [UPDATE]",
     }
     facade {
+        ShowSemanticModel(ShowSemanticModelCommand) => Rule::show_semantic_model_stmt,
+            "SHOW SEMANTIC MODEL" => "SHOW SEMANTIC MODEL",
+        ExportSemanticModel(ExportSemanticModelCommand) => Rule::export_semantic_model_stmt,
+            "EXPORT SEMANTIC MODEL" => "EXPORT SEMANTIC MODEL TO '<path>'",
         ExportData(ExportDataCommand) => Rule::export_data_stmt,
             "EXPORT DATA" => "EXPORT DATA TO '<path>' <sql>",
         ExportSource(ExportSourceCommand) => Rule::export_source_stmt,

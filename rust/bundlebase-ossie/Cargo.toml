@@ -1,0 +1,15 @@
+[package]
+name = "bundlebase-ossie"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Pinned Apache Ossie semantic model types and offline document validation"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+jsonschema = { version = "0.58.2", default-features = false }

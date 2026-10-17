@@ -318,6 +318,160 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Apply an Ossie dict as granular native metadata edits. With replace=True,
+    /// omitted supported metadata is cleared. The dataset schema is not changed.
+    #[pyo3(signature = (document, replace=false))]
+    fn apply_semantic_model<'py>(
+        &self,
+        document: &Bound<'_, pyo3::types::PyDict>,
+        replace: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let document = super::semantic::value_from_py(document.as_any())?;
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .apply_semantic_model(&document, replace)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to apply semantic model", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }))
+        })
+    }
+
+    /// Preview the ordinary operations a document would apply without mutating.
+    #[pyo3(signature = (document, replace=false))]
+    fn preview_semantic_model<'py>(
+        &self,
+        document: &Bound<'_, pyo3::types::PyDict>,
+        replace: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let document = super::semantic::value_from_py(document.as_any())?;
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let operations = ::bundlebase::bundle::semantic_model::document_operations(
+                &inner, &document, replace,
+            )
+            .await
+            .map_err(|e| to_py_error_ctx("Failed to preview semantic model", e))?;
+            Ok(operations
+                .into_iter()
+                .map(super::operation::PyOperation::new)
+                .collect::<Vec<_>>())
+        })
+    }
+
+    /// Import an Ossie JSON/YAML file through the normal storage abstraction.
+    #[pyo3(signature = (path, replace=false))]
+    fn import_semantic_model<'py>(
+        &self,
+        path: String,
+        replace: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .import_semantic_model(&path, replace)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to import semantic model", e))?;
+            Python::attach(|py| Py::new(py, PyBundleBuilder { inner }))
+        })
+    }
+
+    #[pyo3(signature = (name, label=None))]
+    fn set_column_label<'py>(
+        &self,
+        name: String,
+        label: Option<String>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        use bundlebase_command::builder::{AlterColumnCommand, SemanticPropertyChange};
+        super::semantic::mutate(
+            py,
+            self.inner.clone(),
+            bundlebase_command::BundleCommand::AlterColumn(AlterColumnCommand {
+                name,
+                change: SemanticPropertyChange::Label(label),
+            }),
+        )
+    }
+
+    fn set_metric_expression<'py>(
+        &self,
+        name: String,
+        expression: String,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        use bundlebase_command::builder::{AlterMetricCommand, SemanticPropertyChange};
+        super::semantic::mutate(
+            py,
+            self.inner.clone(),
+            bundlebase_command::BundleCommand::AlterMetric(AlterMetricCommand {
+                name,
+                change: SemanticPropertyChange::Expression(expression),
+            }),
+        )
+    }
+
+    #[pyo3(signature = (name, description=None))]
+    fn set_metric_description<'py>(
+        &self,
+        name: String,
+        description: Option<String>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        use bundlebase_command::builder::{AlterMetricCommand, SemanticPropertyChange};
+        super::semantic::mutate(
+            py,
+            self.inner.clone(),
+            bundlebase_command::BundleCommand::AlterMetric(AlterMetricCommand {
+                name,
+                change: SemanticPropertyChange::Description(description),
+            }),
+        )
+    }
+
+    /// Set or clear AI context on model/dataset/column/metric. Column and metric
+    /// targets require name; member optionally edits one structured context key.
+    #[pyo3(signature = (target, context=None, *, name=None, member=None))]
+    fn set_ai_context<'py>(
+        &self,
+        target: &str,
+        context: Option<&Bound<'_, PyAny>>,
+        name: Option<String>,
+        member: Option<String>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        use bundlebase_command::builder::{
+            AlterColumnCommand, AlterDatasetCommand, AlterMetricCommand, AlterSemanticModelCommand,
+            SemanticPropertyChange,
+        };
+        use bundlebase_command::BundleCommand;
+        let change = SemanticPropertyChange::AiContext {
+            member,
+            value: context.map(super::semantic::value_from_py).transpose()?,
+        };
+        let command = match (target, name) {
+            ("model", None) => {
+                BundleCommand::AlterSemanticModel(AlterSemanticModelCommand { change })
+            }
+            ("dataset", None) => BundleCommand::AlterDataset(AlterDatasetCommand { change }),
+            ("column", Some(name)) => {
+                BundleCommand::AlterColumn(AlterColumnCommand { name, change })
+            }
+            ("metric", Some(name)) => {
+                BundleCommand::AlterMetric(AlterMetricCommand { name, change })
+            }
+            _ => {
+                return Err(to_py_error(
+                    "target must be model/dataset without name, or column/metric with name",
+                ))
+            }
+        };
+        super::semantic::mutate(py, self.inner.clone(), command)
+    }
+
     /// Define (or redefine) a named metric — a canonical, reusable aggregate
     /// expression (the "how to compute the numbers" half of the semantic layer).
     /// Travels in the bundle and is surfaced to agents. Mutates the bundle in
@@ -1874,7 +2028,36 @@ impl PyBundleBuilder {
             .collect()
     }
 
-    /// Named metrics defined on the bundle, in definition order, as
+    /// Execute SQL or a Bundlebase command using the normal command dispatcher.
+    #[pyo3(signature = (sql, params=None))]
+    fn execute<'py>(
+        &self,
+        sql: String,
+        params: Option<Vec<Py<PyAny>>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::execute(py, self.inner.clone() as Arc<dyn BundleFacade>, sql, params)
+    }
+
+    /// Project the current native metadata as a validated Apache Ossie dict.
+    fn semantic_model<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::semantic_model(py, self.inner.clone() as Arc<dyn BundleFacade>)
+    }
+
+    /// Export the shared semantic projection to a .json, .yaml, or .yml path.
+    fn export_semantic_model<'py>(
+        &self,
+        path: String,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::export_semantic_model(
+            py,
+            self.inner.clone() as Arc<dyn BundleFacade>,
+            path,
+        )
+    }
+
+    /// Named metrics defined on the bundle, in name order, as
     /// `{"name", "expression", "description"}` dicts. Expressions use the
     /// columns' current names.
     fn metrics(&self) -> Vec<HashMap<String, Option<String>>> {

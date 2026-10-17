@@ -29,8 +29,8 @@ There is no separate `BundleState` type — schema/name tracking is handled by `
 
 ### Workspace Crates
 
-The Rust workspace has 12 crates under `rust/`:
-`bundlebase` (core), `bundlebase-command` (command parsing + `BundleBuilderExt`), `bundlebase-cli` (CLI binary), `bundlebase-python` (PyO3 bindings), `bundlebase-common` (errors, RowId, ObjectId, Platform, arrow type parsing), `bundlebase-data` (reader plugins, DataReaderFactory), `bundlebase-io` (storage abstraction), `bundlebase-catalog` (DataFusion `bundle_info.*` schema providers), `bundlebase-connector` (connector definitions), `bundlebase-index` (BTree indexes), `bundlebase-udf` (function runtimes/bridges), `bundlebase-report` (report generation).
+The Rust workspace has 13 crates under `rust/`:
+`bundlebase` (core), `bundlebase-ossie` (portable semantic document types and schema validation), `bundlebase-command` (command parsing + `BundleBuilderExt`), `bundlebase-cli` (CLI binary), `bundlebase-python` (PyO3 bindings), `bundlebase-common` (errors, RowId, ObjectId, Platform, arrow type parsing), `bundlebase-data` (reader plugins, DataReaderFactory), `bundlebase-io` (storage abstraction), `bundlebase-catalog` (DataFusion `bundle_info.*` schema providers), `bundlebase-connector` (connector definitions), `bundlebase-index` (BTree indexes), `bundlebase-udf` (function runtimes/bridges), `bundlebase-report` (report generation).
 
 ## Operation Pipeline
 
@@ -343,6 +343,72 @@ Each column has a stable `ColumnId` (64-bit hex, e.g., `0a3f1b2c9d4e7f80`) assig
 This design means stored operations are resilient to column renames — an `ALWAYS DELETE WHERE col_<id> < 0` remains valid even if the column is renamed.
 
 **Key files**: `bundle/bundle_schema.rs` (helpers: `generate_internal_name()`, `parse_internal_name()`, `translate_sql()`, `rename_to_real_names()`), `bundle/data_block.rs`, `bundle/schema_rename_filter.rs`.
+
+## Native Semantic Metadata
+
+`BundleFacade::semantic_state()` folds the ordinary operation history into one
+`SemanticState`. It includes committed and pending operations when called on a
+builder. `metrics()`, column description accessors, Arrow descriptions, and the
+Ossie view consume this state; none maintains a separate mutable document store.
+Model name and description retain the existing bundle properties.
+
+The state owns model and dataset AI context, dataset description, per-column
+description/label/AI context, named metric expression/description/AI context,
+one ordered primary key, and separate unique-key declarations. Columns use
+stable `ColumnId` values; metrics use exact case-sensitive names. Stored metric
+SQL references internal column/function IDs and is rendered with current names
+at public read boundaries. Keys declare intent and never scan or constrain data.
+Unique-key identity normalizes member sets while preserving declared display
+order. Primary-key order is significant.
+
+Property edits use concrete operations registered in `define_any_operation!`:
+`SetMetricExpressionOp`, `SetMetricDescriptionOp`, `SetColumnLabelOp`,
+`ClearColumnDescriptionOp`, `SetAiContextOp`, `SetAiContextMemberOp`,
+`SetDatasetDescriptionOp`, `DeclareKeyOp`, and `DropKeyOp`, alongside the existing
+metric creation/removal and column description operations. Model description
+clearing uses `ClearDescriptionOp`. Their metadata `apply()` methods generally
+do nothing and retain the default unchanged `apply_dataframe()` behavior.
+
+The resolver folds operations in manifest order. Later writes to the same
+property win; writes to different properties survive independently. Dropping a
+metric removes its properties, setters against an absent metric do nothing,
+and a later explicit creation starts with fresh metadata. A definition updating
+an existing metric changes only its expression. Descriptions use separate
+property operations. Metadata for dropped columns and keys with missing columns is
+omitted. An invalidated metric expression remains readable until computation
+or export attempts to plan it.
+
+An AI context is a string or an object. Whole replacements overlap all member
+updates. Setting a member after a string or absent context establishes an
+object; removing a member from a string or absent context does nothing. Arrays
+are atomic member values. JSON null is a value only when the pinned member's
+schema permits it; removal is explicit. Known members are `instructions`
+(string), `synonyms` (string array), and `examples` (string array); extension
+members follow the schema's permissive additional-property rule.
+
+Authored operations validate targets and metric SQL before recording. Manifest
+loading checks persisted semantic operation structure without repeating target
+existence or SQL planning against a concurrently changed schema. Other
+operations retain their normal validation. This keeps ordinary combined
+metadata histories replayable without masking malformed metadata values.
+
+`BundleFacade::semantic_model()` projects a valid Ossie document on demand.
+`bundlebase-ossie` vendors an immutable upstream schema and examples, validates
+JSON/YAML offline, and is independent of Arrow and DataFusion. The adapter in
+`bundle/semantic_model.rs` accepts one dataset for the opened bundle, rejects
+unsupported dimensions/relationships and physical schema changes, and lowers
+a supplied document into ordinary property operations. MERGE leaves omitted
+metadata unchanged. Explicit REPLACE clears omitted supported metadata and
+removes omitted metrics within the opened model. Object AI context updates
+lower to top-level member writes; omission never becomes a persisted wildcard.
+An identical document produces no change. Application groups the diff in one
+`do_change`, so validation failure preserves pending work and undo removes the
+whole batch. Reads and exports do not commit or record operations.
+
+**Key files:** `bundle/semantic_state.rs`, `bundle/semantic_model.rs`,
+`bundle/operation/semantic_validation.rs`, `rust/bundlebase-ossie/`.
+
+**Decision:** [ADR-012](decisions/012-native-semantic-model.md).
 
 ## CLI Modes
 

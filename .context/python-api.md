@@ -530,6 +530,69 @@ v = await c2.view("active")  # Sees both data-1.csv and data-2.csv
 
 See [views.md](views.md) for detailed documentation on views architecture, storage structure, and advanced usage.
 
+## Native Semantic Metadata
+
+Both opened bundles and builders expose `await semantic_model() -> dict`, an
+Ossie snapshot of committed plus pending metadata, and
+`await export_semantic_model(path)`. The snapshot is detached; editing it has no
+effect until explicitly applied. Schema validation uses the pinned offline
+Ossie schema. Strict snapshots/exports accept the supported ANSI SQL subset;
+unsupported DataFusion or imported-function expressions remain valid native
+metrics and surface an actionable portability error at this boundary.
+
+Builders provide:
+
+- `await apply_semantic_model(document: dict, replace=False)` — one undoable
+  batch of ordinary operations; omitted properties remain unchanged by default.
+- `await preview_semantic_model(document: dict, replace=False)` — the same diff
+  as a list of `PyOperation` values, without recording it.
+- `await import_semantic_model(path, replace=False)` — parse JSON/YAML and apply
+  the same diff; extension must be `.json`, `.yaml`, or `.yml`.
+- `await set_column_label(name, label=None)`.
+- `await set_metric_expression(name, expression)`.
+- `await set_metric_description(name, description=None)`.
+- `await set_ai_context(target, context=None, *, name=None, member=None)`.
+
+AI targets are `model`, `dataset`, `column`, and `metric`; column and metric
+require `name`. `member` selects one top-level object member. `None` explicitly
+clears a context or member. Known object members have pinned schema types:
+`instructions` is a string; `synonyms` and `examples` are string arrays.
+Extension members may use any schema-permitted JSON value. Whole string
+contexts are atomic. A member set after a string or absent context establishes
+an object; a member removal in that situation does nothing.
+
+```python
+model = await builder.semantic_model()
+model["datasets"][0]["description"] = "One row per order"
+operations = await builder.preview_semantic_model(model)
+await builder.apply_semantic_model(model)
+await builder.set_metric_expression("revenue", "SUM(amount - discount)")
+await builder.set_ai_context("column", {"synonyms": ["net total"]}, name="amount")
+await builder.execute("DECLARE PRIMARY KEY (order_id)")
+await builder.export_semantic_model("sales.yaml")
+```
+
+`execute(sql, params=None)` runs normal Bundlebase commands and returns
+`QueryResult`; use it for `ALTER`, `DECLARE`, `SHOW SEMANTIC MODEL`, and other
+native commands. The command dispatcher enforces read-only bundle restrictions.
+The sync API exposes the same methods without `await`.
+
+`replace=True` selects all supported editable metadata in the opened model:
+omitted properties and key declarations are cleared and omitted metrics are
+dropped; physical columns are unchanged. Preview the full diff before applying
+replacement. Document application is atomic, produces no empty change for an
+identical snapshot, preserves existing pending work on validation failure, and
+never commits implicitly. A single undo removes the entire applied batch.
+
+Convenience readers `metrics()` and `column_descriptions()` consume
+`BundleFacade::semantic_state()`, as do metric computation, Arrow descriptions,
+and MCP. Metric expression updates do not overwrite independent descriptions
+or AI context. Stable column references survive renames. Keys declare intent
+and do not enforce data constraints.
+
+See [Native Semantic Metadata](architecture.md#native-semantic-metadata) and
+[ADR-012](decisions/012-native-semantic-model.md).
+
 ## Other Useful Methods
 
 Brief pointers to the rest of the surface (see `python/src/bundlebase/__init__.pyi` for full signatures):

@@ -714,7 +714,36 @@ impl PyBundle {
         })
     }
 
-    /// Named metrics defined on the bundle, in definition order, as
+    /// Execute SQL or a Bundlebase command using the normal command dispatcher.
+    #[pyo3(signature = (sql, params=None))]
+    fn execute<'py>(
+        &self,
+        sql: String,
+        params: Option<Vec<Py<PyAny>>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::execute(py, self.inner.clone() as Arc<dyn BundleFacade>, sql, params)
+    }
+
+    /// Project the current native metadata as a validated Apache Ossie dict.
+    fn semantic_model<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::semantic_model(py, self.inner.clone() as Arc<dyn BundleFacade>)
+    }
+
+    /// Export the shared semantic projection to a .json, .yaml, or .yml path.
+    fn export_semantic_model<'py>(
+        &self,
+        path: String,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        super::semantic::export_semantic_model(
+            py,
+            self.inner.clone() as Arc<dyn BundleFacade>,
+            path,
+        )
+    }
+
+    /// Named metrics defined on the bundle, in name order, as
     /// `{"name", "expression", "description"}` dicts. Expressions use the
     /// columns' current names.
     fn metrics(&self) -> Vec<HashMap<String, Option<String>>> {

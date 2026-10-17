@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/apache/ossie",
+  "commit": "64a1ae44035f5360dcd53401a29bcd900fdce349",
+  "schema_version": "0.2.0.dev0",
+  "files_sha256": {
+    "DISCLAIMER": "28222757247bc74429da67db2828c4621ac17eeca3bfe37078349375af81b535",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "NOTICE": "cdd61e3d225833b912985567730c9043394ae21e3ecfe619ed63cff5f170c59a",
+    "examples/flights.semantic_model.yaml": "e0652e489c1bbf69066c9c17109175721e7d9e7e27d302a5cae9747cabbac75e",
+    "examples/tpcds_semantic_model.yaml": "b339481f80c1c41d65396061f5d3104f339e4263bd759a2c4c92c0b9f4436af0",
+    "ossie-schema.json": "e1a1d9ad1cf2b33bc6b05a0d0d3a91b213e7ca034828a0bb76766bdb2e0b5ce1"
+  }
+}

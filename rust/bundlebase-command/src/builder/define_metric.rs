@@ -3,7 +3,7 @@
 use crate::parser::{extract_identifier, extract_string_content, quote_identifier};
 use crate::BundleBuilderCommand;
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::DefineMetricOp;
+use bundlebase::bundle::operation::{DefineMetricOp, SetMetricDescriptionOp};
 use bundlebase::BundleBuilder;
 use bundlebase_common::BundlebaseError;
 
@@ -52,8 +52,8 @@ impl CommandParsing for DefineMetricCommand {
             }
         }
 
-        let name = name
-            .ok_or_else(|| -> BundlebaseError { "CREATE METRIC missing metric name".into() })?;
+        let name =
+            name.ok_or_else(|| -> BundlebaseError { "CREATE METRIC missing metric name".into() })?;
         let mut strings = strings.into_iter();
         let expression = strings
             .next()
@@ -84,12 +84,19 @@ impl BundleBuilderCommand for DefineMetricCommand {
         // Store column/function references by stable id (`col_<id>`/`fn_<id>`)
         // so the metric survives renames; `metrics()` renders current names.
         let translated = builder.translate_sql(&self.expression);
+        // CREATE is an explicit definition in every writer's history. Do not
+        // turn it into an existence-dependent ALTER based on a local snapshot:
+        // a later definition must recreate a concurrently removed metric.
         builder
-            .apply_operation(
-                DefineMetricOp::setup(&self.name, &translated, self.description.as_deref())
-                    .into(),
-            )
+            .apply_operation(DefineMetricOp::setup(&self.name, &translated).into())
             .await?;
+        if let Some(description) = &self.description {
+            builder
+                .apply_operation(
+                    SetMetricDescriptionOp::setup(&self.name, Some(description)).into(),
+                )
+                .await?;
+        }
         Ok(format!("Defined metric: {}", self.name))
     }
 }

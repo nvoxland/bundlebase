@@ -3,11 +3,14 @@ mod always_delete;
 mod always_update;
 mod attach_block;
 mod cast_column;
+mod clear_column_description;
+mod clear_description;
 mod create_index;
 mod create_join;
 mod create_report;
 mod create_source;
 mod create_view;
+mod declare_key;
 mod delete;
 mod detach_block;
 mod drop_always_delete;
@@ -18,6 +21,7 @@ mod drop_connector;
 mod drop_function;
 mod drop_index;
 mod drop_join;
+mod drop_key;
 mod drop_metric;
 mod drop_report;
 mod drop_view;
@@ -36,13 +40,22 @@ mod rename_view;
 mod replace_block;
 mod save_config;
 pub(crate) mod serde_util;
+mod semantic_validation;
+mod set_ai_context;
+mod set_ai_context_member;
+mod set_column_label;
+mod set_dataset_description;
 mod set_description;
 mod set_max_version;
+mod set_metric_description;
+mod set_metric_expression;
 mod set_min_version;
 mod set_name;
 mod update_data;
 mod update_version;
 
+pub use semantic_validation::SemanticTarget;
+pub(crate) use semantic_validation::check_semantic_replay;
 use crate::bundle::bundle_schema::BundleSchema;
 pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
@@ -51,11 +64,14 @@ pub use crate::bundle::operation::attach_block::{
     AttachBlockOp, BatchedSource, SharedAttachContext, SourceInfo,
 };
 pub use crate::bundle::operation::cast_column::CastColumnOp;
+pub use crate::bundle::operation::clear_column_description::ClearColumnDescriptionOp;
+pub use crate::bundle::operation::clear_description::ClearDescriptionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::create_join::CreateJoinOp;
 pub use crate::bundle::operation::create_report::CreateReportOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
+pub use crate::bundle::operation::declare_key::DeclareKeyOp;
 pub use crate::bundle::operation::delete::DeleteOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_always_delete::DropAlwaysDeleteOp;
@@ -66,6 +82,7 @@ pub use crate::bundle::operation::drop_connector::DropConnectorOp;
 pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_join::DropJoinOp;
+pub use crate::bundle::operation::drop_key::DropKeyOp;
 pub use crate::bundle::operation::drop_report::DropReportOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
@@ -82,8 +99,14 @@ pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::save_config::SaveConfigOp;
+pub use crate::bundle::operation::set_ai_context::SetAiContextOp;
+pub use crate::bundle::operation::set_ai_context_member::SetAiContextMemberOp;
+pub use crate::bundle::operation::set_column_label::SetColumnLabelOp;
+pub use crate::bundle::operation::set_dataset_description::SetDatasetDescriptionOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_max_version::SetMaxVersionOp;
+pub use crate::bundle::operation::set_metric_description::SetMetricDescriptionOp;
+pub use crate::bundle::operation::set_metric_expression::SetMetricExpressionOp;
 pub use crate::bundle::operation::set_min_version::SetMinVersionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_data::UpdateDataOp;
@@ -276,6 +299,15 @@ macro_rules! define_any_operation {
 // Define all operations in one place.
 // To add a new operation, simply add a line here.
 define_any_operation! {
+    SetMetricExpression(SetMetricExpressionOp),
+    SetMetricDescription(SetMetricDescriptionOp),
+    SetColumnLabel(SetColumnLabelOp),
+    ClearColumnDescription(ClearColumnDescriptionOp),
+    SetAiContext(SetAiContextOp),
+    SetAiContextMember(SetAiContextMemberOp),
+    SetDatasetDescription(SetDatasetDescriptionOp),
+    DeclareKey(DeclareKeyOp),
+    DropKey(DropKeyOp),
     AddColumn(AddColumnOp),
     AlwaysDelete(AlwaysDeleteOp),
     AlwaysUpdate(AlwaysUpdateOp),
@@ -314,6 +346,7 @@ define_any_operation! {
     ReplaceBlock(ReplaceBlockOp),
     SaveConfig(SaveConfigOp),
     SetDescription(SetDescriptionOp),
+    ClearDescription(ClearDescriptionOp),
     SetMaxVersion(SetMaxVersionOp),
     SetMinVersion(SetMinVersionOp),
     SetName(SetNameOp),

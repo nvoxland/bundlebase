@@ -26,7 +26,10 @@ _CONVERSION_METHODS = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyar
 # would clobber the builder, so they are handled like conversions: execute the
 # queued chain first, then call the public method on the result and return ITS
 # value. Nothing can be chained after a terminal method.
-_TERMINAL_METHODS = {"commit", "query", "fetch", "fetch_all"}
+_TERMINAL_METHODS = {
+    "commit", "query", "execute", "fetch", "fetch_all",
+    "semantic_model", "preview_semantic_model", "export_semantic_model",
+}
 
 # Methods that finalize a chain by executing it and delegating to the result.
 _FINALIZING_METHODS = _CONVERSION_METHODS | _TERMINAL_METHODS

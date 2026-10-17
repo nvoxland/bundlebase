@@ -79,6 +79,14 @@ schema_stmt = {
     | cast_column_stmt
     | add_column_stmt
     | normalize_column_names_stmt
+    | alter_column_stmt
+    | alter_metric_stmt
+    | alter_semantic_model_stmt
+    | alter_dataset_stmt
+    | declare_primary_key_stmt
+    | declare_unique_key_stmt
+    | drop_primary_key_stmt
+    | drop_unique_key_stmt
     | create_metric_stmt
     | drop_metric_stmt
     | create_view_stmt
@@ -126,7 +134,10 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    export_data_stmt
+    show_semantic_model_stmt
+    | export_semantic_model_stmt
+    | import_semantic_model_stmt
+    | export_data_stmt
     | export_empty_stmt
     | export_source_stmt
     | show_details_stmt
@@ -1082,3 +1093,31 @@ show_reports_stmt = { ^"show" ~ ^"reports" }
 generate_report_stmt = {
     ^"generate" ~ ^"report" ~ report_id
 }
+
+// Semantic metadata changes lower to ordinary property operations.
+alter_column_stmt = { ^"alter" ~ ^"column" ~ identifier ~ (set_column_property | drop_column_property) }
+set_column_property = { ^"set" ~ (semantic_description | semantic_label | semantic_ai_context) ~ semantic_member? ~ quoted_string }
+drop_column_property = { ^"drop" ~ (semantic_description | semantic_label | semantic_ai_context) ~ semantic_member? }
+alter_metric_stmt = { ^"alter" ~ ^"metric" ~ identifier ~ (set_metric_property | drop_metric_property) }
+set_metric_property = { ^"set" ~ (semantic_expression | semantic_description | semantic_ai_context) ~ semantic_member? ~ quoted_string }
+drop_metric_property = { ^"drop" ~ (semantic_description | semantic_ai_context) ~ semantic_member? }
+alter_semantic_model_stmt = { ^"alter" ~ ^"semantic" ~ ^"model" ~ (set_model_property | drop_model_property) }
+set_model_property = { ^"set" ~ (semantic_description | semantic_ai_context) ~ semantic_member? ~ quoted_string }
+drop_model_property = { ^"drop" ~ (semantic_description | semantic_ai_context) ~ semantic_member? }
+alter_dataset_stmt = { ^"alter" ~ ^"dataset" ~ ^"bundle" ~ (set_dataset_property | drop_dataset_property) }
+set_dataset_property = { ^"set" ~ (semantic_description | semantic_ai_context) ~ semantic_member? ~ quoted_string }
+drop_dataset_property = { ^"drop" ~ (semantic_description | semantic_ai_context) ~ semantic_member? }
+semantic_description = { ^"description" }
+semantic_label = { ^"label" }
+semantic_expression = { ^"expression" }
+semantic_ai_context = { ^"ai" ~ ^"context" }
+semantic_member = { ^"member" ~ identifier }
+declare_primary_key_stmt = { ^"declare" ~ ^"primary" ~ ^"key" ~ semantic_key_columns }
+declare_unique_key_stmt = { ^"declare" ~ ^"unique" ~ ^"key" ~ semantic_key_columns }
+drop_primary_key_stmt = { ^"drop" ~ ^"primary" ~ ^"key" }
+drop_unique_key_stmt = { ^"drop" ~ ^"unique" ~ ^"key" ~ semantic_key_columns }
+semantic_key_columns = { "(" ~ identifier ~ ("," ~ identifier)* ~ ")" }
+show_semantic_model_stmt = { ^"show" ~ ^"semantic" ~ ^"model" }
+export_semantic_model_stmt = { ^"export" ~ ^"semantic" ~ ^"model" ~ ^"to" ~ quoted_string }
+import_semantic_model_stmt = { ^"import" ~ ^"semantic" ~ ^"model" ~ ^"from" ~ quoted_string ~ semantic_import_mode? }
+semantic_import_mode = { ^"merge" | ^"replace" }

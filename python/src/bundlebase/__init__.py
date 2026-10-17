@@ -103,6 +103,13 @@ _original_methods = {
     "set_description": _PyBundleBuilder.set_description,
     "define_metric": _PyBundleBuilder.define_metric,
     "drop_metric": _PyBundleBuilder.drop_metric,
+    "apply_semantic_model": _PyBundleBuilder.apply_semantic_model,
+    "import_semantic_model": _PyBundleBuilder.import_semantic_model,
+    "set_column_label": _PyBundleBuilder.set_column_label,
+    "set_metric_expression": _PyBundleBuilder.set_metric_expression,
+    "set_metric_description": _PyBundleBuilder.set_metric_description,
+    "set_ai_context": _PyBundleBuilder.set_ai_context,
+
     "save_config": _PyBundleBuilder.save_config,
     "set_config": _PyBundleBuilder.set_config,
 
@@ -182,7 +189,9 @@ mutation_methods = [
     "import_function", "import_temp_function", "rename_function", "drop_function",
     "rename_connector", "create_report", "drop_report",
     "create_index", "drop_index", "rebuild_index", "reindex",
-    "reset", "undo"
+    "reset", "undo",
+    "apply_semantic_model", "import_semantic_model", "set_column_label",
+    "set_metric_expression", "set_metric_description", "set_ai_context",
 ]
 for method_name in mutation_methods:
     wrapped = _wrap_mutation_method(method_name)
@@ -299,6 +308,25 @@ async def _wrapped_builder_query(self, sql: str, params=None, hard_limit=None) -
 
 PyBundle.query = _wrapped_bundle_query
 PyBundleBuilder.query = _wrapped_builder_query
+
+# Commands use the same streaming result wrapper as SQL queries.
+_original_bundle_execute = PyBundle.execute
+_original_builder_execute = PyBundleBuilder.execute
+register_original_method("execute", _original_builder_execute)
+register_original_method("semantic_model", PyBundleBuilder.semantic_model)
+register_original_method("preview_semantic_model", PyBundleBuilder.preview_semantic_model)
+register_original_method("export_semantic_model", PyBundleBuilder.export_semantic_model)
+
+async def _wrapped_bundle_execute(self, sql: str, params=None) -> QueryResult:
+    """Execute SQL or a Bundlebase command and return streaming results."""
+    return QueryResult(await _original_bundle_execute(self, sql, params))
+
+async def _wrapped_builder_execute(self, sql: str, params=None) -> QueryResult:
+    """Execute SQL or a Bundlebase command and return streaming results."""
+    return QueryResult(await _original_builder_execute(self, sql, params))
+
+PyBundle.execute = _wrapped_bundle_execute
+PyBundleBuilder.execute = _wrapped_builder_execute
 
 # Wrap describe_data() to return QueryResult
 _original_bundle_describe_data = PyBundle.describe_data

@@ -103,8 +103,8 @@ async fn test_metric_persists_across_commit_reopen() -> Result<(), BundlebaseErr
         .find(|m| m.name == "total_salary")
         .expect("metric after reopen");
     assert_eq!(m.expression, "SUM(salary) / 1000", "last definition must win");
-    // The redefinition dropped the description (a fresh CREATE METRIC).
-    assert_eq!(m.description, None);
+    // Updating the expression leaves independently owned metadata intact.
+    assert_eq!(m.description.as_deref(), Some("gross payroll"));
     Ok(())
 }
 

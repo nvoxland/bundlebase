@@ -48,3 +48,6 @@ pub use show::{
 pub use show_count::ShowCountCommand;
 pub use syntax::SyntaxCommand;
 pub use test_connector::TestConnectorCommand;
+
+mod semantic_model;
+pub use semantic_model::{ShowSemanticModelCommand, ExportSemanticModelCommand};

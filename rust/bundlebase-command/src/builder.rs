@@ -119,3 +119,15 @@ pub(crate) fn extract_json_opts(
         Some(opts)
     }
 }
+
+mod alter_semantics;
+mod semantic_keys;
+mod import_semantic_model;
+pub use alter_semantics::{
+    AlterColumnCommand, AlterDatasetCommand, AlterMetricCommand, AlterSemanticModelCommand,
+    SemanticPropertyChange,
+};
+pub use semantic_keys::{
+    DeclarePrimaryKeyCommand, DeclareUniqueKeyCommand, DropPrimaryKeyCommand, DropUniqueKeyCommand,
+};
+pub use import_semantic_model::ImportSemanticModelCommand;

@@ -417,8 +417,20 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
 
+    def semantic_model(self) -> Dict[str, Any]:
+        """Project current native metadata as a validated Apache Ossie document."""
+        return _loop_manager.run_sync(_call_original_method(self._async, "semantic_model"))
+
+    def export_semantic_model(self, path: str) -> None:
+        """Export the semantic projection to a JSON or YAML file."""
+        return _loop_manager.run_sync(_call_original_method(self._async, "export_semantic_model", path))
+
+    def execute(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        return SyncQueryResult(_loop_manager.run_sync(_call_original_method(self._async, "execute", sql, params)))
+
     def metrics(self) -> List[Dict[str, Optional[str]]]:
-        """Named metrics defined on the bundle, in definition order.
+        """Named metrics defined on the bundle, in name order.
 
         Returns:
             List of ``{"name", "expression", "description"}`` dicts. Expressions
@@ -739,6 +751,40 @@ class SyncBundleBuilder(SyncBundle):
         """
         coro = _call_original_method(self._async, "describe_column", name, description)
         self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def apply_semantic_model(self, document: Dict[str, Any], replace: bool = False) -> "SyncBundleBuilder":
+        """Apply a document as ordinary native edits; replace also clears omitted metadata."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "apply_semantic_model", document, replace))
+        return self
+
+    def import_semantic_model(self, path: str, replace: bool = False) -> "SyncBundleBuilder":
+        """Import an Ossie JSON/YAML file as native metadata edits."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "import_semantic_model", path, replace))
+        return self
+
+    def preview_semantic_model(self, document: Dict[str, Any], replace: bool = False) -> List[Any]:
+        """Preview ordinary operations without mutating the bundle."""
+        return _loop_manager.run_sync(_call_original_method(self._async, "preview_semantic_model", document, replace))
+
+    def set_column_label(self, name: str, label: Optional[str] = None) -> "SyncBundleBuilder":
+        """Set a column label, or clear it with None."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "set_column_label", name, label))
+        return self
+
+    def set_metric_expression(self, name: str, expression: str) -> "SyncBundleBuilder":
+        """Change only a metric's expression."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "set_metric_expression", name, expression))
+        return self
+
+    def set_metric_description(self, name: str, description: Optional[str] = None) -> "SyncBundleBuilder":
+        """Set a metric description, or clear it with None."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "set_metric_description", name, description))
+        return self
+
+    def set_ai_context(self, target: str, context: Any = None, *, name: Optional[str] = None, member: Optional[str] = None) -> "SyncBundleBuilder":
+        """Set/clear AI context on model, dataset, column, or metric."""
+        self._async = _loop_manager.run_sync(_call_original_method(self._async, "set_ai_context", target, context, name=name, member=member))
         return self
 
     def define_metric(self, name: str, expression: str, description: Optional[str] = None) -> "SyncBundleBuilder":

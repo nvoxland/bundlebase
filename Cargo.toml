@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "rust/bundlebase-common",
+    "rust/bundlebase-ossie",
     "rust/bundlebase-io",
     "rust/bundlebase-connector",
     "rust/bundlebase-index",
@@ -26,6 +27,7 @@ authors = ["Nathan Voxland <nathan@voxland.net>"]
 
 [workspace.dependencies]
 bundlebase-common = { path = "rust/bundlebase-common" }
+bundlebase-ossie = { path = "rust/bundlebase-ossie" }
 bundlebase-connector = { path = "rust/bundlebase-connector" }
 bundlebase-index = { path = "rust/bundlebase-index" }
 bundlebase-data = { path = "rust/bundlebase-data" }

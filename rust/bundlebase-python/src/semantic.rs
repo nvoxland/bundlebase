@@ -8,11 +8,91 @@ use pyo3::types::{PyDict, PyList};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Preserve JSON value types while crossing the Python boundary.
+pub(crate) fn value_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
+    let text = serde_json::to_string(value)
+        .map_err(|e| value_error("Cannot serialize semantic metadata", e))?;
+    Ok(py.import("json")?.call_method1("loads", (text,))?.unbind())
+}
+
+pub(crate) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    let kwargs = PyDict::new(value.py());
+    kwargs.set_item("allow_nan", false)?;
+    let text: String = value
+        .py()
+        .import("json")?
+        .call_method("dumps", (value,), Some(&kwargs))?
+        .extract()?;
+    serde_json::from_str(&text).map_err(|e| value_error("Invalid semantic metadata", e))
+}
+
+pub(crate) fn semantic_model<'py>(
+    py: Python<'py>,
+    facade: Arc<dyn BundleFacade>,
+) -> PyResult<Bound<'py, PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let document = facade
+            .semantic_model()
+            .await
+            .map_err(|e| value_error("Failed to project semantic model", e))?;
+        Python::attach(|py| value_to_py(py, &document))
+    })
+}
+
+pub(crate) fn export_semantic_model<'py>(
+    py: Python<'py>,
+    facade: Arc<dyn BundleFacade>,
+    path: String,
+) -> PyResult<Bound<'py, PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        ::bundlebase::bundle::semantic_model::export_semantic_model(facade.as_ref(), &path)
+            .await
+            .map_err(|e| value_error("Failed to export semantic model", e))
+    })
+}
+
+pub(crate) fn mutate<'py>(
+    py: Python<'py>,
+    inner: Arc<::bundlebase::BundleBuilder>,
+    command: bundlebase_command::BundleCommand,
+) -> PyResult<Bound<'py, PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        command
+            .execute(&inner)
+            .await
+            .map_err(|e| value_error("Failed to update semantic metadata", e))?;
+        Python::attach(|py| Py::new(py, super::builder::PyBundleBuilder::new(inner)))
+    })
+}
+
+pub(crate) fn execute<'py>(
+    py: Python<'py>,
+    facade: Arc<dyn BundleFacade>,
+    sql: String,
+    params: Option<Vec<Py<PyAny>>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    use bundlebase_command::BundleFacadeCommandExt;
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let params = super::utils::convert_py_params(params.unwrap_or_default())?;
+        let stream = facade
+            .execute(&sql, params)
+            .await
+            .map_err(|e| value_error("Failed to execute command", e))?;
+        let schema = stream.schema();
+        Python::attach(|py| {
+            Py::new(
+                py,
+                super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+            )
+        })
+    })
+}
+
 fn value_error<E: std::fmt::Display>(context: &str, e: E) -> PyErr {
     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}: {}", context, e))
 }
 
-/// `[{"name", "expression", "description"}, ...]` in definition order.
+/// `[{"name", "expression", "description"}, ...]` in name order.
 pub(crate) fn metrics(facade: &dyn BundleFacade) -> Vec<HashMap<String, Option<String>>> {
     facade
         .metrics()

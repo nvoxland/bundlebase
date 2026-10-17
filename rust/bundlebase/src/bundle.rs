@@ -11,6 +11,8 @@ mod init;
 pub mod operation;
 mod pack;
 mod source;
+pub mod semantic_state;
+pub mod semantic_model;
 pub mod connector_entry {
     pub use bundlebase_udf::{parse_connector_name, resolve_connector, ConnectorEntry};
 }
@@ -951,7 +953,11 @@ impl Bundle {
         let description = &op.describe();
         debug!("Applying operation (deferred): {}...", &description);
 
-        op.check(self).await?;
+        if let Some(result) = operation::check_semantic_replay(&op) {
+            result?;
+        } else {
+            op.check(self).await?;
+        }
         op.apply(self).await?;
         self.operations.write().push(op);
 

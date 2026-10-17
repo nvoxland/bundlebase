@@ -19,6 +19,9 @@ impl SetNameOp {
 
 impl Operation for SetNameOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+        if self.name.trim().is_empty() {
+            return Err("Bundle name cannot be empty".into());
+        }
         Ok(())
     }
 

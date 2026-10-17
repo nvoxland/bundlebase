@@ -362,6 +362,18 @@ class PyBundle:
         """Commit history of the bundle."""
         ...
 
+    async def semantic_model(self) -> Dict[str, Any]:
+        """Validated Ossie projection of current native metadata."""
+        ...
+
+    async def export_semantic_model(self, path: str) -> None:
+        """Export the projection to a JSON/YAML file."""
+        ...
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = ...) -> "QueryResult":
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        ...
+
     def metrics(self) -> List[Dict[str, Optional[str]]]:
         """Named metrics as ``{"name", "expression", "description"}`` dicts (current column names)."""
         ...
@@ -1005,6 +1017,34 @@ class PyBundleBuilder:
         """
         ...
 
+    def apply_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> "OperationChain":
+        """Apply a document as granular native metadata edits."""
+        ...
+
+    def import_semantic_model(self, path: str, replace: bool = ...) -> "OperationChain":
+        """Import an Ossie JSON/YAML document."""
+        ...
+
+    async def preview_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> List[Any]:
+        """Preview ordinary operations without mutating the bundle."""
+        ...
+
+    def set_column_label(self, name: str, label: Optional[str] = ...) -> "OperationChain":
+        """Set or clear a column's label."""
+        ...
+
+    def set_metric_expression(self, name: str, expression: str) -> "OperationChain":
+        """Change only a metric expression."""
+        ...
+
+    def set_metric_description(self, name: str, description: Optional[str] = ...) -> "OperationChain":
+        """Set or clear only a metric description."""
+        ...
+
+    def set_ai_context(self, target: str, context: Any = ..., *, name: Optional[str] = ..., member: Optional[str] = ...) -> "OperationChain":
+        """Set or clear AI context on model/dataset/column/metric."""
+        ...
+
     def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "OperationChain":
         """
         Queue a define_metric operation.
@@ -1586,6 +1626,18 @@ class PyBundleBuilder:
         """Commit history of the bundle."""
         ...
 
+    async def semantic_model(self) -> Dict[str, Any]:
+        """Validated Ossie projection of current native metadata."""
+        ...
+
+    async def export_semantic_model(self, path: str) -> None:
+        """Export the projection to a JSON/YAML file."""
+        ...
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = ...) -> "QueryResult":
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        ...
+
     def metrics(self) -> List[Dict[str, Optional[str]]]:
         """Named metrics as ``{"name", "expression", "description"}`` dicts (current column names)."""
         ...
@@ -1774,6 +1826,46 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
+    async def semantic_model(self) -> Dict[str, Any]:
+        """Validated Ossie projection of current native metadata."""
+        ...
+
+    async def export_semantic_model(self, path: str) -> None:
+        """Export the projection to a JSON/YAML file."""
+        ...
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = ...) -> "QueryResult":
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        ...
+
+    def apply_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> "OperationChain":
+        """Apply a document as granular native metadata edits."""
+        ...
+
+    def import_semantic_model(self, path: str, replace: bool = ...) -> "OperationChain":
+        """Import an Ossie JSON/YAML document."""
+        ...
+
+    async def preview_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> List[Any]:
+        """Preview ordinary operations without mutating the bundle."""
+        ...
+
+    def set_column_label(self, name: str, label: Optional[str] = ...) -> "OperationChain":
+        """Set or clear a column's label."""
+        ...
+
+    def set_metric_expression(self, name: str, expression: str) -> "OperationChain":
+        """Change only a metric expression."""
+        ...
+
+    def set_metric_description(self, name: str, description: Optional[str] = ...) -> "OperationChain":
+        """Set or clear only a metric description."""
+        ...
+
+    def set_ai_context(self, target: str, context: Any = ..., *, name: Optional[str] = ..., member: Optional[str] = ...) -> "OperationChain":
+        """Set or clear AI context on model/dataset/column/metric."""
+        ...
+
     def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "OperationChain":
         """Queue a define_metric operation."""
         ...
@@ -1950,6 +2042,46 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
+    async def semantic_model(self) -> Dict[str, Any]:
+        """Validated Ossie projection of current native metadata."""
+        ...
+
+    async def export_semantic_model(self, path: str) -> None:
+        """Export the projection to a JSON/YAML file."""
+        ...
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = ...) -> "QueryResult":
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        ...
+
+    def apply_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> "CreateChain":
+        """Apply a document as granular native metadata edits."""
+        ...
+
+    def import_semantic_model(self, path: str, replace: bool = ...) -> "CreateChain":
+        """Import an Ossie JSON/YAML document."""
+        ...
+
+    async def preview_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> List[Any]:
+        """Preview ordinary operations without mutating the bundle."""
+        ...
+
+    def set_column_label(self, name: str, label: Optional[str] = ...) -> "CreateChain":
+        """Set or clear a column's label."""
+        ...
+
+    def set_metric_expression(self, name: str, expression: str) -> "CreateChain":
+        """Change only a metric expression."""
+        ...
+
+    def set_metric_description(self, name: str, description: Optional[str] = ...) -> "CreateChain":
+        """Set or clear only a metric description."""
+        ...
+
+    def set_ai_context(self, target: str, context: Any = ..., *, name: Optional[str] = ..., member: Optional[str] = ...) -> "CreateChain":
+        """Set or clear AI context on model/dataset/column/metric."""
+        ...
+
     def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "CreateChain":
         """Queue a define_metric operation."""
         ...
@@ -2124,6 +2256,46 @@ class ExtendChain:
 
     def set_description(self, description: str) -> "ExtendChain":
         """Queue a set_description operation."""
+        ...
+
+    async def semantic_model(self) -> Dict[str, Any]:
+        """Validated Ossie projection of current native metadata."""
+        ...
+
+    async def export_semantic_model(self, path: str) -> None:
+        """Export the projection to a JSON/YAML file."""
+        ...
+
+    async def execute(self, sql: str, params: Optional[List[Any]] = ...) -> "QueryResult":
+        """Execute SQL or a Bundlebase command using the normal dispatcher."""
+        ...
+
+    def apply_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> "ExtendChain":
+        """Apply a document as granular native metadata edits."""
+        ...
+
+    def import_semantic_model(self, path: str, replace: bool = ...) -> "ExtendChain":
+        """Import an Ossie JSON/YAML document."""
+        ...
+
+    async def preview_semantic_model(self, document: Dict[str, Any], replace: bool = ...) -> List[Any]:
+        """Preview ordinary operations without mutating the bundle."""
+        ...
+
+    def set_column_label(self, name: str, label: Optional[str] = ...) -> "ExtendChain":
+        """Set or clear a column's label."""
+        ...
+
+    def set_metric_expression(self, name: str, expression: str) -> "ExtendChain":
+        """Change only a metric expression."""
+        ...
+
+    def set_metric_description(self, name: str, description: Optional[str] = ...) -> "ExtendChain":
+        """Set or clear only a metric description."""
+        ...
+
+    def set_ai_context(self, target: str, context: Any = ..., *, name: Optional[str] = ..., member: Optional[str] = ...) -> "ExtendChain":
+        """Set or clear AI context on model/dataset/column/metric."""
         ...
 
     def define_metric(self, name: str, expression: str, description: Optional[str] = ...) -> "ExtendChain":
