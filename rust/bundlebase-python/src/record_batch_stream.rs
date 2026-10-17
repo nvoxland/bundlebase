@@ -1,5 +1,5 @@
 use arrow::datatypes::SchemaRef;
-use arrow::record_batch::RecordBatch;
+use arrow::record_batch::{RecordBatch, RecordBatchReader};
 use datafusion::physical_plan::SendableRecordBatchStream;
 use futures::StreamExt;
 use pyo3::prelude::*;
@@ -8,11 +8,11 @@ use std::sync::Arc;
 use super::schema::PySchema;
 
 /// The stream plus an optional one-batch look-ahead buffer used by `is_empty()`.
-struct StreamState {
-    stream: SendableRecordBatchStream,
+pub(crate) struct StreamState {
+    pub(crate) stream: SendableRecordBatchStream,
     /// A batch already pulled by `is_empty()` that `next_batch()`/`collect_all()`
     /// must return before polling the stream again.
-    peeked: Option<RecordBatch>,
+    pub(crate) peeked: Option<RecordBatch>,
 }
 
 /// Python-exposed wrapper around DataFusion's RecordBatch stream.
@@ -41,7 +41,7 @@ struct StreamState {
 #[pyclass]
 pub struct PyRecordBatchStream {
     /// The underlying stream + look-ahead, wrapped in an Arc for cheap cloning
-    inner: Arc<tokio::sync::Mutex<StreamState>>,
+    inner: Arc<tokio::sync::Mutex<Option<StreamState>>>,
     /// Cached schema for O(1) access
     schema: SchemaRef,
 }
@@ -50,10 +50,10 @@ impl PyRecordBatchStream {
     /// Create a new PyRecordBatchStream from a DataFusion stream
     pub fn new(stream: SendableRecordBatchStream, schema: SchemaRef) -> Self {
         PyRecordBatchStream {
-            inner: Arc::new(tokio::sync::Mutex::new(StreamState {
+            inner: Arc::new(tokio::sync::Mutex::new(Some(StreamState {
                 stream,
                 peeked: None,
-            })),
+            }))),
             schema,
         }
     }
@@ -61,6 +61,31 @@ impl PyRecordBatchStream {
 
 #[pymethods]
 impl PyRecordBatchStream {
+    /// Transfer the remaining stream to a standard, blocking PyArrow reader.
+    /// An active async read must finish before ownership can be transferred.
+    fn arrow_reader<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use arrow::pyarrow::IntoPyArrow;
+        let mut ownership = self.inner.try_lock().map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot export stream while an async read is in progress",
+            )
+        })?;
+        let state = ownership.take().ok_or_else(transferred_error)?;
+        // Keep a rollback handle until PyArrow has accepted ownership. Importing
+        // reads the schema but never polls the stream.
+        let pending = Arc::new(parking_lot::Mutex::new(Some(state)));
+        let reader: Box<dyn RecordBatchReader + Send> = Box::new(
+            crate::arrow_reader::BlockingArrowReader::new(self.schema.clone(), pending.clone()),
+        );
+        match reader.into_pyarrow(py) {
+            Ok(reader) => Ok(reader),
+            Err(error) => {
+                *ownership = pending.lock().take();
+                Err(error)
+            }
+        }
+    }
+
     /// Get the next RecordBatch from the stream.
     ///
     /// # Returns
@@ -80,7 +105,8 @@ impl PyRecordBatchStream {
     fn next_batch<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut guard = inner.lock().await;
+            let mut ownership = inner.lock().await;
+            let guard = ownership.as_mut().ok_or_else(transferred_error)?;
             // Return the look-ahead batch (if is_empty() pulled one) before polling.
             let next = match guard.peeked.take() {
                 Some(batch) => Some(Ok(batch)),
@@ -116,7 +142,8 @@ impl PyRecordBatchStream {
     fn collect_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut stream_guard = inner.lock().await;
+            let mut ownership = inner.lock().await;
+            let stream_guard = ownership.as_mut().ok_or_else(transferred_error)?;
             let mut batches = Vec::new();
             if let Some(batch) = stream_guard.peeked.take() {
                 batches.push(batch);
@@ -161,7 +188,8 @@ impl PyRecordBatchStream {
     fn is_empty<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut guard = inner.lock().await;
+            let mut ownership = inner.lock().await;
+            let guard = ownership.as_mut().ok_or_else(transferred_error)?;
             if guard.peeked.is_some() {
                 return Ok(false);
             }
@@ -178,4 +206,8 @@ impl PyRecordBatchStream {
             }
         })
     }
+}
+
+fn transferred_error() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err("Stream has been transferred to an Arrow reader")
 }

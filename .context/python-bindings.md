@@ -146,3 +146,24 @@ await c.import_temp_function("acme.double_val", "python::my_module:double_val")
 ```
 
 Python-runtime functions/connectors are session-only (`import_temp_*`); persistent imports (`import_function` / `import_connector`) require a serializable runtime (ipc, ffi, etc.).
+
+## Standard Arrow Stream Export
+
+`arrow_reader()` prepares a query asynchronously, then returns a real
+`pyarrow.RecordBatchReader` through Arrow's C Stream interface. Its synchronous
+batch reader owns the Rust stream and schema and polls execution on the shared
+Tokio runtime. There is no Python asyncio callback for each batch and no runtime
+or producer thread per reader. Blocking consumption must release the Python GIL
+so Rust queries can call Python functions and connectors.
+
+`PyRecordBatchStream` transfers ownership atomically, including a batch cached by
+`is_empty()`. An active async read and a second transfer cannot consume the same
+stream. The exported reader owns its query resources independently of the Python
+wrapper and the asyncio loop that created it. Schema reads do not advance the
+stream. Close/drop releases remaining resources without draining the query;
+batches already returned retain their Arrow buffers.
+
+The pure-Python `QueryResult` marks itself consumed after successful export.
+Bundle and builder methods prepare independent streams on each call. The
+synchronous wrapper uses the same preparation path and returns the standard
+reader directly. See [ADR-013](decisions/013-arrow-stream-export.md).

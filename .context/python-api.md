@@ -215,6 +215,7 @@ for batch in batches:
 | **to_numpy()** | NumPy array operations, ML | Full materialization (via `as_pyarrow()`) |
 | **to_dict()** | Generic Python usage, JSON serialization | Full materialization |
 | **as_pyarrow()** | Legacy batch access (uses DataFusion `collect()`) | Full materialization |
+| **arrow_reader()** | Standard Arrow consumers, including DuckDB | Bounded bridge buffering |
 | **stream_batches()** | **Incremental processing of large datasets** | **Bounded** (one batch at a time) |
 
 **Important notes:**
@@ -227,6 +228,30 @@ for batch in batches:
   - `to_dict()` → `Dict[str, list]`
   - `as_pyarrow()` → `List[pyarrow.RecordBatch]` (legacy, prefer `stream_batches()`)
   - `stream_batches()` → `AsyncIterator[pyarrow.RecordBatch]`
+
+## Standard Arrow Reader
+
+`await bundle.arrow_reader()` and `await builder.arrow_reader()` create a fresh
+`pyarrow.RecordBatchReader` over the prepared bundle query. For selection, call
+`query(sql, params)` first, then `await result.arrow_reader()`. `arrow_reader()`
+takes no SQL arguments and is also a terminal method on an `OperationChain`.
+
+```python
+result = await bundle.query("SELECT region, amount FROM bundle WHERE year = $1", [2026])
+reader = await result.arrow_reader()
+```
+
+Preparation is async; the returned reader is synchronous and one-shot. Exporting
+a `QueryResult` transfers ownership of its stream, so subsequent conversions or
+exports raise the consumed-result error. Each bundle/builder call creates an
+independent reader. EOF uses normal Arrow iteration semantics. Close a partially
+consumed reader to release its query resources without reading the remaining rows.
+
+Use `stream_batches()` for async batch processing. Run blocking consumers such
+as DuckDB in `asyncio.to_thread()` when an asyncio loop must remain responsive.
+Filters in Bundlebase SQL can use normal source pruning; filters applied by
+DuckDB to an issued reader do not reduce Bundlebase source IO. See the
+[DuckDB guide](../docs/guide/duckdb.md).
 
 ## Streaming API for Large Datasets
 

@@ -185,7 +185,7 @@ All operations work synchronously without `await`:
   result = c.query("SELECT id, name FROM bundle WHERE id = $1 LIMIT 10", [42])
   df = result.to_pandas()
   ```
-  `SyncQueryResult` provides `to_pandas()`, `to_polars()`, `to_pyarrow()`, `to_dict()`, and `stream_batches()`.
+  `SyncQueryResult` provides `to_pandas()`, `to_polars()`, `to_pyarrow()`, `to_dict()`, `arrow_reader()`, and `stream_batches()`.
 
 - **`num_rows() -> int`** - Get row count
 - **`to_pandas() -> DataFrame`** - Convert to pandas (materializes the full DataFrame)
@@ -193,6 +193,7 @@ All operations work synchronously without `await`:
 - **`to_dict() -> Dict`** - Convert to dict
 - **`to_numpy() -> Dict`** - Convert to numpy arrays
 - **`as_pyarrow()`** - Get all data as PyArrow batches (materializes; prefer `stream_batches()`)
+- **`arrow_reader() -> pyarrow.RecordBatchReader`** - Create a standard synchronous Arrow reader. Each bundle/builder call creates a fresh stream; exporting a `SyncQueryResult` consumes that result. A reader is one-shot, so recreate it for another scan. See the [DuckDB guide](../docs/guide/duckdb.md).
 - **`stream_batches(sql: Optional[str] = None)`** - Yield RecordBatches one at a time (bounded memory). With `sql`, streams that query's results instead of the full bundle.
 - **`explain(verbose=False, analyze=False, format=None, sql=None) -> ExplainResult`** - Get query plan (printable result)
 - **`describe_data(columns) -> SyncQueryResult`** - Per-column quality stats

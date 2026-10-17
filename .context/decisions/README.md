@@ -64,7 +64,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 - `002-datafusion-arrow.md`
 - `010-some-future-decision.md`
 
-**Next available number:** 013
+**Next available number:** 014
 
 ## Process
 
@@ -91,6 +91,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 | [010](010-trust-model.md) | Trust Model: Trusted Client, Untrusted Bundle Data | Accepted |
 | [011](011-puffin-deletion-vectors.md) | Puffin Deletion Vectors for DELETE Persistence | Accepted |
 | [012](012-native-semantic-model.md) | Native Semantic Metadata with an Ossie View | Accepted |
+| [013](013-arrow-stream-export.md) | Standard Arrow Stream Export | Accepted |
 
 ## References
 

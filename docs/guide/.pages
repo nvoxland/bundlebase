@@ -17,6 +17,7 @@ nav:
     - cli-mcp.md
     - cli-repl.md
     - jupyter.md
+    - duckdb.md
   - Operating:
     - configuration.md
     - performance.md

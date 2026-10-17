@@ -71,6 +71,24 @@ class QueryResult:
             )
         self._consumed = True
 
+    async def arrow_reader(self) -> pa.RecordBatchReader:
+        """Transfer this result to a synchronous, single-use Arrow reader.
+
+        The reader owns the query resources and can be consumed on another
+        thread. Use ``asyncio.to_thread`` for blocking consumers in async code.
+        Execute the query again to obtain another reader.
+        """
+        if self._consumed:
+            raise RuntimeError(
+                "Query result has already been consumed. "
+                "Streams can only be read once. Execute the query again if needed."
+            )
+        # Native transfer is synchronous and atomic: a failed export leaves the
+        # result available, and cancellation cannot interrupt ownership transfer.
+        reader = self._stream.arrow_reader()
+        self._consumed = True
+        return reader
+
     async def _collect_batches(self) -> List[pa.RecordBatch]:
         """Collect all batches from the stream, caching for reuse."""
         if self._cached_batches is not None:
@@ -185,6 +203,12 @@ class QueryResult:
             if batch is None:
                 break
             yield batch
+
+
+async def arrow_reader(bundle: "PyBundle | PyBundleBuilder") -> pa.RecordBatchReader:
+    """Prepare a fresh synchronous Arrow reader without collecting batches."""
+    stream = await bundle.as_pyarrow_stream()
+    return stream.arrow_reader()
 
 
 async def stream_batches(bundle: "PyBundle | PyBundleBuilder") -> AsyncIterator[pa.RecordBatch]:

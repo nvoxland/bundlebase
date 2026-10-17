@@ -1,3 +1,4 @@
+mod arrow_reader;
 mod builder;
 mod bundle;
 mod bundle_config;

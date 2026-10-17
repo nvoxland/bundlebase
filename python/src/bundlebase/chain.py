@@ -19,7 +19,7 @@ from typing import Any, List, Tuple, Callable, Dict, Optional
 _ORIGINAL_METHODS: Dict[str, Callable] = {}
 
 # Methods that should execute the chain first, then call the method on the result
-_CONVERSION_METHODS = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
+_CONVERSION_METHODS = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream", "arrow_reader"}
 
 # Terminal methods do NOT return a builder (commit -> None, query -> QueryResult,
 # fetch/fetch_all -> list). Queuing them mid-chain and doing `bundle = await result`

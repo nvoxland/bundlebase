@@ -1,5 +1,7 @@
 """Type stubs for bundlebase module."""
 
+import pyarrow
+
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
 __version__: str
@@ -332,6 +334,10 @@ class PyBundle:
     @property
     def url(self) -> str:
         """URL of the bundle's storage location."""
+        ...
+
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Create a fresh synchronous, single-use Arrow reader."""
         ...
 
     async def as_pyarrow_stream(self) -> "PyRecordBatchStream":
@@ -1598,6 +1604,10 @@ class PyBundleBuilder:
         """URL of the bundle's storage location."""
         ...
 
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Create a fresh synchronous, single-use Arrow reader."""
+        ...
+
     async def as_pyarrow_stream(self) -> "PyRecordBatchStream":
         """Stream the bundle's data as pyarrow RecordBatches."""
         ...
@@ -1826,6 +1836,10 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Execute queued operations and return a fresh Arrow reader."""
+        ...
+
     async def semantic_model(self) -> Dict[str, Any]:
         """Validated Ossie projection of current native metadata."""
         ...
@@ -2040,6 +2054,10 @@ class CreateChain:
 
     def set_description(self, description: str) -> "CreateChain":
         """Queue a set_description operation."""
+        ...
+
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Execute queued operations and return a fresh Arrow reader."""
         ...
 
     async def semantic_model(self) -> Dict[str, Any]:
@@ -2258,6 +2276,10 @@ class ExtendChain:
         """Queue a set_description operation."""
         ...
 
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Execute queued operations and return a fresh Arrow reader."""
+        ...
+
     async def semantic_model(self) -> Dict[str, Any]:
         """Validated Ossie projection of current native metadata."""
         ...
@@ -2442,6 +2464,10 @@ class QueryResult:
         """Collect the result into a pandas DataFrame."""
         ...
 
+    async def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Transfer this result to a synchronous, single-use Arrow reader."""
+        ...
+
     async def to_polars(self) -> Any:
         """Collect the result into a polars DataFrame."""
         ...
@@ -2460,6 +2486,10 @@ class PyRecordBatchStream:
 
     async def next_batch(self) -> Optional[Any]:
         """Return the next pyarrow RecordBatch, or None when exhausted."""
+        ...
+
+    def arrow_reader(self) -> "pyarrow.RecordBatchReader":
+        """Transfer remaining batches to a synchronous Arrow reader."""
         ...
 
     async def collect_all(self) -> List[Any]:

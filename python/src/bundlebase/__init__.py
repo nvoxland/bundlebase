@@ -17,6 +17,7 @@ from ._bundlebase import test_datafile as test_datafile
 from ._bundlebase import upgrade_bundle as upgrade_bundle
 from .chain import OperationChain, register_original_method, CreateChain, ExtendChain
 from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches, QueryResult
+from .conversion import arrow_reader as _arrow_reader
 
 # Configure Rust→Python logging bridge
 _rust_logger = logging.getLogger('bundlebase.rust')
@@ -259,12 +260,15 @@ PyBundle.to_pandas = lambda self: to_pandas(self)
 PyBundle.to_polars = lambda self: to_polars(self)
 PyBundle.to_numpy = lambda self: to_numpy(self)
 PyBundle.to_dict = lambda self: to_dict(self)
+PyBundle.arrow_reader = lambda self: _arrow_reader(self)
 
 # Add conversion methods to PyBundleBuilder
 PyBundleBuilder.to_pandas = lambda self: to_pandas(self)
 PyBundleBuilder.to_polars = lambda self: to_polars(self)
 PyBundleBuilder.to_numpy = lambda self: to_numpy(self)
 PyBundleBuilder.to_dict = lambda self: to_dict(self)
+PyBundleBuilder.arrow_reader = lambda self: _arrow_reader(self)
+register_original_method("arrow_reader", PyBundleBuilder.arrow_reader)
 
 # Wrap query() to return QueryResult
 _original_bundle_query = PyBundle.query

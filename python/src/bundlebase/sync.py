@@ -113,6 +113,10 @@ class SyncQueryResult:
         """Convert query results to dict of lists."""
         return _loop_manager.run_sync(self._async.to_dict())
 
+    def arrow_reader(self) -> "pa.RecordBatchReader":
+        """Transfer this result to a synchronous, single-use Arrow reader."""
+        return _loop_manager.run_sync(self._async.arrow_reader())
+
     def stream_batches(self) -> Iterator["pa.RecordBatch"]:
         """Stream batches synchronously, one at a time.
 
@@ -324,6 +328,13 @@ class SyncBundle:
     def views(self) -> Dict[str, str]:
         """Return ``{view_id: view_name}`` for every view on this bundle."""
         return self._async.views()
+
+    def arrow_reader(self) -> "pa.RecordBatchReader":
+        """Create a fresh Arrow reader; recreate it for another scan."""
+        async def _prepare_reader():
+            return await self._async.arrow_reader()
+
+        return _loop_manager.run_sync(_prepare_reader())
 
     def stream_batches(
         self, sql: Optional[str] = None
