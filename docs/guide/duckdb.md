@@ -103,6 +103,8 @@ Export computed results to Parquet, then attach the file and commit through the
 ordinary Bundlebase API:
 
 ```python
+from pathlib import Path
+
 with duckdb.connect() as con:
     reader = bundle.arrow_reader()
     try:
@@ -117,9 +119,13 @@ with duckdb.connect() as con:
         reader.close()
 
 output = bb.create("regional-totals.bundle")
-output.attach("regional_totals.parquet")
+output.attach(Path("regional_totals.parquet").resolve().as_uri())
 output.commit("Regional totals computed with DuckDB")
 ```
+
+DuckDB writes this relative export path in the current working directory.
+The absolute file URI makes Bundlebase attach that same file; relative attach
+paths resolve from the output bundle's directory.
 
 The reader API exports query results. Bundle changes continue through Bundlebase
 operations and commits.

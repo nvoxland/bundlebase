@@ -97,17 +97,7 @@ class SyncQueryResult:
         into a single Table. For very large results that don't fit in
         memory, prefer ``stream_batches()``.
         """
-        async def _collect_table():
-            import pyarrow as pa
-
-            batches = []
-            async for batch in self._async.stream_batches():
-                batches.append(batch)
-            if not batches:
-                return pa.Table.from_batches([])
-            return pa.Table.from_batches(batches)
-
-        return _loop_manager.run_sync(_collect_table())
+        return _loop_manager.run_sync(self._async._collect_table())
 
     def to_dict(self) -> Dict[str, List[Any]]:
         """Convert query results to dict of lists."""

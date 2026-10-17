@@ -2387,6 +2387,10 @@ class ExtendChain:
 class PySchema:
     """Schema information for a bundle."""
 
+    def to_pyarrow(self) -> "pyarrow.Schema":
+        """Export Arrow field types, nullability, and metadata."""
+        ...
+
     @property
     def fields(self) -> List["PySchemaField"]:
         """

@@ -149,6 +149,11 @@ Python-runtime functions/connectors are session-only (`import_temp_*`); persiste
 
 ## Standard Arrow Stream Export
 
+`PySchema.to_pyarrow()` exports the complete native Arrow schema, including
+field types, nullability, and metadata. Materializing conversions use the stream
+schema when execution returns no batches, so valid empty results retain their
+columns and types instead of raising an error or returning a schemaless value.
+
 `arrow_reader()` prepares a query asynchronously, then returns a real
 `pyarrow.RecordBatchReader` through Arrow's C Stream interface. Its synchronous
 batch reader owns the Rust stream and schema and polls execution on the shared

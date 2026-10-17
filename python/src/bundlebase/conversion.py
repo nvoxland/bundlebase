@@ -103,6 +103,13 @@ class QueryResult:
         self._cached_batches = batches
         return batches
 
+    async def _collect_table(self) -> pa.Table:
+        """Build a table from cached batches, retaining an empty result's schema."""
+        batches = await self._collect_batches()
+        if batches:
+            return pa.Table.from_batches(batches)
+        return pa.Table.from_batches([], schema=self._stream.schema.to_pyarrow())
+
     async def to_pandas(self) -> "pd.DataFrame":
         """Convert query results to pandas DataFrame.
 
@@ -127,8 +134,7 @@ class QueryResult:
 
         batches = await self._collect_batches()
         if not batches:
-            # Return empty DataFrame with correct schema if possible
-            return pd.DataFrame()
+            return (await self._collect_table()).to_pandas()
 
         chunks = [batch.to_pandas() for batch in batches]
         return pd.concat(chunks, ignore_index=True)
@@ -155,12 +161,7 @@ class QueryResult:
                 "Install it with: pip install polars"
             ) from e
 
-        batches = await self._collect_batches()
-        if not batches:
-            return pl.DataFrame()
-
-        arrow_table = pa.Table.from_batches(batches)
-        return pl.from_arrow(arrow_table)
+        return pl.from_arrow(await self._collect_table())
 
     async def to_dict(self) -> Dict[str, list]:
         """Convert query results to a dictionary of lists.
@@ -175,12 +176,7 @@ class QueryResult:
             >>> result = await c.query("SELECT * FROM bundle LIMIT 10")
             >>> data = await result.to_dict()
         """
-        batches = await self._collect_batches()
-        if not batches:
-            return {}
-
-        arrow_table = pa.Table.from_batches(batches)
-        return arrow_table.to_pydict()
+        return (await self._collect_table()).to_pydict()
 
     async def stream_batches(self) -> AsyncIterator[pa.RecordBatch]:
         """Stream batches one at a time for memory-efficient processing.
@@ -237,6 +233,13 @@ async def stream_batches(bundle: "PyBundle | PyBundleBuilder") -> AsyncIterator[
         >>>     # Memory is freed after each iteration
         >>> print(f"Processed {total_rows} rows")
     """
+    stream = await _open_stream(bundle)
+    async for batch in _stream_batches(stream):
+        yield batch
+
+
+async def _open_stream(bundle):
+    """Open one stream, retaining its schema even when it yields no batches."""
     if not hasattr(bundle, 'as_pyarrow_stream'):
         raise TypeError(
             f"Expected PyBundle or PyBundleBuilder with streaming support, "
@@ -245,13 +248,16 @@ async def stream_batches(bundle: "PyBundle | PyBundleBuilder") -> AsyncIterator[
 
     try:
         # Get the streaming object from bundle
-        stream = await bundle.as_pyarrow_stream()
+        return await bundle.as_pyarrow_stream()
     except Exception as e:
         raise ValueError(
             f"Failed to create stream from bundle: {e}. "
             "Ensure the bundle is valid and all operations are properly configured."
         ) from e
 
+
+async def _stream_batches(stream) -> AsyncIterator[pa.RecordBatch]:
+    """Read an already opened stream with the public conversion error handling."""
     # Iterate through batches one at a time
     while True:
         try:
@@ -292,8 +298,9 @@ async def _get_arrow_table(bundle: "PyBundle") -> pa.Table:
     try:
         # Stream batches incrementally — as_pyarrow() routes through
         # DataFusion collect(), materializing ~3x the dataset (bb-cko.3).
+        stream = await _open_stream(bundle)
         record_batches = []
-        async for batch in stream_batches(bundle):
+        async for batch in _stream_batches(stream):
             record_batches.append(batch)
     except Exception as e:
         raise ValueError(
@@ -301,15 +308,12 @@ async def _get_arrow_table(bundle: "PyBundle") -> pa.Table:
             "Ensure the bundle is valid and all operations are properly configured."
         ) from e
 
-    if not record_batches:
-        raise ValueError(
-            "Bundle produced no data. "
-            "Check that data sources are configured with attach() and data is available."
-        )
-
     try:
         # Combine record batches into a single table
-        arrow_table = pa.Table.from_batches(record_batches)
+        arrow_table = pa.Table.from_batches(
+            record_batches,
+            schema=stream.schema.to_pyarrow() if not record_batches else None,
+        )
     except Exception as e:
         raise RuntimeError(
             f"Failed to combine Arrow record batches into table: {e}. "
@@ -351,17 +355,16 @@ async def to_pandas(bundle: "PyBundle | PyBundleBuilder") -> "pd.DataFrame":
         ) from e
 
     # Collect batches using streaming to avoid materializing everything at once
+    stream = await _open_stream(bundle)
     chunks = []
-    async for batch in stream_batches(bundle):
+    async for batch in _stream_batches(stream):
         try:
             chunks.append(batch.to_pandas())
         except Exception as e:
             raise RuntimeError(f"Failed to convert batch to pandas: {e}") from e
 
     if not chunks:
-        # A legitimately empty result is not an error: mirror QueryResult.to_pandas
-        # and return an empty DataFrame rather than raising (bb-cko).
-        return pd.DataFrame()
+        return pa.Table.from_batches([], schema=stream.schema.to_pyarrow()).to_pandas()
 
     try:
         # Combine all chunks into a single DataFrame
@@ -402,17 +405,16 @@ async def to_polars(bundle: "PyBundle | PyBundleBuilder") -> "pl.DataFrame":
         ) from e
 
     # Collect batches using streaming
+    stream = await _open_stream(bundle)
     batches = []
-    async for batch in stream_batches(bundle):
+    async for batch in _stream_batches(stream):
         batches.append(batch)
-
-    if not batches:
-        # A legitimately empty result is not an error (bb-cko).
-        return pl.DataFrame()
 
     try:
         # Polars can efficiently construct from multiple batches
-        arrow_table = pa.Table.from_batches(batches)
+        arrow_table = pa.Table.from_batches(
+            batches, schema=stream.schema.to_pyarrow() if not batches else None
+        )
         return pl.from_arrow(arrow_table)
     except Exception as e:
         raise RuntimeError(f"Failed to convert batches to polars: {e}") from e

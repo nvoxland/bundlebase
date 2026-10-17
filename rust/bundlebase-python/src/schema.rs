@@ -54,6 +54,12 @@ pub struct PySchema {
 
 #[pymethods]
 impl PySchema {
+    /// Export the complete schema, including field and schema metadata.
+    fn to_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        use arrow::pyarrow::ToPyArrow;
+        self.inner.as_ref().to_pyarrow(py)
+    }
+
     fn is_empty(&self) -> bool {
         self.inner.fields().is_empty()
     }
