@@ -163,6 +163,15 @@ retains the newest one by that ordering.
 Neither records an operation. Pruning never removes manifests or edit sidecars.
 Automatic maintenance runs after durable commit publication and warns on failure
 rather than failing an already successful commit; explicit commands return errors.
+It checks the local count/age schedule before opening a parent. A structurally
+valid checkpoint can serve as a scheduling hint even if its parent dependency
+has changed; regeneration then waits for the usual local tail threshold.
+Actual creation and loading always validate the current parent dependency.
+
+Opening scans uncovered manifests one at a time for format compatibility before
+typed replay, then rereads them individually. This trades a second read of the
+tail for bounded raw-YAML memory while preserving format errors before unknown
+operation deserialization.
 
 Checkpoints reduce manifest reads and repeated edit-file loads. Their original
 history metadata still grows with history, and arbitrary operations still replay;

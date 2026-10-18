@@ -104,6 +104,16 @@ pub(crate) async fn select(
     manifest_dir: &dyn IOReadWriteDir,
     expected_dependency: &str,
 ) -> Option<Checkpoint> {
+    select_candidate(listing, manifests, manifest_dir, Some(expected_dependency)).await
+}
+
+/// An absent dependency is only suitable for scheduling maintenance, never replay.
+async fn select_candidate(
+    listing: &[FileInfo],
+    manifests: &[FileInfo],
+    manifest_dir: &dyn IOReadWriteDir,
+    expected_dependency: Option<&str>,
+) -> Option<Checkpoint> {
     for file in checkpoint_files(listing, manifest_dir) {
         let result: Result<Checkpoint, BundlebaseError> = async {
             let checkpoint_file = manifest_dir.file(&format!(
@@ -115,7 +125,7 @@ pub(crate) async fn select(
                 .ok_or("Checkpoint disappeared")?;
             let cp = stored.checkpoint;
             if cp.format != 1
-                || cp.dependency != expected_dependency
+                || expected_dependency.is_some_and(|expected| cp.dependency != expected)
                 || digest(&cp)? != stored.checksum
             {
                 return Err("Checkpoint format, dependency, or checksum mismatch".into());
@@ -319,6 +329,34 @@ impl BundleBuilder {
                 Ok(())
             };
         }
+        if !force {
+            // A structurally valid cache is a scheduling hint even if its parent
+            // dependency has changed. Never use this candidate to seed replay:
+            // once maintenance is due, resolve the current parent and select
+            // again with its validated dependency below.
+            let hint = select_candidate(&listing, &manifests, manifest_dir.as_ref(), None).await;
+            let covered = hint.as_ref().map_or(0, |cp| cp.covers.len());
+            if covered == manifests.len() {
+                return Ok(());
+            }
+            if ((manifests.len() - covered) as u64) < policy.every {
+                // Eligibility only needs the timestamp; do not hydrate sidecars.
+                let first: BundleCommit = read_yaml(
+                    manifest_dir
+                        .file(
+                            manifests[covered]
+                                .filename()
+                                .ok_or("Invalid manifest filename")?,
+                        )?
+                        .as_ref(),
+                )
+                .await?
+                .ok_or("Manifest disappeared while checkpointing")?;
+                if !old_enough(&first, policy.max_age, Utc::now()) {
+                    return Ok(());
+                }
+            }
+        }
         let init: InitCommit = read_yaml(manifest_dir.file(super::INIT_FILENAME)?.as_ref())
             .await?
             .ok_or("Cannot checkpoint an uncommitted bundle")?;
@@ -412,4 +450,79 @@ async fn prune(data_dir: &dyn IOReadWriteDir, keep: usize) -> Result<(), Bundleb
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::operation::SetNameOp;
+    use crate::bundle_config::{PassedBundleConfig, Scope};
+    use crate::test_utils::random_memory_dir;
+    use crate::BundleFacade;
+    use bundlebase_common::checkpoint_config::{EVERY_CFG, GRACE_CFG};
+
+    async fn commit_name(builder: &BundleBuilder, name: &str) -> Result<(), BundlebaseError> {
+        let name = name.to_owned();
+        builder
+            .do_change("set name", move |bundle| {
+                Box::pin(
+                    async move { bundle.apply_operation(SetNameOp::setup(&name).into()).await },
+                )
+            })
+            .await?;
+        builder.commit("metadata change").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ineligible_maintenance_does_not_read_parent_after_previous_checkpoint(
+    ) -> Result<(), BundlebaseError> {
+        let parent_dir = random_memory_dir();
+        let child_dir = random_memory_dir();
+        let mut config = PassedBundleConfig::new();
+        let scope = Scope::try_from("checkpoint")?;
+        config.set(&scope, EVERY_CFG.key, "3");
+        config.set(&scope, GRACE_CFG.key, "0s");
+        let parent = BundleBuilder::create(parent_dir.url().as_str(), Some(config)).await?;
+        commit_name(&parent, "parent").await?;
+        let child = parent.extend(Some(child_dir.url().as_str())).await?;
+        for name in ["one", "two", "three"] {
+            commit_name(&child, name).await?;
+        }
+        let meta = child_dir.writable_subdir(META_DIR)?;
+        assert_eq!(
+            checkpoint_files(&meta.list_files().await?, meta.as_ref()).len(),
+            1
+        );
+
+        // An unavailable parent makes any attempted reopen observable as an error.
+        parent_dir
+            .writable_subdir(META_DIR)?
+            .writable_file(super::super::INIT_FILENAME)?
+            .delete()
+            .await?;
+        for name in ["four", "five"] {
+            commit_name(&child, name).await?;
+            child.write_checkpoint(false).await?;
+        }
+        assert!(child.write_checkpoint(true).await.is_err());
+
+        // Age eligibility must resolve the parent even below the count threshold.
+        let listing = meta.list_files().await?;
+        let manifests = super::super::commit::manifest_files_from_listing(&listing, meta.as_ref());
+        let tail = manifests[3].filename().ok_or("Missing tail filename")?;
+        let file = meta.writable_file(tail)?;
+        let mut commit: BundleCommit = read_yaml(file.as_ref()).await?.ok_or("Missing tail")?;
+        commit.timestamp = "2000-01-01T00:00:00Z".into();
+        file.write(bytes::Bytes::from(serde_yaml_ng::to_string(&commit)?))
+            .await?;
+        assert!(child.write_checkpoint(false).await.is_err());
+
+        commit.timestamp = Utc::now().to_rfc3339();
+        file.write(bytes::Bytes::from(serde_yaml_ng::to_string(&commit)?))
+            .await?;
+        commit_name(&child, "six").await?;
+        assert!(child.write_checkpoint(false).await.is_err());
+        Ok(())
+    }
 }

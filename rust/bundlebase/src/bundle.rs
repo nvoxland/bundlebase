@@ -632,18 +632,9 @@ impl Bundle {
             version_init.max_version = cached.max_version.clone();
             manifest_files.drain(..cached.covers.len());
         }
-        // Reuse manifest bytes for compatibility validation and replay. Covered
-        // manifests are not read; each uncovered manifest is fetched once.
-        let mut manifest_contents = Vec::with_capacity(manifest_files.len());
-        for file in &manifest_files {
-            let bytes = readable_file_from_url(&file.url, bundle.config())
-                .await?
-                .read_bytes()
-                .await?
-                .ok_or_else(|| format!("Manifest not found: {}", file.url))?;
-            manifest_contents.push(bytes);
-        }
-        Self::check_format_version(&version_init, &manifest_contents)?;
+        // Scan compatibility before typed replay, releasing each raw manifest
+        // before reading the next. Replay rereads only the uncovered tail.
+        Self::check_format_version(&version_init, &manifest_files, bundle.config()).await?;
 
         if let Some(mut cached) = cached {
             cached
@@ -681,10 +672,16 @@ impl Bundle {
         }
 
         // Load and apply each manifest in order
-        for (manifest_file_info, contents) in manifest_files.into_iter().zip(manifest_contents) {
+        for manifest_file_info in manifest_files {
             *bundle.last_manifest_version.write() =
                 manifest_version(manifest_file_info.filename().unwrap_or(""));
+            let contents = readable_file_from_url(&manifest_file_info.url, bundle.config())
+                .await?
+                .read_bytes()
+                .await?
+                .ok_or_else(|| format!("Manifest not found: {}", manifest_file_info.url))?;
             let mut commit: BundleCommit = serde_yaml_ng::from_slice(&contents)?;
+            drop(contents);
             commit.url = Some(manifest_file_info.url.clone());
             commit.data_dir = Some(data_dir.url().clone());
 
@@ -867,9 +864,10 @@ impl Bundle {
     /// minVersion/maxVersion in the init commit and SetMinVersion/SetMaxVersion operations
     /// in manifests. The most recent values win. Returns an error if the current bundlebase
     /// version is outside the allowed range.
-    fn check_format_version(
+    async fn check_format_version(
         init_commit: &InitCommit,
-        manifest_contents: &[bytes::Bytes],
+        manifest_files: &[crate::file_info::FileInfo],
+        config: Arc<BundleConfig>,
     ) -> Result<(), BundlebaseError> {
         let current = bundlebase_common::format_version();
         let current_str = bundlebase_common::format_version_string();
@@ -888,8 +886,13 @@ impl Bundle {
         // bundles never set these, so before paying for a full YAML parse
         // (~50 ms on a 3 MB manifest) do a cheap substring check on the raw
         // bytes — if neither operation name is present, skip the parse.
-        for bytes in manifest_contents {
-            let yaml_str = std::str::from_utf8(bytes)
+        for file in manifest_files {
+            let bytes = readable_file_from_url(&file.url, config.clone())
+                .await?
+                .read_bytes()
+                .await?
+                .ok_or_else(|| format!("Manifest not found: {}", file.url))?;
+            let yaml_str = std::str::from_utf8(&bytes)
                 .map_err(|e| BundlebaseError::from(format!("Invalid UTF-8 in manifest: {}", e)))?;
             // Fast path: no version ops in this manifest's raw text. Skip
             // the (expensive) YAML parse entirely — a 3 MB manifest parses

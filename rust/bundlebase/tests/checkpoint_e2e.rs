@@ -824,3 +824,112 @@ async fn cached_format_bounds_equal_full_replay_without_covered_reads(
     );
     Ok(())
 }
+
+#[rstest::rstest]
+#[case(false, false)]
+#[case(false, true)]
+#[case(true, false)]
+#[case(true, true)]
+#[tokio::test]
+async fn uncovered_format_scan_precedes_unknown_operation_deserialization(
+    #[case] prefix_checkpoint: bool,
+    #[case] disabled: bool,
+) -> Result<(), BundlebaseError> {
+    let (_temp, dir) = storage(false).await?;
+    let builder = BundleBuilder::create(dir.url().as_str(), Some(config(&[])?)).await?;
+    builder.set_name("prefix").await?;
+    builder.commit("prefix").await?;
+    if prefix_checkpoint {
+        builder.checkpoint().await?;
+    }
+    builder.set_description("future operation").await?;
+    builder.commit("first uncovered manifest").await?;
+    let files = manifests(dir.as_ref()).await?;
+    let unknown = dir
+        .writable_subdir(META_DIR)?
+        .writable_file(files[1].filename().expect("manifest"))?;
+    let bytes = unknown.read_bytes().await?.expect("manifest bytes");
+    let yaml = std::str::from_utf8(&bytes)?.replace("setDescription", "futureOperation");
+    assert!(yaml.contains("futureOperation"));
+    unknown.write(Bytes::from(yaml)).await?;
+    builder
+        .run_command("future format bound".to_string(), async {
+            builder
+                .apply_operation(
+                    bundlebase::bundle::operation::SetMinVersionOp::setup("9999.0").into(),
+                )
+                .await
+        })
+        .await?;
+    builder
+        .commit("later uncovered manifest sets format bound")
+        .await?;
+    let error = match Bundle::open(
+        dir.url().as_str(),
+        Some(config(&[(
+            ENABLED_CFG.key,
+            if disabled { "false" } else { "true" },
+        )])?),
+    )
+    .await
+    {
+        Ok(_) => panic!("future format must be rejected"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("requires bundlebase >= 9999.0"), "{error}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn due_automatic_checkpoint_revalidates_changed_parent() -> Result<(), BundlebaseError> {
+    let (_temp, dir) = storage(false).await?;
+    let policy = config(&[(EVERY_CFG.key, "2"), (GRACE_CFG.key, "0s")])?;
+    let parent = BundleBuilder::create(dir.url().as_str(), Some(policy.clone())).await?;
+    parent.set_name("parent").await?;
+    parent.commit("parent").await?;
+    let child_dir = dir.writable_subdir("child")?;
+    let child = Bundle::open(dir.url().as_str(), Some(policy.clone()))
+        .await?
+        .extend(Some(child_dir.url().as_str()))
+        .await?;
+    for number in 1..=2 {
+        child.set_description(&format!("child {number}")).await?;
+        child.commit("child").await?;
+    }
+    let files = checkpoints(child_dir.as_ref()).await?;
+    assert_eq!(files.len(), 1);
+    let old_bytes = checkpoint_bytes(child_dir.as_ref(), &files[0]).await?;
+    let old: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&old_bytes)?;
+    parent.set_name("updated parent").await?;
+    parent.commit("parent changed").await?;
+    child.set_description("child 3").await?;
+    child.commit("not yet due").await?;
+    assert_eq!(checkpoints(child_dir.as_ref()).await?.len(), 1);
+    child.set_description("child 4").await?;
+    child.commit("checkpoint due").await?;
+    let files = checkpoints(child_dir.as_ref()).await?;
+    assert_eq!(files.len(), 2);
+    let bytes = checkpoint_bytes(child_dir.as_ref(), files.last().expect("checkpoint")).await?;
+    let new: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&bytes)?;
+    assert_ne!(
+        old["checkpoint"]["dependency"],
+        new["checkpoint"]["dependency"]
+    );
+    assert_eq!(
+        new["checkpoint"]["covers"]
+            .as_sequence()
+            .expect("covers")
+            .len(),
+        4
+    );
+    let full = Bundle::open(
+        child_dir.url().as_str(),
+        Some(config(&[(ENABLED_CFG.key, "false")])?),
+    )
+    .await?;
+    let head = new["checkpoint"]["version"].as_str().expect("version");
+    assert_eq!(&head[..12], full.version());
+    let cached = Bundle::open(child_dir.url().as_str(), Some(policy)).await?;
+    assert_same(cached.as_ref(), full.as_ref()).await?;
+    Ok(())
+}
