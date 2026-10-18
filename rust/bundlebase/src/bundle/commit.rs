@@ -121,20 +121,29 @@ pub fn manifest_version(filename: &str) -> u32 {
 pub(crate) async fn list_manifest_files(
     manifest_dir: &dyn IOReadDir,
 ) -> Result<Vec<FileInfo>, BundlebaseError> {
+    Ok(manifest_files_from_listing(
+        &manifest_dir.list_files().await?,
+        manifest_dir,
+    ))
+}
+
+pub(crate) fn manifest_files_from_listing(
+    listing: &[FileInfo],
+    manifest_dir: &dyn IOReadDir,
+) -> Vec<FileInfo> {
     let dir_url = manifest_dir.url().to_string();
-    let mut files = manifest_dir
-        .list_files()
-        .await?
-        .into_iter()
+    let mut files = listing
+        .iter()
         .filter(|f| {
             let Some(relative) = f.url.as_str().strip_prefix(&dir_url) else {
                 return false;
             };
             f.filename() != Some(INIT_FILENAME) && !relative.trim_start_matches('/').contains('/')
         })
+        .cloned()
         .collect::<Vec<_>>();
     sort_manifest_files(&mut files);
-    Ok(files)
+    files
 }
 
 /// Sorts manifests into replay order by full filename. See [`list_manifest_files`].

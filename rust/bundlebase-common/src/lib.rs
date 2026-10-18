@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod arrow_types;
+pub mod checkpoint_config;
 pub mod command_response;
 pub mod content_address;
 pub use content_address::{ContentAddress, ContentCategory, ContentFormat};

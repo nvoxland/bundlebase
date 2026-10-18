@@ -66,16 +66,17 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand,
-    CommitCommand, CreateIndexCommand, CreateReportCommand, CreateSourceCommand, CreateViewCommand,
-    DefineMetricCommand, DeleteCommand, DescribeColumnCommand, DetachBlockCommand,
-    DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, DropColumnCommand,
-    DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
-    DropMetricCommand, DropReportCommand, DropViewCommand, ExportEmptyCommand, FetchAllCommand,
-    FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand, ImportJoinCommand,
-    JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand, ReindexCommand,
-    RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand, RenameJoinCommand,
-    RenameViewCommand, ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand,
-    SetNameCommand, UndoCommand, UpdateCommand, VerifyDataCommand,
+    CheckpointCommand, CheckpointPruneCommand, CommitCommand, CreateIndexCommand,
+    CreateReportCommand, CreateSourceCommand, CreateViewCommand, DefineMetricCommand,
+    DeleteCommand, DescribeColumnCommand, DetachBlockCommand, DropAlwaysDeleteCommand,
+    DropAlwaysUpdateCommand, DropCastColumnCommand, DropColumnCommand, DropConnectorCommand,
+    DropFunctionCommand, DropIndexCommand, DropJoinCommand, DropMetricCommand, DropReportCommand,
+    DropViewCommand, ExportEmptyCommand, FetchAllCommand, FetchCommand, FilterCommand,
+    ImportConnectorCommand, ImportFunctionCommand, ImportJoinCommand, JoinCommand,
+    NormalizeColumnNamesCommand, RebuildIndexCommand, ReindexCommand, RenameColumnCommand,
+    RenameConnectorCommand, RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
+    ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
+    UndoCommand, UpdateCommand, VerifyDataCommand,
 };
 
 pub use builder::{
@@ -514,6 +515,8 @@ impl BundleCommand {
                     BundleCommand::CreateIndex(_) => "CREATE INDEX",
                     BundleCommand::DropIndex(_) => "DROP INDEX",
                     BundleCommand::RebuildIndex(_) => "REBUILD INDEX",
+                    BundleCommand::Checkpoint(_) => "CHECKPOINT",
+                    BundleCommand::CheckpointPrune(_) => "CHECKPOINT PRUNE",
                     BundleCommand::Reindex(_) => "REINDEX",
                     BundleCommand::CreateReport(_) => "CREATE REPORT",
                     BundleCommand::CreateView(_) => "CREATE VIEW",
@@ -758,12 +761,17 @@ macro_rules! register_commands {
             /// which handles change tracking. Facade commands bypass change tracking
             /// since they don't mutate state.
             pub async fn execute(self, builder: &BundleBuilder) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+                let maintenance = matches!(&self, Self::Checkpoint(_) | Self::CheckpointPrune(_));
                 match self {
                     // Message commands - return String boxed as CommandResponse
                     $(
                         BundleCommand::$msg_variant(cmd) => {
                             let description = cmd.to_statement();
-                            let result = builder.run_command(description, Box::new(cmd).execute(builder)).await?;
+                            let result = if maintenance {
+                                Box::new(cmd).execute(builder).await?
+                            } else {
+                                builder.run_command(description, Box::new(cmd).execute(builder)).await?
+                            };
                             Ok(Box::new(result) as Box<dyn CommandResponse>)
                         }
                     )*
@@ -948,6 +956,10 @@ register_commands! {
             "CREATE INDEX" => "CREATE <BTREE|TEXT> INDEX ON <column>",
         DropIndex(DropIndexCommand) => Rule::drop_index_stmt,
             "DROP INDEX" => "DROP INDEX <column>",
+        Checkpoint(CheckpointCommand) => Rule::checkpoint_stmt,
+            "CHECKPOINT" => "CHECKPOINT",
+        CheckpointPrune(CheckpointPruneCommand) => Rule::checkpoint_prune_stmt,
+            "CHECKPOINT PRUNE" => "CHECKPOINT PRUNE",
         RebuildIndex(RebuildIndexCommand) => Rule::rebuild_index_stmt,
             "REBUILD INDEX" => "REBUILD INDEX ON <column>",
         Reindex(ReindexCommand) => Rule::reindex_stmt,

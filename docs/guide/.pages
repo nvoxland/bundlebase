@@ -19,6 +19,7 @@ nav:
     - jupyter.md
     - duckdb.md
   - Operating:
+    - maintenance.md
     - configuration.md
     - performance.md
     - logging.md

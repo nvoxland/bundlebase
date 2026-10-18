@@ -121,6 +121,54 @@ await extended.commit("Added new data")
 - **Relative paths**: Manifests support relative paths for portability
 - **Circular dependency detection**: Prevents invalid from chains
 
+## Replay Checkpoints
+
+Checkpoints in `_bundlebase/checkpoints/` are optional caches of an exact ordered
+manifest prefix. Original manifests remain authoritative and are never deleted
+by checkpoint maintenance. Checkpoint files preserve the complete original
+commits and operations for public history, alongside a separate replay list.
+Only consecutive DELETE/UPDATE runs are consolidated into content-addressed edit
+sidecars. Every other operation is a replay barrier; ATTACH and metadata
+operations are not blindly removed or deduplicated.
+
+Selection validates the format, checksum, cache filename, exact listed manifest
+prefix, and coverage/history consistency. An init/parent dependency digest binds
+the cache to the init commit and the parent's full committed head, including view
+parents. A late manifest inside the covered prefix invalidates the cache.
+Invalid or unusable candidates fall back to another checkpoint or full replay.
+
+The committed version chain folds each original manifest's persisted operations
+into a full 32-byte digest. The public version exposes its first 12 hexadecimal
+characters. Checkpoints save and restore the full digest; consolidated replay
+operations never replace original operations in this chain.
+This replaces the previous flattened-operation hash, so existing bundles receive
+new version strings on open. Manifests are unchanged and require no migration.
+
+`checkpoint.every=50` and `checkpoint.max_age=3d` are the default automatic
+count/age thresholds. `checkpoint.grace=1h` leaves recent commits uncovered;
+coverage stops at the first ineligible commit to retain a prefix. `every=0`
+disables automatic creation. Runtime-only `checkpoint.enabled=false` disables
+checkpoint loading and automatic creation for diagnostic full replay.
+
+`CHECKPOINT` creates a cache of currently durable manifests without committing
+pending changes, bypassing automatic count/age/grace checks. Creation retains
+the newest two checkpoint files by descending filename. `CHECKPOINT PRUNE`
+retains the newest one by that ordering.
+Neither records an operation. Pruning never removes manifests or edit sidecars.
+Automatic maintenance runs after durable commit publication and warns on failure
+rather than failing an already successful commit; explicit commands return errors.
+
+Checkpoints reduce manifest reads and repeated edit-file loads. Their original
+history metadata still grows with history, and arbitrary operations still replay;
+there is no constant-time opening guarantee. Sidecar reachability and garbage
+collection are separate work.
+
+**Decision history:** October 2026: adopted exact-prefix, dependency-validated
+caches with separate history and replay representations to preserve history,
+operation ordering, and version identity. See
+[ADR-014](decisions/014-self-validating-checkpoints.md) and the end-user
+[maintenance guide](../docs/guide/maintenance.md).
+
 ## Path Handling
 
 ### Path Resolution

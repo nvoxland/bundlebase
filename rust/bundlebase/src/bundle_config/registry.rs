@@ -50,6 +50,10 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(system::system_scopes());
     registry.register_keys(system::system_keys());
 
+    use bundlebase_common::checkpoint_config;
+    registry.register_scopes(checkpoint_config::checkpoint_scopes());
+    registry.register_keys(checkpoint_config::checkpoint_keys());
+
     crate::bundle::register_config_hooks();
 
     use bundlebase_io::plugin;

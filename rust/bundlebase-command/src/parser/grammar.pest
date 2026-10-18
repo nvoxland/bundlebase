@@ -119,6 +119,8 @@ source_stmt = {
 index_stmt = {
     create_index_stmt
     | drop_index_stmt
+    | checkpoint_prune_stmt
+    | checkpoint_stmt
     | rebuild_index_stmt
     | reindex_stmt
 }
@@ -1121,3 +1123,7 @@ show_semantic_model_stmt = { ^"show" ~ ^"semantic" ~ ^"model" }
 export_semantic_model_stmt = { ^"export" ~ ^"semantic" ~ ^"model" ~ ^"to" ~ quoted_string }
 import_semantic_model_stmt = { ^"import" ~ ^"semantic" ~ ^"model" ~ ^"from" ~ quoted_string ~ semantic_import_mode? }
 semantic_import_mode = { ^"merge" | ^"replace" }
+
+// Replay checkpoint maintenance (longer alternative must precede CHECKPOINT).
+checkpoint_prune_stmt = { ^"checkpoint" ~ ^"prune" }
+checkpoint_stmt = { ^"checkpoint" }

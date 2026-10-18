@@ -1,6 +1,8 @@
 pub mod block_cache;
 mod builder;
 pub mod bundle_schema;
+mod checkpoint;
+mod checkpoint_edits;
 pub mod command_metadata;
 mod commit;
 mod data_block;
@@ -257,8 +259,10 @@ pub struct Bundle {
     /// Maximum bundlebase version allowed to open this bundle (major, minor)
     max_version: Arc<RwLock<Option<(u16, u16)>>>,
 
-    /// Running SHA-256 hasher for incremental version computation.
-    /// Feeds each operation's version hash as it's applied, avoiding O(n) re-iteration.
+    /// Full digest at the last durable manifest boundary. Checkpoints persist
+    /// this value rather than the truncated, user-visible version.
+    committed_version_head: Arc<RwLock<[u8; 32]>>,
+    /// Provisional operation hash; never used to advance the committed chain.
     version_hasher: Arc<RwLock<Sha256>>,
 }
 
@@ -322,6 +326,7 @@ impl Clone for Bundle {
             is_view: Arc::clone(&self.is_view),
             min_version: Arc::clone(&self.min_version),
             max_version: Arc::clone(&self.max_version),
+            committed_version_head: Arc::clone(&self.committed_version_head),
             version_hasher: Arc::clone(&self.version_hasher),
         }
     }
@@ -437,6 +442,7 @@ impl Bundle {
             is_view: Arc::new(RwLock::new(false)),
             min_version: Arc::new(RwLock::new(None)),
             max_version: Arc::new(RwLock::new(None)),
+            committed_version_head: Arc::new(RwLock::new([0; 32])),
             version_hasher: Arc::new(RwLock::new(Sha256::new())),
         });
 
@@ -471,8 +477,27 @@ impl Bundle {
         path: &str,
         config: Option<PassedBundleConfig>,
     ) -> Result<Arc<Self>, BundlebaseError> {
+        match Self::open_internal(path, config.clone(), true).await {
+            Err(error) if error.downcast_ref::<checkpoint::ReplayError>().is_some() => {
+                log::debug!("Checkpoint replay failed; retrying original manifests: {error}");
+                Self::open_internal(path, config, false).await
+            }
+            result => result,
+        }
+    }
+
+    async fn open_internal(
+        path: &str,
+        config: Option<PassedBundleConfig>,
+        use_checkpoints: bool,
+    ) -> Result<Arc<Self>, BundlebaseError> {
         let mut visited = HashSet::new();
         let arc_bundle = Self::empty(config).await?;
+        let use_checkpoints = use_checkpoints
+            && bundlebase_common::checkpoint_config::CheckpointConfig::from_provider(
+                arc_bundle.config().as_ref(),
+            )?
+            .enabled;
 
         arc_bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
@@ -486,6 +511,7 @@ impl Bundle {
                 .as_str(),
             &mut visited,
             &arc_bundle,
+            use_checkpoints,
         )
         .await?;
 
@@ -497,6 +523,7 @@ impl Bundle {
         url: &str,
         visited: &mut HashSet<String>,
         bundle: &Bundle,
+        use_checkpoints: bool,
     ) -> Result<(), BundlebaseError> {
         if !visited.insert(url.to_string()) {
             return Err(
@@ -545,7 +572,13 @@ impl Bundle {
             };
 
             // Box the recursive call to avoid infinite future size
-            Box::pin(Self::open_recursive(resolved_url.as_str(), visited, bundle)).await?;
+            Box::pin(Self::open_recursive(
+                resolved_url.as_str(),
+                visited,
+                bundle,
+                use_checkpoints,
+            ))
+            .await?;
         };
 
         // Set id if provided in init_commit
@@ -570,7 +603,9 @@ impl Bundle {
             .map(bundlebase_common::parse_format_version);
 
         // Manifests directly in the manifest dir, in replay order.
-        let manifest_files = commit::list_manifest_files(manifest_dir.as_ref()).await?;
+        let listing = manifest_dir.list_files().await?;
+        let mut manifest_files =
+            commit::manifest_files_from_listing(&listing, manifest_dir.as_ref());
 
         if manifest_files.is_empty() {
             return Err(format!("No data bundle in: {}", url).into());
@@ -579,22 +614,77 @@ impl Bundle {
         // Check format version compatibility before deserializing operations.
         // This uses raw YAML scanning so that unknown operation types from newer
         // bundlebase versions don't cause deserialization errors.
-        Self::check_format_version(&init_commit, &manifest_files, bundle.config()).await?;
+        let dependency = checkpoint::dependency(&init_commit, &bundle.version_head())?;
+        let cached = if use_checkpoints {
+            checkpoint::select(
+                &listing,
+                &manifest_files,
+                manifest_dir.as_ref(),
+                &dependency,
+            )
+            .await
+        } else {
+            None
+        };
+        let mut version_init = init_commit.clone();
+        if let Some(cached) = &cached {
+            version_init.min_version = cached.min_version.clone();
+            version_init.max_version = cached.max_version.clone();
+            manifest_files.drain(..cached.covers.len());
+        }
+        // Reuse manifest bytes for compatibility validation and replay. Covered
+        // manifests are not read; each uncovered manifest is fetched once.
+        let mut manifest_contents = Vec::with_capacity(manifest_files.len());
+        for file in &manifest_files {
+            let bytes = readable_file_from_url(&file.url, bundle.config())
+                .await?
+                .read_bytes()
+                .await?
+                .ok_or_else(|| format!("Manifest not found: {}", file.url))?;
+            manifest_contents.push(bytes);
+        }
+        Self::check_format_version(&version_init, &manifest_contents)?;
+
+        if let Some(mut cached) = cached {
+            cached
+                .hydrate(data_dir.as_ref())
+                .await
+                .map_err(checkpoint::replay_error)?;
+            let start = bundle.operations.read().len();
+            for op in cached.operations.clone() {
+                if !bundle.skip_view_operation(&op) {
+                    bundle
+                        .apply_operation_deferred(op)
+                        .await
+                        .map_err(checkpoint::replay_error)?;
+                }
+            }
+            // Public operation history remains the original stream, including edit provenance.
+            let original = cached
+                .history
+                .iter()
+                .flat_map(|entry| entry.commit.operations())
+                .filter(|op| !bundle.skip_view_operation(op))
+                .collect::<Vec<_>>();
+            bundle.operations.write().truncate(start);
+            bundle.operations.write().extend(original);
+            *bundle.bundle_schema.write() = BundleSchema::new();
+            bundle
+                .seed_version_head(&cached.version)
+                .map_err(checkpoint::replay_error)?;
+            *bundle.last_manifest_version.write() =
+                manifest_version(cached.covers.last().ok_or("Empty checkpoint")?);
+            bundle
+                .commits
+                .write()
+                .extend(cached.history.into_iter().map(|entry| entry.commit));
+        }
 
         // Load and apply each manifest in order
-        for manifest_file_info in manifest_files {
+        for (manifest_file_info, contents) in manifest_files.into_iter().zip(manifest_contents) {
             *bundle.last_manifest_version.write() =
                 manifest_version(manifest_file_info.filename().unwrap_or(""));
-            // Create IOFile from FileInfo to read the manifest
-            let manifest_file =
-                readable_file_from_url(&manifest_file_info.url, bundle.config()).await?;
-            let mut commit: BundleCommit =
-                read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
-                    BundlebaseError::from(format!(
-                        "Failed to read manifest: {}",
-                        manifest_file_info.url
-                    ))
-                })?;
+            let mut commit: BundleCommit = serde_yaml_ng::from_slice(&contents)?;
             commit.url = Some(manifest_file_info.url.clone());
             commit.data_dir = Some(data_dir.url().clone());
 
@@ -612,13 +702,13 @@ impl Bundle {
             bundle.commits.write().push(commit.clone());
 
             // Apply operations from this manifest's changes
-            for change in commit.changes {
+            for change in &commit.changes {
                 debug!(
                     "  Change: {} with {} operations",
                     change.description,
                     change.operations.len()
                 );
-                for op in change.operations {
+                for op in &change.operations {
                     // Skip view-related operations when loading a view
                     if *bundle.is_view.read() {
                         match &op {
@@ -632,15 +722,23 @@ impl Bundle {
                         }
                     }
                     debug!("    Applying: {}", op.describe());
-                    bundle.apply_operation_deferred(op).await?;
+                    bundle.apply_operation_deferred(op.clone()).await?;
                 }
             }
+            bundle.finish_manifest_version(&commit);
         }
 
-        // Compute version once after all operations are applied (O(n) instead of O(n²))
-        bundle.recompute_version();
-
         Ok(())
+    }
+
+    fn skip_view_operation(&self, op: &AnyOperation) -> bool {
+        *self.is_view.read()
+            && matches!(
+                op,
+                AnyOperation::CreateView(_)
+                    | AnyOperation::RenameView(_)
+                    | AnyOperation::DropView(_)
+            )
     }
 }
 
@@ -769,10 +867,9 @@ impl Bundle {
     /// minVersion/maxVersion in the init commit and SetMinVersion/SetMaxVersion operations
     /// in manifests. The most recent values win. Returns an error if the current bundlebase
     /// version is outside the allowed range.
-    async fn check_format_version(
+    fn check_format_version(
         init_commit: &InitCommit,
-        manifest_files: &[crate::file_info::FileInfo],
-        config: Arc<BundleConfig>,
+        manifest_contents: &[bytes::Bytes],
     ) -> Result<(), BundlebaseError> {
         let current = bundlebase_common::format_version();
         let current_str = bundlebase_common::format_version_string();
@@ -791,13 +888,8 @@ impl Bundle {
         // bundles never set these, so before paying for a full YAML parse
         // (~50 ms on a 3 MB manifest) do a cheap substring check on the raw
         // bytes — if neither operation name is present, skip the parse.
-        for file_info in manifest_files {
-            let file = readable_file_from_url(&file_info.url, config.clone()).await?;
-            let bytes = match file.read_bytes().await? {
-                Some(b) => b,
-                None => continue,
-            };
-            let yaml_str = std::str::from_utf8(&bytes)
+        for bytes in manifest_contents {
+            let yaml_str = std::str::from_utf8(bytes)
                 .map_err(|e| BundlebaseError::from(format!("Invalid UTF-8 in manifest: {}", e)))?;
             // Fast path: no version ops in this manifest's raw text. Skip
             // the (expensive) YAML parse entirely — a 3 MB manifest parses
@@ -947,7 +1039,7 @@ impl Bundle {
 
     /// Applies an operation without recomputing the version.
     /// Used during bulk manifest loading where intermediate versions are never read.
-    /// Call `recompute_version()` once after all operations are applied.
+    /// Call `finish_manifest_version()` after the manifest is applied.
     async fn apply_operation_deferred(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
         let description = op.describe();
         debug!("Applying operation (deferred): {}...", description);
@@ -1071,6 +1163,7 @@ impl Bundle {
         *self.always_delete_rules.write() = other.always_delete_rules.read().clone();
         *self.always_update_rules.write() = other.always_update_rules.read().clone();
         *self.update_overlays.write() = other.update_overlays.read().clone();
+        *self.committed_version_head.write() = *other.committed_version_head.read();
         *self.version_hasher.write() = other.version_hasher.read().clone();
         self.dataframe.clear();
         *self.bundle_schema.write() = BundleSchema::new();
@@ -1205,23 +1298,72 @@ impl Bundle {
             .refresh_version_udf(new_version);
     }
 
-    /// Recomputes the version from scratch by iterating all operations.
-    /// Also resets the running hasher to match. Used during bulk loading
-    /// and for correctness verification in tests.
-    fn recompute_version(&self) {
+    /// Full committed digest, suitable for resuming replay from a checkpoint.
+    pub(crate) fn version_head(&self) -> String {
+        hex::encode(*self.committed_version_head.read())
+    }
+
+    /// Restore a committed digest; reduced checkpoint operations must not enter
+    /// the chain. Reject malformed cache data before changing any version state.
+    pub(crate) fn seed_version_head(&self, value: &str) -> Result<(), BundlebaseError> {
+        self.set_committed_version_head(Self::parse_version_head(value)?);
+        Ok(())
+    }
+
+    fn parse_version_head(value: &str) -> Result<[u8; 32], BundlebaseError> {
+        let decoded = hex::decode(value).map_err(|e| format!("Invalid version head: {e}"))?;
+        decoded
+            .try_into()
+            .map_err(|_| "Version head must contain exactly 32 bytes".into())
+    }
+
+    /// Compute the next committed digest without replaying operations. Attach
+    /// sidecars must be resolved first, just as in ordinary manifest replay.
+    pub(crate) fn advance_manifest_head(
+        previous: &str,
+        commit: &BundleCommit,
+    ) -> Result<String, BundlebaseError> {
+        Ok(hex::encode(Self::fold_manifest_version(
+            Self::parse_version_head(previous)?,
+            commit,
+        )))
+    }
+
+    /// Advance exactly once for the exact operation sequence persisted in a
+    /// manifest. Author, timestamp, change grouping, and storage URL are omitted.
+    pub(crate) fn finish_manifest_version(&self, commit: &BundleCommit) {
+        let previous = *self.committed_version_head.read();
+        self.set_committed_version_head(Self::fold_manifest_version(previous, commit));
+    }
+
+    fn fold_manifest_version(previous: [u8; 32], commit: &BundleCommit) -> [u8; 32] {
         let mut hasher = Sha256::new();
-
-        for op in self.operations.read().iter() {
-            hasher.update(op.version().as_bytes());
+        hasher.update(b"bundlebase.manifest-version.v1\0");
+        hasher.update(previous);
+        let count = commit
+            .changes
+            .iter()
+            .map(|change| change.operations.len())
+            .sum::<usize>();
+        hasher.update((count as u64).to_be_bytes());
+        for change in &commit.changes {
+            for op in &change.operations {
+                let version = op.version();
+                hasher.update((version.len() as u64).to_be_bytes());
+                hasher.update(version.as_bytes());
+            }
         }
+        hasher.finalize().into()
+    }
 
-        *self.version_hasher.write() = hasher.clone();
-        let new_version = hex::encode(hasher.finalize())[0..12].to_string();
-        *self.version.write() = new_version.clone();
-
-        self.function_registry
-            .read()
-            .refresh_version_udf(new_version);
+    fn set_committed_version_head(&self, head: [u8; 32]) {
+        *self.committed_version_head.write() = head;
+        let mut pending = Sha256::new();
+        pending.update(head);
+        *self.version_hasher.write() = pending;
+        let displayed = hex::encode(head)[..12].to_string();
+        *self.version.write() = displayed.clone();
+        self.function_registry.read().refresh_version_udf(displayed);
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -1271,6 +1413,12 @@ impl Bundle {
         self.last_manifest_version = Arc::new(RwLock::new(current_manifest_version));
         self.operations = Arc::new(RwLock::new(current_operations));
         self.bundle_schema = Arc::new(RwLock::new(BundleSchema::new()));
+        let current_version = self.version.read().clone();
+        let current_head = *self.committed_version_head.read();
+        let current_pending = self.version_hasher.read().clone();
+        self.version = Arc::new(RwLock::new(current_version));
+        self.committed_version_head = Arc::new(RwLock::new(current_head));
+        self.version_hasher = Arc::new(RwLock::new(current_pending));
 
         // Each definition owns mutable indexed-block registrations. Keep immutable
         // index-file metadata shared, but isolate registry additions and pruning.
@@ -2434,6 +2582,93 @@ mod tests {
             Arc::new(datafusion::catalog::MemorySchemaProvider::new()),
         )?;
 
+        Ok(())
+    }
+
+    fn version_test_commit(operations: Vec<AnyOperation>) -> BundleCommit {
+        let mut change = operation::BundleChange::new("version test");
+        change.operations = operations;
+        BundleCommit {
+            url: None,
+            data_dir: None,
+            author: "test".to_string(),
+            message: "test".to_string(),
+            timestamp: "2026-10-18T00:00:00Z".to_string(),
+            changes: vec![change],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manifest_chain_resumes_full_digest_and_ignores_pending(
+    ) -> Result<(), BundlebaseError> {
+        init();
+        let first = version_test_commit(vec![SetNameOp {
+            name: "first".to_string(),
+        }
+        .into()]);
+        let second = version_test_commit(vec![SetNameOp {
+            name: "second".to_string(),
+        }
+        .into()]);
+        let full = Bundle::empty(None).await?;
+        let predicted = Bundle::advance_manifest_head(&full.version_head(), &first)?;
+        full.finish_manifest_version(&first);
+        let saved_head = full.version_head();
+        assert_eq!(saved_head, predicted);
+        assert_eq!(saved_head.len(), 64);
+        full.finish_manifest_version(&second);
+
+        let resumed = Bundle::empty(None).await?;
+        resumed.seed_version_head(&saved_head)?;
+        // Replayed/reduced operations and pending builder state do not change
+        // the committed digest; only an actual manifest boundary advances it.
+        resumed
+            .apply_operation(
+                SetNameOp {
+                    name: "provisional".to_string(),
+                }
+                .into(),
+            )
+            .await?;
+        assert_eq!(resumed.version_head(), saved_head);
+        resumed.finish_manifest_version(&second);
+        assert_eq!(resumed.version_head(), full.version_head());
+        assert_eq!(resumed.version(), full.version());
+
+        let before = resumed.version_head();
+        assert!(resumed.seed_version_head("not-hex").is_err());
+        assert!(resumed.seed_version_head("00").is_err());
+        assert_eq!(resumed.version_head(), before);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_manifest_chain_records_boundaries_not_commit_metadata(
+    ) -> Result<(), BundlebaseError> {
+        init();
+        let first: AnyOperation = SetNameOp {
+            name: "first".to_string(),
+        }
+        .into();
+        let second: AnyOperation = SetNameOp {
+            name: "second".to_string(),
+        }
+        .into();
+        let combined = version_test_commit(vec![first.clone(), second.clone()]);
+        let one = Bundle::empty(None).await?;
+        one.finish_manifest_version(&combined);
+        let separate = Bundle::empty(None).await?;
+        separate.finish_manifest_version(&version_test_commit(vec![first]));
+        separate.finish_manifest_version(&version_test_commit(vec![second]));
+        assert_ne!(one.version_head(), separate.version_head());
+
+        let mut metadata_changed = combined;
+        metadata_changed.author = "other".to_string();
+        metadata_changed.message = "other".to_string();
+        metadata_changed.timestamp = "2000-01-01T00:00:00Z".to_string();
+        let renamed = Bundle::empty(None).await?;
+        renamed.finish_manifest_version(&metadata_changed);
+        assert_eq!(one.version_head(), renamed.version_head());
         Ok(())
     }
 

@@ -8,6 +8,10 @@ Bundlebase has a built-in versioning system. Every time you call `commit()`, a n
 
 Until `commit()` is called, any changes you have made remain in-memory and only apply to your bundle instance. **To share changes, you must commit.**
 
+Replay checkpoints reduce manifest reads for long histories without removing commits.
+See [Checkpoint Maintenance](maintenance.md) for automatic creation, manual
+`CHECKPOINT` and `CHECKPOINT PRUNE`, and diagnostic full replay.
+
 ## Committing Changes
 
 === "Async API"

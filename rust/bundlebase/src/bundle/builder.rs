@@ -523,6 +523,18 @@ impl BundleBuilder {
     pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError> {
         // Validate no pending filters reference temporary-only functions
         let mut changes = self.status.read().changes().clone();
+        // Commands such as IMPORT JOIN publish several manifests while their
+        // outer change scope remains active. Persist that scope's current prefix
+        // alongside completed changes, rather than silently writing empty commits.
+        let active_snapshot = self.in_progress_change.read().as_ref().cloned();
+        let active_prefix = active_snapshot
+            .as_ref()
+            .map(|change| (change.id, change.operations.len()));
+        if let Some(change) = active_snapshot {
+            if !change.operations.is_empty() || !self.edits.read().current_is_empty() {
+                changes.push(change);
+            }
+        }
         for change in &changes {
             for op in &change.operations {
                 if let AnyOperation::Filter(filter_op) = op {
@@ -633,8 +645,8 @@ impl BundleBuilder {
         }
 
         // The commit is durable — update the in-memory bookkeeping.
-        // The bundle state (operations, version, schema) is already correct in memory —
-        // we just need to record the commit and advance the manifest version.
+        // Seal only persisted operations, including the commit-time edit ops.
+        self.bundle.finish_manifest_version(&commit_struct);
         *self.bundle.last_manifest_version.write() = next_version;
 
         // Set data_dir on the commit to match what open_recursive would have set,
@@ -646,6 +658,13 @@ impl BundleBuilder {
         // Clear status and pending deletes/updates now that the operations
         // have been persisted
         self.status.write().clear();
+        if let Some((id, count)) = active_prefix {
+            if let Some(active) = self.in_progress_change.write().as_mut() {
+                if active.id == id {
+                    active.operations.drain(..count);
+                }
+            }
+        }
         self.edits.write().clear();
         self.flushed_block_state
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -655,8 +674,14 @@ impl BundleBuilder {
         // drop it to avoid carrying the same edit as two overlays (bb-plf).
         // Commit does not reload, so this must be explicit.
         self.clear_session_overlays();
+        self.bundle
+            .function_registry()
+            .read()
+            .refresh_version_udf(self.version());
 
         info!("Committed version {}", self.bundle.version());
+
+        Box::pin(self.maybe_checkpoint()).await;
 
         Ok(self)
     }
@@ -774,7 +799,10 @@ impl BundleBuilder {
     async fn restore_uncommitted_state(&self) -> Result<(), BundlebaseError> {
         self.reload_bundle().await?;
 
-        let changes = self.status.read().changes().clone();
+        let mut changes = self.status.read().changes().clone();
+        if let Some(active) = self.in_progress_change.read().as_ref() {
+            changes.push(active.clone());
+        }
         for change in &changes {
             for op in &change.operations {
                 Box::pin(self.bundle.apply_operation(op.clone())).await?;
