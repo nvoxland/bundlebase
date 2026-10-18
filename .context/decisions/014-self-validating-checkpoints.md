@@ -1,6 +1,6 @@
 # ADR-014: Self-Validating Replay Checkpoints
 
-**Status:** Accepted
+**Status:** Amended October 2026
 
 **Date:** October 2026
 
@@ -36,6 +36,21 @@ prefix. Checkpoints retain the full head and resume the chain from it; compacted
 replay operations never enter the original version chain. Original history is
 restored separately from replay state.
 
+The identity is a function of the canonical manifest sequence, ordered by full
+filename. Checkpoint files never enter this sequence or its hash. Creating,
+deleting, pruning, or replacing checkpoints cannot change the version. A newly
+listed manifest inside a covered prefix invalidates that checkpoint; an earlier
+checkpoint ending before the insertion may still be used, followed by canonical
+tail replay. The added commit changes the commit set and therefore its version,
+identically with full replay or any valid checkpoint.
+
+Keep the manifest chain rather than the former flattened-operation SHA-256
+stream. A finalized SHA-256 digest cannot resume that original stream: doing so
+would require persisting the hasher's internal state or rehashing all covered
+operations. The chain restores version state in constant work and hashes only
+the tail, without introducing a cryptographic-state serialization format.
+Loading original history metadata remains proportional to history size.
+
 Automatic maintenance runs after durable commit publication. The `checkpoint`
 configuration scope defaults to `every=50`, `max_age=3d`, `grace=1h`, and
 `enabled=true`. A new checkpoint is eligible after the commit-count threshold or
@@ -70,6 +85,9 @@ original manifests, checkpoints, branches, and views.
   original-history/replay lists to preserve observable operation order and
   committed version identity. Limited compaction to consecutive edits rather
   than introducing unproven reductions of arbitrary operations.
+- October 2026: Confirmed canonical commit-set identity as the version contract.
+  Retained per-manifest hashing for efficient digest resume and added checkpoint
+  lifecycle and late-insertion/earlier-checkpoint continuation regressions.
 
 ## References
 

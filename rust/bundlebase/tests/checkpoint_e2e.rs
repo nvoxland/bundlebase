@@ -276,6 +276,7 @@ async fn late_same_number_manifest_invalidates_checkpoint(
         .attach(test_datafile("userdata.parquet"), None)
         .await?;
     builder.commit("one").await?;
+    builder.checkpoint().await?;
     builder.set_name("two").await?;
     builder.commit("two").await?;
     builder.checkpoint().await?;
@@ -303,8 +304,103 @@ async fn late_same_number_manifest_invalidates_checkpoint(
     .await?;
     assert_same(cached.as_ref(), full.as_ref()).await?;
     assert_eq!(cached.description().as_deref(), Some("straggler applied"));
+    let canonical_version = full.version();
+
+    // The checkpoint ending before the insertion remains usable, even though
+    // the newer checkpoint's covered set no longer matches. Prevent a full
+    // replay from hiding a failure to use that earlier checkpoint.
+    let first = manifests(dir.as_ref()).await?.remove(0);
+    let first_file = dir
+        .writable_subdir(META_DIR)?
+        .writable_file(first.filename().expect("manifest"))?;
+    let original = first_file.read_bytes().await?.expect("first manifest");
+    first_file
+        .write(Bytes::from_static(b"[invalid yaml"))
+        .await?;
+    let earlier_checkpoint = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_same(earlier_checkpoint.as_ref(), full.as_ref()).await?;
+    first_file.write(original).await?;
+
     cached.extend(None).await?.checkpoint().await?;
     assert_eq!(checkpoints(dir.as_ref()).await?.len(), 2);
+    let refreshed = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_eq!(refreshed.version(), canonical_version);
+    let continued = refreshed.extend(None).await?;
+    continued
+        .set_description("commit after the insertion")
+        .await?;
+    continued.commit("continue canonical history").await?;
+    let full_tail = Bundle::open(
+        dir.url().as_str(),
+        Some(config(&[(ENABLED_CFG.key, "false")])?),
+    )
+    .await?;
+    let cached_tail = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_eq!(continued.version(), full_tail.version());
+    assert_same(cached_tail.as_ref(), full_tail.as_ref()).await?;
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case(false)]
+#[case(true)]
+#[tokio::test]
+async fn checkpoint_lifecycle_never_changes_commit_set_version(
+    #[case] local: bool,
+) -> Result<(), BundlebaseError> {
+    let (_temp, dir) = storage(local).await?;
+    let builder = BundleBuilder::create(dir.url().as_str(), Some(config(&[])?)).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder.commit("data").await?;
+    for salary in [100, 200] {
+        builder
+            .update(&format!("SET salary = {salary} WHERE id = 1"))
+            .await?;
+        builder.commit("edit").await?;
+    }
+    let original = Bundle::open(
+        dir.url().as_str(),
+        Some(config(&[(ENABLED_CFG.key, "false")])?),
+    )
+    .await?;
+    builder.checkpoint().await?;
+    let cached = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_same(cached.as_ref(), original.as_ref()).await?;
+
+    // Extend a checkpoint-loaded bundle, rather than the original live writer.
+    let continued = cached.extend(None).await?;
+    continued.delete("id = 2").await?;
+    continued.commit("tail after checkpoint").await?;
+    let canonical = Bundle::open(
+        dir.url().as_str(),
+        Some(config(&[(ENABLED_CFG.key, "false")])?),
+    )
+    .await?;
+    assert_eq!(continued.version(), canonical.version());
+    continued.checkpoint().await?;
+    assert_eq!(checkpoints(dir.as_ref()).await?.len(), 2);
+    continued.checkpoint_prune().await?;
+    assert_eq!(checkpoints(dir.as_ref()).await?.len(), 1);
+    let pruned = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_same(pruned.as_ref(), canonical.as_ref()).await?;
+
+    let directory = dir
+        .writable_subdir(META_DIR)?
+        .writable_subdir("checkpoints")?;
+    for file in checkpoints(dir.as_ref()).await? {
+        directory
+            .writable_file(file.filename().expect("checkpoint"))?
+            .delete()
+            .await?;
+    }
+    let without_cache = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_same(without_cache.as_ref(), canonical.as_ref()).await?;
+    without_cache.extend(None).await?.checkpoint().await?;
+    let replaced = Bundle::open(dir.url().as_str(), Some(config(&[])?)).await?;
+    assert_same(replaced.as_ref(), canonical.as_ref()).await?;
+    assert_eq!(manifests(dir.as_ref()).await?.len(), 4);
     Ok(())
 }
 

@@ -143,6 +143,12 @@ characters. Checkpoints save and restore the full digest; consolidated replay
 operations never replace original operations in this chain.
 This replaces the previous flattened-operation hash, so existing bundles receive
 new version strings on open. Manifests are unchanged and require no migration.
+For the same canonical ordered commit set, the version is identical whether
+loaded from full history or a valid checkpoint plus its tail. Adding, removing,
+or replacing checkpoints does not change it. A late commit inside a covered
+prefix invalidates that checkpoint; a checkpoint ending before the insertion
+can still seed replay of the newly ordered tail. A newly discovered commit
+changes the commit set, so it can change the version, consistently in both modes.
 
 `checkpoint.every=50` and `checkpoint.max_age=3d` are the default automatic
 count/age thresholds. `checkpoint.grace=1h` leaves recent commits uncovered;

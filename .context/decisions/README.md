@@ -92,7 +92,7 @@ ADRs are numbered sequentially starting from 001. Use three digits with leading 
 | [011](011-puffin-deletion-vectors.md) | Puffin Deletion Vectors for DELETE Persistence | Accepted |
 | [012](012-native-semantic-model.md) | Native Semantic Metadata with an Ossie View | Accepted |
 | [013](013-arrow-stream-export.md) | Standard Arrow Stream Export | Accepted |
-| [014](014-self-validating-checkpoints.md) | Self-Validating Replay Checkpoints | Accepted |
+| [014](014-self-validating-checkpoints.md) | Self-Validating Replay Checkpoints | Accepted (amended 2026-10) |
 
 ## References
 
