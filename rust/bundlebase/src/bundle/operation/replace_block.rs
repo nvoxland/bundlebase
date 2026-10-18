@@ -223,6 +223,7 @@ impl Operation for ReplaceBlockOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

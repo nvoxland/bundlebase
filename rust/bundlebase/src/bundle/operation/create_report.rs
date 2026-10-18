@@ -1,6 +1,5 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::ReportEntry;
-use crate::io::IOReadDir;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use bytes::Bytes;
 use datafusion::common::DataFusionError;

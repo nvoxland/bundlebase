@@ -116,8 +116,7 @@ impl PySchema {
     fn __getitem__(&self, idx: usize) -> PyResult<PySchemaField> {
         self.inner
             .fields()
-            .iter()
-            .nth(idx)
+            .get(idx)
             .map(|field| PySchemaField {
                 inner: field.clone(),
             })

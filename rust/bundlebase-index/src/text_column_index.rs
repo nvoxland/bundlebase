@@ -592,9 +592,8 @@ pub fn build_unified_index(passes: &[Bytes]) -> Result<UnifiedIndex, BundlebaseE
         ));
     }
 
-    let unified_dir = TempDir::with_prefix("bundlebase_text_unified_").map_err(|e| {
-        BundlebaseError::from(format!("Failed to create unified temp dir: {}", e))
-    })?;
+    let unified_dir = TempDir::with_prefix("bundlebase_text_unified_")
+        .map_err(|e| BundlebaseError::from(format!("Failed to create unified temp dir: {}", e)))?;
     let unified_path = unified_dir.path();
 
     // tantivy's IndexMeta is `Serialize` but not `Deserialize` (it uses a
@@ -661,9 +660,8 @@ pub fn build_unified_index(passes: &[Bytes]) -> Result<UnifiedIndex, BundlebaseE
                 pass_idx, e
             ))
         })? {
-            let entry = entry.map_err(|e| {
-                BundlebaseError::from(format!("Failed to read entry: {}", e))
-            })?;
+            let entry =
+                entry.map_err(|e| BundlebaseError::from(format!("Failed to read entry: {}", e)))?;
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -707,13 +705,11 @@ pub fn build_unified_index(passes: &[Bytes]) -> Result<UnifiedIndex, BundlebaseE
     let unified_meta_str = serde_json::to_string(&unified_meta).map_err(|e| {
         BundlebaseError::from(format!("Failed to serialize unified meta.json: {}", e))
     })?;
-    std::fs::write(unified_path.join("meta.json"), &unified_meta_str).map_err(|e| {
-        BundlebaseError::from(format!("Failed to write unified meta.json: {}", e))
-    })?;
+    std::fs::write(unified_path.join("meta.json"), &unified_meta_str)
+        .map_err(|e| BundlebaseError::from(format!("Failed to write unified meta.json: {}", e)))?;
 
-    let index = TantivyIndex::open_in_dir(unified_path).map_err(|e| {
-        BundlebaseError::from(format!("Failed to open unified index: {}", e))
-    })?;
+    let index = TantivyIndex::open_in_dir(unified_path)
+        .map_err(|e| BundlebaseError::from(format!("Failed to open unified index: {}", e)))?;
     TextIndex::register_tokenizers(&index)?;
 
     Ok(UnifiedIndex {
@@ -760,9 +756,9 @@ pub fn search_in_unified(
     }
 
     let parser = QueryParser::for_index(&unified.index, default_fields);
-    let parsed = parser.parse_query(query).map_err(|e| {
-        BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e))
-    })?;
+    let parsed = parser
+        .parse_query(query)
+        .map_err(|e| BundlebaseError::from(format!("Failed to parse query '{}': {}", query, e)))?;
     let top_docs = searcher
         .search(&parsed, &TopDocs::with_limit(limit).order_by_score())
         .map_err(|e| BundlebaseError::from(format!("Search failed: {}", e)))?;
@@ -779,9 +775,9 @@ pub fn search_in_unified(
                 segment_id
             ))
         })?;
-        let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| {
-            BundlebaseError::from(format!("Failed to retrieve document: {}", e))
-        })?;
+        let doc: TantivyDocument = searcher
+            .doc(doc_address)
+            .map_err(|e| BundlebaseError::from(format!("Failed to retrieve document: {}", e)))?;
         if let Some(rowid_value) = doc.get_first(rowid_field) {
             if let Some(rowid_u64) = rowid_value.as_u64() {
                 hits.push(UnifiedSearchHit {
@@ -879,7 +875,7 @@ pub fn search_unified_cached(
 /// Returns `true` when the unified-index cache has an entry for the
 /// given path set. Lets callers skip reading pass tars on a cache hit.
 pub fn unified_index_cached(paths: &[String]) -> bool {
-    let mut cache = UNIFIED_INDEX_CACHE.lock();
+    let cache = UNIFIED_INDEX_CACHE.lock();
     cache.contains(&paths.to_vec())
 }
 
@@ -908,6 +904,7 @@ impl Index for TextIndex {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -962,7 +959,7 @@ mod tests {
 
         // With stemming, searching for "run" should find all variants
         let results = index.search("run", 10).expect("Search failed");
-        assert!(results.len() >= 1); // At least "run" itself
+        assert!(!results.is_empty()); // At least "run" itself
     }
 
     #[test]
@@ -1118,9 +1115,18 @@ mod tests {
             "pass0",
             &columns,
             vec![
-                (vec![Some("apple cargo banana".to_string())], RowId::from(1u64)),
-                (vec![Some("the quick brown fox".to_string())], RowId::from(2u64)),
-                (vec![Some("cargo build success".to_string())], RowId::from(3u64)),
+                (
+                    vec![Some("apple cargo banana".to_string())],
+                    RowId::from(1u64),
+                ),
+                (
+                    vec![Some("the quick brown fox".to_string())],
+                    RowId::from(2u64),
+                ),
+                (
+                    vec![Some("cargo build success".to_string())],
+                    RowId::from(3u64),
+                ),
             ]
             .into_iter(),
             &TokenizerConfig::Simple,
@@ -1135,8 +1141,14 @@ mod tests {
                     vec![Some("rust cargo install crate".to_string())],
                     RowId::from(101u64),
                 ),
-                (vec![Some("nothing to see here".to_string())], RowId::from(102u64)),
-                (vec![Some("cargo run --release".to_string())], RowId::from(103u64)),
+                (
+                    vec![Some("nothing to see here".to_string())],
+                    RowId::from(102u64),
+                ),
+                (
+                    vec![Some("cargo run --release".to_string())],
+                    RowId::from(103u64),
+                ),
             ]
             .into_iter(),
             &TokenizerConfig::Simple,
@@ -1207,8 +1219,7 @@ mod tests {
 
         // Miss → cached
         assert!(!unified_index_cached(&paths));
-        let first =
-            search_unified_cached(&paths, &passes, "alpha", 10).expect("first call");
+        let first = search_unified_cached(&paths, &passes, "alpha", 10).expect("first call");
         assert_eq!(first.len(), 2);
         assert!(unified_index_cached(&paths));
 

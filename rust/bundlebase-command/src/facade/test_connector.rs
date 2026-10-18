@@ -48,7 +48,6 @@ impl CommandParsing for TestConnectorCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut name: Option<String> = None;
         let mut from: Option<String> = None;
         let mut args = HashMap::new();
         let mut identifiers = Vec::new();
@@ -317,6 +316,7 @@ impl BundleFacadeCommand for TestConnectorCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

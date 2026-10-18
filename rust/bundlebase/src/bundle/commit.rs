@@ -162,6 +162,7 @@ pub(crate) async fn next_manifest_version(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::operation::{
@@ -203,7 +204,7 @@ changes: []
             id: test_uuid(),
             description: "Remove columns".to_string(),
             operations: vec![op.into()],
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -243,7 +244,7 @@ changes:
             id: test_uuid(),
             description: "Multiple operations".to_string(),
             operations: vec![op1.into(), op2.into(), op3.into()],
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -282,7 +283,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -382,7 +383,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Rename column".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -420,7 +421,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Rename".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -464,7 +465,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -496,7 +497,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set description".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -528,7 +529,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let message = "Commit with special chars: !@#$%".to_string();
         let commit = BundleCommit {
@@ -556,7 +557,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Rename".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -591,7 +592,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -619,7 +620,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -645,7 +646,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set description".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -669,7 +670,7 @@ changes:
             id: test_uuid(),
             operations: vec![op.into()],
             description: "Set name".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
         let commit = BundleCommit {
             url: None,
@@ -729,7 +730,7 @@ changes:
                 AnyOperation::DropColumn(remove_config),
             ],
             description: "Complex operations".to_string(),
-        suppress_auto_reindex: false,
+            suppress_auto_reindex: false,
         };
 
         let commit = BundleCommit {

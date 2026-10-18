@@ -66,7 +66,7 @@ impl TableProvider for BundleColumnsTable {
         let bundle_schema = facade
             .schema()
             .await
-            .map_err(|e| datafusion::error::DataFusionError::External(e))?;
+            .map_err(datafusion::error::DataFusionError::External)?;
 
         let columns: Vec<&str> = bundle_schema
             .fields()

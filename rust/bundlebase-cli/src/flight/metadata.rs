@@ -445,10 +445,8 @@ pub fn do_get_tables(
             }
 
             // Filter by table types (if specified)
-            if !cmd.table_types.is_empty() {
-                if !cmd.table_types.contains(&table_type.to_string()) {
-                    return false;
-                }
+            if !cmd.table_types.is_empty() && !cmd.table_types.contains(&table_type.to_string()) {
+                return false;
             }
 
             true
@@ -850,12 +848,12 @@ pub fn do_get_xdbc_type_info() -> Result<Response<DoGetStream>, Status> {
     const NULLABLE: i32 = 1; // Column allows NULLs
 
     // Type definitions: (name, sql_type, column_size, literal_prefix, literal_suffix, case_sensitive, unsigned, fixed_prec_scale, auto_inc, min_scale, max_scale, num_prec_radix)
-    let types: Vec<(
-        &str,
+    type SqlTypeDefinition = (
+        &'static str,
         i32,
         Option<i32>,
-        Option<&str>,
-        Option<&str>,
+        Option<&'static str>,
+        Option<&'static str>,
         bool,
         Option<bool>,
         bool,
@@ -863,7 +861,8 @@ pub fn do_get_xdbc_type_info() -> Result<Response<DoGetStream>, Status> {
         Option<i32>,
         Option<i32>,
         Option<i32>,
-    )> = vec![
+    );
+    let types: Vec<SqlTypeDefinition> = vec![
         (
             "VARCHAR",
             SQL_VARCHAR,

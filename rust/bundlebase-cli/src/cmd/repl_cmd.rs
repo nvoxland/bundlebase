@@ -68,9 +68,9 @@ pub async fn run(args: ReplArgs) -> Result<(), BundlebaseError> {
     // multi-statement support, same uncapped output.
     if !std::io::stdin().is_terminal() {
         let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).map_err(|e| {
-            BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e))
-        })?;
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| BundlebaseError::from(format!("Failed to read SQL from stdin: {}", e)))?;
         let trimmed = buf.trim();
         if trimmed.is_empty() {
             return Ok(());

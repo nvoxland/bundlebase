@@ -10,9 +10,7 @@ use bundlebase::BundleFacade;
 use bundlebase_common::system_config::is_external_code_allowed;
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::Platform;
-use bundlebase_connector::plugin::ffi::{
-    verify_shared_lib_connector, verify_shared_lib_header,
-};
+use bundlebase_connector::plugin::ffi::{verify_shared_lib_connector, verify_shared_lib_header};
 use bundlebase_udf::runtime::UdfRuntime;
 use std::collections::HashMap;
 
@@ -88,10 +86,7 @@ impl ImportConnectorCommand {
     }
 
     /// Construct a multi-platform IMPORT CONNECTOR.
-    pub fn new_multi(
-        name: impl Into<String>,
-        entries: Vec<(Platform, String)>,
-    ) -> Self {
+    pub fn new_multi(name: impl Into<String>, entries: Vec<(Platform, String)>) -> Self {
         Self {
             name: name.into(),
             source: ImportConnectorSource::Multi { entries },
@@ -263,11 +258,7 @@ impl CommandParsing for ImportConnectorCommand {
                 let body = entries
                     .iter()
                     .map(|(p, f)| {
-                        format!(
-                            "{}: {}",
-                            escape_string(&p.to_string()),
-                            escape_string(f)
-                        )
+                        format!("{}: {}", escape_string(&p.to_string()), escape_string(f))
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -440,7 +431,11 @@ impl BundleBuilderCommand for ImportConnectorCommand {
             self.name,
             n_entries,
             if n_entries == 1 { "" } else { "s" },
-            if bundled_src.is_some() { ", src bundled" } else { "" }
+            if bundled_src.is_some() {
+                ", src bundled"
+            } else {
+                ""
+            }
         ))
     }
 }
@@ -511,7 +506,10 @@ fn expand_glob_pattern(pattern: &str) -> Result<Vec<(Platform, String)>, Bundleb
     // Split off the directory we need to scan. We assume placeholders only
     // appear in the filename, not in directory components — the common case.
     let path = std::path::Path::new(body);
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
     let file_pattern = path
         .file_name()
         .ok_or_else(|| -> BundlebaseError {
@@ -538,7 +536,12 @@ fn expand_glob_pattern(pattern: &str) -> Result<Vec<(Platform, String)>, Bundleb
     let mut entries = Vec::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     let read_dir = std::fs::read_dir(dir).map_err(|e| -> BundlebaseError {
-        format!("Failed to scan directory '{}' for glob: {}", dir.display(), e).into()
+        format!(
+            "Failed to scan directory '{}' for glob: {}",
+            dir.display(),
+            e
+        )
+        .into()
     })?;
 
     for dent in read_dir.flatten() {
@@ -596,7 +599,7 @@ fn build_glob_regex(file_pattern: &str) -> String {
     let mut out = String::with_capacity(file_pattern.len() + 32);
     out.push('^');
     let mut rest = file_pattern;
-    while !rest.is_empty() {
+    while let Some(c) = rest.chars().next() {
         if let Some(stripped) = rest.strip_prefix("{os}") {
             out.push_str(r"(?P<os>[A-Za-z0-9_]+)");
             rest = stripped;
@@ -607,7 +610,6 @@ fn build_glob_regex(file_pattern: &str) -> String {
             out.push_str(r"(?P<ext>[A-Za-z0-9_]+)");
             rest = stripped;
         } else {
-            let c = rest.chars().next().unwrap();
             out.push_str(&regex::escape(&c.to_string()));
             rest = &rest[c.len_utf8()..];
         }
@@ -626,6 +628,7 @@ fn ext_matches_os(ext: &str, os: &str) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;
@@ -824,12 +827,19 @@ mod parsing_tests {
             "acme.weather",
             vec![
                 ("linux/amd64".parse().unwrap(), "ffi::./a.so".to_string()),
-                ("darwin/arm64".parse().unwrap(), "ffi::./b.dylib".to_string()),
+                (
+                    "darwin/arm64".parse().unwrap(),
+                    "ffi::./b.dylib".to_string(),
+                ),
             ],
         );
         let stmt = cmd.to_statement();
         assert!(stmt.contains("FROM {"), "got: {}", stmt);
-        assert!(stmt.contains("'linux/amd64': 'ffi::./a.so'"), "got: {}", stmt);
+        assert!(
+            stmt.contains("'linux/amd64': 'ffi::./a.so'"),
+            "got: {}",
+            stmt
+        );
         let parsed = parse_command(&stmt).unwrap();
         match parsed {
             BundleCommand::ImportConnector(c) => match c.source {
@@ -917,7 +927,11 @@ mod parsing_tests {
             dir.path().display()
         );
         let err = expand_glob_pattern(&pattern).unwrap_err();
-        assert!(err.to_string().contains("matched zero files"), "got: {}", err);
+        assert!(
+            err.to_string().contains("matched zero files"),
+            "got: {}",
+            err
+        );
     }
 
     #[test]

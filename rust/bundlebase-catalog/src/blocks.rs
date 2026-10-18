@@ -105,6 +105,7 @@ impl SchemaProvider for BlockSchemaProvider {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use bundlebase_common::object_id::BlockId;

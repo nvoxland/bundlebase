@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use suppaftp::tokio::AsyncFtpStream;
 use suppaftp::types::FileType;
-use tokio::io::AsyncReadExt;
 use url::Url;
 
 config_scopes!(ftp_scopes, {
@@ -155,7 +154,9 @@ impl FtpFile {
         let user = config
             .get_in_scope(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get_in_scope(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
+        let password = config
+            .get_in_scope(&scope, &FTP_PASSWORD_CFG)?
+            .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -290,7 +291,9 @@ impl FtpDir {
         let user = config
             .get_in_scope(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get_in_scope(&scope, &FTP_PASSWORD_CFG)?.unwrap_or_default();
+        let password = config
+            .get_in_scope(&scope, &FTP_PASSWORD_CFG)?
+            .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -478,6 +481,7 @@ impl IOFactory for FtpIOFactory {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

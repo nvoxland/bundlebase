@@ -83,6 +83,7 @@ impl fmt::Debug for IndexScanExec {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::btree_index::IndexedValue;

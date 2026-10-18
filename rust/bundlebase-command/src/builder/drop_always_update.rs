@@ -91,9 +91,7 @@ impl BundleBuilderCommand for DropAlwaysUpdateCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column names to stable internal name references
         // so the rule text matches the stored rule format.
-        let translated = self.rule_text.as_ref().map(|rt| {
-                        builder.translate_sql(rt)
-        });
+        let translated = self.rule_text.as_ref().map(|rt| builder.translate_sql(rt));
 
         let op = DropAlwaysUpdateOp::new(translated.clone());
         builder.apply_operation(op.into()).await?;

@@ -56,7 +56,7 @@ impl TableProvider for BundleStatusTable {
         let schema = BundleStatus::schema();
         let stream = Box::new(status)
             .into_stream()
-            .map_err(|e| datafusion::error::DataFusionError::External(e))?;
+            .map_err(datafusion::error::DataFusionError::External)?;
         let batches: Vec<_> = stream.try_collect().await?;
         let mem_table = MemTable::try_new(schema, vec![batches])?;
         mem_table.scan(state, projection, filters, limit).await

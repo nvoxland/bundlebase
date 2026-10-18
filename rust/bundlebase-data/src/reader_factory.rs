@@ -67,6 +67,8 @@ impl DataReaderFactory {
     /// Create a reader for a known format (used when re-reading existing blocks).
     ///
     /// The `format` parameter selects the reader plugin directly.
+    // Mirrors ReaderPlugin::reader while selecting the stored format.
+    #[allow(clippy::too_many_arguments)]
     pub async fn reader(
         &self,
         source: &str,

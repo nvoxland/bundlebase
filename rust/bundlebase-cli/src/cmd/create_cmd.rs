@@ -42,7 +42,8 @@ pub struct CreateArgs {
 
 pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
-    let state: Arc<dyn BundleFacade> = match BundleBuilder::create(&args.bundle, config.clone()).await
+    let state: Arc<dyn BundleFacade> = match BundleBuilder::create(&args.bundle, config.clone())
+        .await
     {
         Ok(builder) => builder,
         Err(e) => {

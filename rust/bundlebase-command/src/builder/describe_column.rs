@@ -40,9 +40,7 @@ impl CommandParsing for DescribeColumnCommand {
         for inner in pair.into_inner() {
             match inner.as_rule() {
                 Rule::identifier => name = Some(extract_identifier(&inner)),
-                Rule::quoted_string => {
-                    description = Some(extract_string_content(inner.as_str())?)
-                }
+                Rule::quoted_string => description = Some(extract_string_content(inner.as_str())?),
                 _ => {}
             }
         }
@@ -83,6 +81,7 @@ impl BundleBuilderCommand for DescribeColumnCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

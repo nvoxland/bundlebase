@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase_command::BundleBuilderExt;
@@ -98,7 +97,7 @@ async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError>
         // Handle both qualified and unqualified column names (DataFrame may have ?table?.column_name format)
         let found = df_cols
             .iter()
-            .any(|c| c.split('.').last().unwrap_or(c) == *col || c == *col);
+            .any(|c| c.split('.').next_back().unwrap_or(c) == *col || c == *col);
         assert!(found, "Column {} not found in DataFrame schema", col);
     }
 

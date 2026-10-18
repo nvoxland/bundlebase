@@ -27,6 +27,8 @@ pub trait ReaderPlugin: Send + Sync {
     /// extension and optionally validating content (magic bytes, format structure).
     /// Returns `Some(reader)` if this plugin handles the source, `None` otherwise.
     /// The returned reader's `format()` method indicates the detected AttachFormat.
+    // Reader plugins share this explicit source/context/options interface.
+    #[allow(clippy::too_many_arguments)]
     async fn reader(
         &self,
         source: &str,

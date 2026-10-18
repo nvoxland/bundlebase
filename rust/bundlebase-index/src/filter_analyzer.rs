@@ -227,7 +227,7 @@ impl FilterAnalyzer {
         }
 
         // Try literal OP column (reversed)
-        if let (Expr::Literal(scalar, _), Expr::Column(col)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Literal(scalar, _), Expr::Column(col)) = (left, right) {
             let indexed_value = IndexedValue::from_scalar(scalar)?;
             let predicate = match op {
                 Operator::Lt | Operator::LtEq => {

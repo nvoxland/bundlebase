@@ -19,15 +19,15 @@ use std::sync::Arc;
 
 use crate::builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand,
-    CreateReportCommand, CreateSourceCommand, DefineMetricCommand, DeleteCommand, DropMetricCommand,
-    DescribeColumnCommand, DetachBlockCommand,
-    DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropColumnCommand, DropConnectorCommand,
-    DropFunctionCommand, DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand,
-    ExportEmptyCommand, FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand,
-    ImportFunctionCommand, JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand,
-    ReindexCommand, RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand,
-    RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, SaveConfigCommand,
-    SetDescriptionCommand, SetNameCommand, VerifyDataCommand,
+    CreateReportCommand, CreateSourceCommand, DefineMetricCommand, DeleteCommand,
+    DescribeColumnCommand, DetachBlockCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand,
+    DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand,
+    DropJoinCommand, DropMetricCommand, DropReportCommand, DropViewCommand, ExportEmptyCommand,
+    FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand,
+    JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand, ReindexCommand,
+    RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand, RenameJoinCommand,
+    RenameViewCommand, ReplaceBlockCommand, SaveConfigCommand, SetDescriptionCommand,
+    SetNameCommand, VerifyDataCommand,
 };
 use crate::BundleBuilderCommand;
 
@@ -48,9 +48,7 @@ async fn exec_cmd<C: BundleBuilderCommand + 'static>(
 /// Strip the `FetchOutput` enum wrapper for callers that just want the
 /// underlying per-source results (Python sync API, the `fetch()` /
 /// `fetch_all()` ext-trait methods, etc.).
-fn unwrap_fetch_output(
-    out: bundlebase_common::command_response::FetchOutput,
-) -> Vec<FetchResults> {
+fn unwrap_fetch_output(out: bundlebase_common::command_response::FetchOutput) -> Vec<FetchResults> {
     match out {
         bundlebase_common::command_response::FetchOutput::Summary(rows)
         | bundlebase_common::command_response::FetchOutput::Verbose(rows) => rows,
@@ -340,8 +338,8 @@ impl BundleBuilderExt for BundleBuilder {
         src: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         let platform: Platform = platform.parse()?;
-        let cmd = ImportConnectorCommand::new(name, from, platform)
-            .with_src(src.map(|s| s.to_string()));
+        let cmd =
+            ImportConnectorCommand::new(name, from, platform).with_src(src.map(|s| s.to_string()));
         exec_cmd(self, cmd).await?;
         Ok(self)
     }
@@ -729,9 +727,7 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         pack: Option<&str>,
         fetch: bool,
     ) -> Result<&Self, BundlebaseError> {
-        (**self)
-            .create_source(connector, args, pack, fetch)
-            .await?;
+        (**self).create_source(connector, args, pack, fetch).await?;
         Ok(self)
     }
     async fn import_connector(
@@ -741,9 +737,7 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         platform: &str,
         src: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
-        (**self)
-            .import_connector(name, from, platform, src)
-            .await?;
+        (**self).import_connector(name, from, platform, src).await?;
         Ok(self)
     }
     async fn rename_connector(
@@ -932,7 +926,9 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
         expression: &str,
         description: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
-        (**self).define_metric(name, expression, description).await?;
+        (**self)
+            .define_metric(name, expression, description)
+            .await?;
         Ok(self)
     }
 

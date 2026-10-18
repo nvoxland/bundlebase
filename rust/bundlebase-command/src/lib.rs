@@ -67,14 +67,15 @@ pub use parser::Rule;
 pub use builder::{
     AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand,
     CommitCommand, CreateIndexCommand, CreateReportCommand, CreateSourceCommand, CreateViewCommand,
-    DeleteCommand, DetachBlockCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand,
-    DropCastColumnCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
-    DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand, ExportEmptyCommand,
-    FetchAllCommand, FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand,
-    ImportJoinCommand, JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand,
-    DefineMetricCommand, DescribeColumnCommand, DropMetricCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand,
-    RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand, SaveConfigCommand,
-    SetDescriptionCommand, SetNameCommand, UndoCommand, UpdateCommand, VerifyDataCommand,
+    DefineMetricCommand, DeleteCommand, DescribeColumnCommand, DetachBlockCommand,
+    DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, DropColumnCommand,
+    DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
+    DropMetricCommand, DropReportCommand, DropViewCommand, ExportEmptyCommand, FetchAllCommand,
+    FetchCommand, FilterCommand, ImportConnectorCommand, ImportFunctionCommand, ImportJoinCommand,
+    JoinCommand, NormalizeColumnNamesCommand, RebuildIndexCommand, ReindexCommand,
+    RenameColumnCommand, RenameConnectorCommand, RenameFunctionCommand, RenameJoinCommand,
+    RenameViewCommand, ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand,
+    SetNameCommand, UndoCommand, UpdateCommand, VerifyDataCommand,
 };
 
 pub use builder::{
@@ -312,8 +313,7 @@ impl FacadeCommand {
                 // changes nothing, so it runs on any facade.
                 if cmd.update_versions {
                     return Err(
-                        "VERIFY DATA UPDATE changes the bundle; run it on a writable bundle"
-                            .into(),
+                        "VERIFY DATA UPDATE changes the bundle; run it on a writable bundle".into(),
                     );
                 }
                 Ok(Box::new(facade.verify_data().await?))
@@ -661,6 +661,8 @@ pub trait CommandParsing: Send + Sync {
 ///
 /// These commands require access to a `BundleBuilder` and typically
 /// apply operations that change the bundle's state.
+// Commands use native async traits; their execution futures need no public Send bound.
+#[allow(async_fn_in_trait)]
 pub trait BundleBuilderCommand: CommandParsing {
     /// The type returned by execute().
     ///
@@ -681,6 +683,8 @@ pub trait BundleBuilderCommand: CommandParsing {
 /// These commands do not require mutable access to the bundle and can work
 /// with any type that implements `BundleFacade`. They typically compute
 /// and return a value from the current state (like ExplainPlan).
+// Commands use native async traits; their execution futures need no public Send bound.
+#[allow(async_fn_in_trait)]
 pub trait BundleFacadeCommand: CommandParsing {
     /// The type returned by execute().
     ///
@@ -835,11 +839,12 @@ macro_rules! register_commands {
             /// Mode is "read-write" for builder commands and "read-only" for facade commands.
             /// Auto-generated from the `register_commands!` macro invocation.
             pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
-                let mut entries = Vec::new();
-                $( entries.push(($msg_name, $msg_syntax, "read-write")); )*
-                $( entries.push(($fetch_name, $fetch_syntax, "read-write")); )*
-                $( entries.push(($verify_name, $verify_syntax, "read-write")); )*
-                $( entries.push(($facade_name, $facade_syntax, "read-only")); )*
+                let mut entries = vec![
+                    $( ($msg_name, $msg_syntax, "read-write"), )*
+                    $( ($fetch_name, $fetch_syntax, "read-write"), )*
+                    $( ($verify_name, $verify_syntax, "read-write"), )*
+                    $( ($facade_name, $facade_syntax, "read-only"), )*
+                ];
                 entries.sort_by_key(|(name, _, _)| name.to_string());
                 entries
             }

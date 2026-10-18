@@ -50,4 +50,4 @@ pub use syntax::SyntaxCommand;
 pub use test_connector::TestConnectorCommand;
 
 mod semantic_model;
-pub use semantic_model::{ShowSemanticModelCommand, ExportSemanticModelCommand};
+pub use semantic_model::{ExportSemanticModelCommand, ShowSemanticModelCommand};

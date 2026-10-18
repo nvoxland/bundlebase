@@ -409,11 +409,7 @@ impl PageMapBuilder {
     /// format's parser would turn into a record.
     fn update_blankness(&mut self, segment: &[u8]) {
         let format = self.line_format;
-        if self.current_line_blank
-            && segment
-                .iter()
-                .any(|&b| !is_ignorable_line_byte(b, format))
-        {
+        if self.current_line_blank && segment.iter().any(|&b| !is_ignorable_line_byte(b, format)) {
             self.current_line_blank = false;
         }
     }
@@ -959,7 +955,10 @@ pub(crate) async fn line_oriented_statistics(
     }
 
     let is_csv = format == LineOrientedFormat::Csv;
-    let mut stream = store.get_opts(path, GetOptions::default()).await?.into_stream();
+    let mut stream = store
+        .get_opts(path, GetOptions::default())
+        .await?
+        .into_stream();
     let mut counter = LogicalLineCounter::new(is_csv, delimiter);
     let mut file_size: usize = 0;
     while let Some(chunk) = stream.next().await {
@@ -970,7 +969,11 @@ pub(crate) async fn line_oriented_statistics(
 
     let lines = counter.finish();
     // The first logical CSV line is the header.
-    let num_rows = if is_csv { lines.saturating_sub(1) } else { lines };
+    let num_rows = if is_csv {
+        lines.saturating_sub(1)
+    } else {
+        lines
+    };
     Ok(Statistics {
         num_rows: Precision::Exact(num_rows),
         total_byte_size: Precision::Exact(file_size),
@@ -989,7 +992,10 @@ pub(crate) async fn scan_page_map(
     delimiter: u8,
 ) -> Result<Option<PageMap>, BundlebaseError> {
     let is_csv = format == LineOrientedFormat::Csv;
-    let mut stream = store.get_opts(path, GetOptions::default()).await?.into_stream();
+    let mut stream = store
+        .get_opts(path, GetOptions::default())
+        .await?
+        .into_stream();
     let mut builder = PageMapBuilder::new(is_csv, DEFAULT_PAGE_SIZE, is_csv, delimiter);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
@@ -1052,6 +1058,7 @@ impl LogicalLineCounter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     // ── PageMapBuilder equivalence (bb-xn0.2) ──────────────────────────
     //
@@ -1298,13 +1305,13 @@ mod tests {
         let mut data_with_newline = data.clone();
         data_with_newline.push(b'\n');
         // Add another row to make file bigger than page size
-        data_with_newline.extend_from_slice(&vec![b'y'; 20]);
+        data_with_newline.extend_from_slice(&[b'y'; 20]);
         data_with_newline.push(b'\n');
 
         let result = PageMap::build(&data_with_newline, false, 10, vec![], false, b',').unwrap();
         assert_eq!(result.total_rows, 2);
         // Large row gets its own page
-        assert!(result.pages.len() >= 1);
+        assert!(!result.pages.is_empty());
     }
 
     #[test]
@@ -1550,7 +1557,10 @@ mod tests {
     fn test_csv_build_counts_whitespace_only_line_as_row() {
         let data = b"name\nalice\n   \n\nbob\n";
         let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![], true, b',').unwrap();
-        assert_eq!(result.total_rows, 3, "\"   \" is a record; only \"\" is skipped");
+        assert_eq!(
+            result.total_rows, 3,
+            "\"   \" is a record; only \"\" is skipped"
+        );
     }
 
     #[test]
@@ -1652,6 +1662,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod quote_aware_tests {
     use super::*;
 
@@ -1664,8 +1675,8 @@ mod quote_aware_tests {
     fn test_build_quote_aware_counts_logical_rows() {
         // bb-dvo.1: 6 physical data lines, 3 logical rows. The parsers number
         // rows logically, so the layout must too.
-        let layout =
-            PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], true, b',').expect("layout");
+        let layout = PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], true, b',')
+            .expect("layout");
         assert_eq!(layout.total_rows, 3, "quoted newlines are not row breaks");
         assert!(
             layout.has_quoted_newlines,
@@ -1677,8 +1688,8 @@ mod quote_aware_tests {
     fn test_build_physical_mode_counts_physical_lines() {
         // Without quote awareness (JSONL mode) the same bytes count 6 rows —
         // this is the old CSV behavior that desynced RowIds.
-        let layout =
-            PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], false, b',').expect("layout");
+        let layout = PageMap::build(QUOTED_CSV, true, DEFAULT_PAGE_SIZE, vec![], false, b',')
+            .expect("layout");
         assert_eq!(layout.total_rows, 6);
         assert!(!layout.has_quoted_newlines);
     }
@@ -1687,7 +1698,8 @@ mod quote_aware_tests {
     fn test_build_quote_aware_escaped_quotes() {
         // ""-escaped quotes toggle parity twice; rows stay aligned.
         let bytes = b"h\n\"a \"\"quoted\"\" word\",1\nplain,2\n";
-        let layout = PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true, b',').expect("layout");
+        let layout =
+            PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true, b',').expect("layout");
         assert_eq!(layout.total_rows, 2);
         assert!(!layout.has_quoted_newlines);
     }
@@ -1695,7 +1707,8 @@ mod quote_aware_tests {
     #[test]
     fn test_build_quote_aware_clean_file_unflagged() {
         let bytes = b"h\na,1\nb,2\nc,3\n";
-        let layout = PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true, b',').expect("layout");
+        let layout =
+            PageMap::build(bytes, true, DEFAULT_PAGE_SIZE, vec![], true, b',').expect("layout");
         assert_eq!(layout.total_rows, 3);
         assert!(!layout.has_quoted_newlines);
     }

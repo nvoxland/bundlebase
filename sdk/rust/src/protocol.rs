@@ -51,8 +51,7 @@ pub(crate) fn write_response(
         result: Some(result),
         error: None,
     };
-    let mut data =
-        serde_json::to_vec(&resp).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut data = serde_json::to_vec(&resp).map_err(std::io::Error::other)?;
     data.push(b'\n');
     w.write_all(&data)
 }
@@ -69,8 +68,7 @@ pub(crate) fn write_error(
         result: None,
         error: Some(JsonRpcError { code, message }),
     };
-    let mut data =
-        serde_json::to_vec(&resp).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let mut data = serde_json::to_vec(&resp).map_err(std::io::Error::other)?;
     data.push(b'\n');
     w.write_all(&data)
 }
@@ -90,16 +88,12 @@ pub(crate) fn write_arrow_ipc(
 
     let mut buf = Vec::new();
     {
-        let mut writer = StreamWriter::try_new(&mut buf, &batches[0].schema())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let mut writer =
+            StreamWriter::try_new(&mut buf, &batches[0].schema()).map_err(std::io::Error::other)?;
         for batch in batches {
-            writer
-                .write(batch)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            writer.write(batch).map_err(std::io::Error::other)?;
         }
-        writer
-            .finish()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        writer.finish().map_err(std::io::Error::other)?;
     }
 
     let len = buf.len() as u32;

@@ -221,15 +221,13 @@ pub trait BundleFacade: Send + Sync {
         let fields: Vec<Arc<Field>> = schema
             .fields()
             .iter()
-            .map(|f| {
-                match descriptions.get(f.name()) {
-                    Some(desc) => {
-                        let mut metadata = f.metadata().clone();
-                        metadata.insert("description".to_string(), desc.clone());
-                        Arc::new(f.as_ref().clone().with_metadata(metadata))
-                    }
-                    None => f.clone(),
+            .map(|f| match descriptions.get(f.name()) {
+                Some(desc) => {
+                    let mut metadata = f.metadata().clone();
+                    metadata.insert("description".to_string(), desc.clone());
+                    Arc::new(f.as_ref().clone().with_metadata(metadata))
                 }
+                None => f.clone(),
             })
             .collect();
         Ok(Arc::new(Schema::new_with_metadata(

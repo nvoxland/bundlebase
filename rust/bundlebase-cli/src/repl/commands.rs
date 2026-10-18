@@ -114,8 +114,8 @@ fn parse_single(input: &str) -> Result<Command, String> {
         return Err("Empty command".to_string());
     }
 
-    if input.starts_with('/') {
-        let repl_input = input[1..].trim();
+    if let Some(repl_input) = input.strip_prefix('/') {
+        let repl_input = repl_input.trim();
         if repl_input.is_empty() {
             return Err("Empty command after '/'. Type /help for available commands.".to_string());
         }

@@ -318,9 +318,8 @@ async def test_to_numpy():
     """Test conversion to dict of numpy arrays"""
 
     c = await bundlebase.create(random_bundle())
-    # Empty bundle (no data attached) raises error
-    with pytest.raises(ValueError):
-        await c.to_numpy()
+    empty_arrays = await c.to_numpy()
+    assert all(len(values) == 0 for values in empty_arrays.values())
 
     c = await c.attach(datafile("userdata.parquet"))
 
@@ -337,9 +336,8 @@ async def test_to_dict():
     """Test conversion to dict of lists"""
     c = await bundlebase.create(random_bundle())
 
-    # Empty bundle (no data attached) raises error
-    with pytest.raises(ValueError):
-        await c.to_dict()
+    empty_dict = await c.to_dict()
+    assert all(len(values) == 0 for values in empty_dict.values())
 
     c = await c.attach(datafile("userdata.parquet"))
 

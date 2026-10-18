@@ -24,7 +24,9 @@ async fn test_limit_after_deletes_on_streaming_scan() -> Result<(), BundlebaseEr
 
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // An UPDATE creates an overlay so the streaming path takes the
     // overlay+tombstone wrapping branch; the DELETE tombstones the first
@@ -32,7 +34,9 @@ async fn test_limit_after_deletes_on_streaming_scan() -> Result<(), BundlebaseEr
     builder.update("SET first_name = 'X' WHERE id = 7").await?;
     builder.delete("id <= 5").await?;
 
-    let stream = builder.query("SELECT id FROM bundle LIMIT 10", vec![], None).await?;
+    let stream = builder
+        .query("SELECT id FROM bundle LIMIT 10", vec![], None)
+        .await?;
     let batches: Vec<arrow::array::RecordBatch> = stream.try_collect().await?;
     let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
 

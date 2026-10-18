@@ -101,16 +101,9 @@ impl FileFormatConfig for CsvFormatConfig {
 }
 
 /// CSV plugin - uses generic FilePlugin and creates CsvReader
+#[derive(Default)]
 pub struct CsvPlugin {
     config: CsvFormatConfig,
-}
-
-impl Default for CsvPlugin {
-    fn default() -> Self {
-        Self {
-            config: CsvFormatConfig::default(),
-        }
-    }
 }
 
 #[async_trait]
@@ -292,7 +285,7 @@ impl DataReader for CsvReader {
         // only the first rows, and later rows may contain values that don't
         // match the inferred types.
         let store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
         let delimiter = self.inner.config().delimiter;
         match read_csv_header(&store, &path, delimiter).await {
             Ok(schema) => Ok(Some(trim_schema_field_names(schema))),
@@ -364,23 +357,25 @@ impl DataReader for CsvReader {
                 LineOrientedFormat::Csv,
             )
             .await
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
 
             let schema = self
                 .inner
                 .read_schema()
                 .await
-                .map_err(|e| DataFusionError::External(e))?
+                .map_err(DataFusionError::External)?
                 .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
-            return Ok(Arc::new(PageMapDataSource::new(
-                self.inner.file().as_object_store_file(),
-                schema,
-                byte_offsets,
-                projection.cloned(),
-                LineOrientedFormat::Csv,
-            )
-            .with_delimiter(self.inner.config().delimiter)));
+            return Ok(Arc::new(
+                PageMapDataSource::new(
+                    self.inner.file().as_object_store_file(),
+                    schema,
+                    byte_offsets,
+                    projection.cloned(),
+                    LineOrientedFormat::Csv,
+                )
+                .with_delimiter(self.inner.config().delimiter),
+            ));
         }
         self.inner.data_source(projection, filters, limit).await
     }
@@ -390,7 +385,7 @@ impl DataReader for CsvReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
         let stats = crate::page_map::line_oriented_statistics(
             &self.inner.object_store(),
             &path,
@@ -426,7 +421,7 @@ impl DataReader for CsvReader {
         }
 
         let object_store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
         let delimiter = self.inner.config().delimiter;
 
         // Pass 1: page boundaries (streamed — never buffered whole).
@@ -489,7 +484,9 @@ impl DataReader for CsvReader {
             column_stats,
             ..initial_layout
         };
-        Ok(Some(crate::page_map::write_layout(&layout, data_dir).await?))
+        Ok(Some(
+            crate::page_map::write_layout(&layout, data_dir).await?,
+        ))
     }
 
     async fn data_source_filtered_pages(
@@ -662,14 +659,16 @@ impl DataReader for CsvReader {
         );
 
         let full_schema = schema;
-        Ok(Some(Arc::new(PageMapDataSource::from_page_ranges(
-            self.inner.file().as_object_store_file(),
-            full_schema,
-            page_ranges,
-            projection.cloned(),
-            LineOrientedFormat::Csv,
-        )
-        .with_delimiter(self.inner.config().delimiter))))
+        Ok(Some(Arc::new(
+            PageMapDataSource::from_page_ranges(
+                self.inner.file().as_object_store_file(),
+                full_schema,
+                page_ranges,
+                projection.cloned(),
+                LineOrientedFormat::Csv,
+            )
+            .with_delimiter(self.inner.config().delimiter),
+        )))
     }
 }
 
@@ -748,8 +747,8 @@ mod tests {
     use super::*;
     use crate::plugin::ReaderPlugin;
     use crate::test_utils::{test_context, test_datafile};
-    use datafusion::common::stats::Precision;
     use arrow::array::{downcast_array, Array, StringArray};
+    use datafusion::common::stats::Precision;
     use futures::stream::StreamExt;
 
     #[tokio::test]
@@ -1039,10 +1038,7 @@ mod tests {
             .get_value()
             .ok_or_else(|| BundlebaseError::from("Expected row count"))?;
 
-        assert_eq!(
-            &3, rows,
-            "empty lines must not count as rows"
-        );
+        assert_eq!(&3, rows, "empty lines must not count as rows");
 
         Ok(())
     }
@@ -1051,8 +1047,7 @@ mod tests {
     /// record (a single field holding the spaces). Statistics, the layout and
     /// the parser must all agree on that, or COUNT(*) and RowId seeks drift.
     #[tokio::test]
-    async fn test_whitespace_only_line_is_a_row_like_the_parser(
-    ) -> Result<(), BundlebaseError> {
+    async fn test_whitespace_only_line_is_a_row_like_the_parser() -> Result<(), BundlebaseError> {
         use bundlebase_io::file::IOReadWriteFile;
         use bundlebase_io::plugin::object_store::ObjectStoreFile;
 
@@ -1158,12 +1153,21 @@ mod tests {
 
         let url = Url::parse("memory:///test_csv_stats_layout/data.csv")?;
         let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
-        file.write(bytes::Bytes::from_static(b"id\n1\n2\n3\n")).await?;
+        file.write(bytes::Bytes::from_static(b"id\n1\n2\n3\n"))
+            .await?;
 
         let plugin = CsvPlugin::default();
         let binding = test_context();
         let reader = plugin
-            .reader(url.as_str(), &BlockId::generate(), &binding, None, None, None, None)
+            .reader(
+                url.as_str(),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
         let layout_file = reader
@@ -1196,8 +1200,8 @@ mod tests {
 
     /// Statistics must not count newlines inside quoted values as rows.
     #[tokio::test]
-    async fn test_statistics_newlines_in_values_counts_logical_rows(
-    ) -> Result<(), BundlebaseError> {
+    async fn test_statistics_newlines_in_values_counts_logical_rows() -> Result<(), BundlebaseError>
+    {
         let plugin = CsvPlugin::default();
         let mut options = HashMap::new();
         options.insert("newlines_in_values".to_string(), "true".to_string());
@@ -1773,7 +1777,7 @@ mod tests {
             raw_result.is_err(),
             "Raw FileReader should fail on jeopardy CSV; this file triggers the LineDelimiter bug"
         );
-        let raw_err = raw_result.err().expect("checked above");
+        let raw_err = raw_result.expect_err("checked above");
         let raw_msg = raw_err.to_string();
         assert!(
             raw_msg.contains("LineDelimiter") && raw_msg.contains("unterminated string"),

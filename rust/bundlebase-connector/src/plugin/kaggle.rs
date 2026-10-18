@@ -594,7 +594,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("requires a 'dataset' argument"));
     }
 
@@ -610,7 +610,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
         assert!(err.contains("owner/dataset-name"));
     }
@@ -627,7 +627,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
     }
 
@@ -694,7 +694,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("Invalid version"));
         assert!(err.contains("positive integer"));
     }
@@ -712,7 +712,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("Invalid version"));
     }
 
@@ -729,7 +729,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("Invalid version"));
         assert!(err.contains("abc"));
     }
@@ -747,7 +747,7 @@ mod tests {
                 .and_then(|_| func.validate_args(&args))
         };
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("does not accept argument 'unknown'"));
     }
 
@@ -830,7 +830,7 @@ mod tests {
 
         let result = KaggleConnector::extract_from_zip_to_file(zip_temp.path(), "test.csv");
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("empty"), "Expected 'empty' in: {}", err);
     }
 
@@ -846,7 +846,7 @@ mod tests {
 
         let result = KaggleConnector::extract_from_zip_to_file(garbage_temp.path(), "test.csv");
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(
             err.contains("Failed to read ZIP"),
             "Expected 'Failed to read ZIP' in: {}",
@@ -1107,8 +1107,10 @@ mod tests {
         let result =
             KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None).await;
 
-        assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let Err(err) = result else {
+            panic!("listing Kaggle files should fail");
+        };
+        let err = err.to_string();
         assert!(
             err.contains("Failed to list"),
             "Expected 'Failed to list' in: {}",
@@ -1140,8 +1142,10 @@ mod tests {
         let result =
             KaggleConnector::list_kaggle_files(&client, "zillow/zecon", &patterns, None).await;
 
-        assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let Err(err) = result else {
+            panic!("listing Kaggle files should fail");
+        };
+        let err = err.to_string();
         assert!(
             err.contains("missing 'datasetFiles'"),
             "Expected \"missing 'datasetFiles'\" in: {}",

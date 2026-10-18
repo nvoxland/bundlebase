@@ -65,6 +65,7 @@ fn sort_json_keys(value: &serde_json::Value) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};

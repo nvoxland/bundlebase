@@ -395,13 +395,12 @@ fn write_overlay_parquet_with_max(
             let num_rows = rows.len();
 
             // Build _row_number array
-            let row_number_values: Vec<u32> =
-                rows.iter().map(|(row, _)| *row).collect();
+            let row_number_values: Vec<u32> = rows.iter().map(|(row, _)| *row).collect();
             let row_number_array: ArrayRef =
                 std::sync::Arc::new(UInt32Array::from(row_number_values));
 
             // Build data column arrays
-            let mask_bytes_len = (all_col_ids.len() + 7) / 8;
+            let mask_bytes_len = all_col_ids.len().div_ceil(8);
             let mut data_arrays: Vec<ArrayRef> = Vec::new();
             for col_id in &all_col_ids {
                 let dt = &column_types[col_id];
@@ -429,7 +428,7 @@ fn write_overlay_parquet_with_max(
                 let array = if scalars.is_empty() {
                     arrow::array::new_empty_array(dt)
                 } else {
-                    ScalarValue::iter_to_array(scalars.into_iter()).map_err(|e| {
+                    ScalarValue::iter_to_array(scalars).map_err(|e| {
                         BundlebaseError::from(format!(
                             "Failed to build array for column {}: {}",
                             col_id, e
@@ -443,7 +442,7 @@ fn write_overlay_parquet_with_max(
             let mut mask_values: Vec<Vec<u8>> = Vec::with_capacity(num_rows);
             for (_, updates) in rows {
                 let mut mask = vec![0u8; mask_bytes_len];
-                for (col_id, _) in updates.iter() {
+                for col_id in updates.keys() {
                     if let Some(&idx) = col_index.get(col_id) {
                         mask[idx / 8] |= 1 << (idx % 8);
                     }
@@ -805,7 +804,7 @@ mod tests {
         let col_a = ColumnId::generate();
         let col_b = ColumnId::generate();
         // Only update col_a, not col_b
-        let pending = one_cell(&block("v1"), 5, col_a, ScalarValue::Float64(Some(3.14)));
+        let pending = one_cell(&block("v1"), 5, col_a, ScalarValue::Float64(Some(3.25)));
 
         let mut column_types = HashMap::new();
         column_types.insert(col_a, DataType::Float64);

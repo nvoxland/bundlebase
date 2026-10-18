@@ -54,6 +54,7 @@ impl<'de> Deserialize<'de> for VersionedBlockId {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

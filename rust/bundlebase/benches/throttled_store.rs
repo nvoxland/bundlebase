@@ -21,7 +21,6 @@ pub struct ThrottleConfig {
     pub wait_get_per_call: Duration,
     pub wait_put_per_call: Duration,
     pub wait_list_per_call: Duration,
-    pub wait_delete_per_call: Duration,
 }
 
 /// Returns a `ThrottleConfig` with S3-like latencies.
@@ -30,7 +29,6 @@ pub fn s3_like_config() -> ThrottleConfig {
         wait_get_per_call: Duration::from_millis(75),
         wait_put_per_call: Duration::from_millis(75),
         wait_list_per_call: Duration::from_millis(100),
-        wait_delete_per_call: Duration::from_millis(50),
     }
 }
 

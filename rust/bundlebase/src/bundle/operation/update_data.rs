@@ -63,11 +63,11 @@ impl Operation for UpdateDataOp {
         let data_dir = bundle.data_dir();
         let overlay_file = data_dir
             .file(&self.overlay)
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
         let bytes = overlay_file
             .read_bytes()
             .await
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
 
         let bytes = match bytes {
             Some(b) => b,
@@ -78,8 +78,8 @@ impl Operation for UpdateDataOp {
         };
 
         // read_overlay_parquet returns per-block overlays directly from row groups
-        let block_overlays = update_overlay::read_overlay_parquet(&bytes)
-            .map_err(|e| DataFusionError::External(e))?;
+        let block_overlays =
+            update_overlay::read_overlay_parquet(&bytes).map_err(DataFusionError::External)?;
 
         // Attach each overlay to the base-pack block with the same
         // (BlockId, version) — never by position, which DETACH/REPLACE shift.

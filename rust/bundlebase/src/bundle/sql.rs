@@ -44,6 +44,7 @@ pub(crate) fn find_temp_functions_in_sql(
 /// - `accumulated_df` is the DataFrame built up so far (base + all prior joins).
 ///   When the expression uses `bundle.col`, this resolves against the full
 ///   accumulated dataset — not just the base pack's columns.
+///
 /// Returns `(expressions, left_alias)` where `left_alias` is `"base"` normally
 /// or `"bundle"` when the expression uses the `bundle.` qualifier.
 pub(crate) async fn parse_join_expr(
@@ -118,9 +119,8 @@ pub(crate) async fn parse_join_expr(
 fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {
     match plan {
         LogicalPlan::Join(filter) => {
-            match &filter.filter {
-                Some(filter) => out.push(filter.clone()),
-                None => {}
+            if let Some(filter) = &filter.filter {
+                out.push(filter.clone());
             }
             for (x1, x2) in &filter.on {
                 out.push(BinaryExpr(datafusion::logical_expr::BinaryExpr::new(
@@ -140,6 +140,7 @@ fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::io::ObjectId;

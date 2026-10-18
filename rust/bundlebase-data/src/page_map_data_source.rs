@@ -460,12 +460,11 @@ impl DataSource for PageMapDataSource {
                         }
 
                         // Parse all lines in the range; format dictates whether to add a header.
-                        parse_bytes_to_batch(&bytes, &schema, &projection, format, delimiter).and_then(
-                            |batch| {
+                        parse_bytes_to_batch(&bytes, &schema, &projection, format, delimiter)
+                            .and_then(|batch| {
                                 let mut remaining = remaining_fetch.lock();
                                 Self::apply_fetch_limit(batch, &mut remaining)
-                            },
-                        )
+                            })
                     }
                     .await;
 
@@ -852,8 +851,7 @@ where
                     String::from_utf8_lossy(&line[..line.len().min(120)])
                 )
                 .into(),
-            )
-            .into());
+            ));
         }
     }
     let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
@@ -1004,7 +1002,8 @@ mod tests {
 "#;
         let bytes = json_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 24], LineOrientedFormat::JsonLines);
+        let lines =
+            PageMapDataSource::extract_lines(bytes, 0, &[0, 24], LineOrientedFormat::JsonLines);
 
         assert_eq!(2, lines.len());
         assert_eq!(r#"{"id":1,"name":"Alice"}"#, lines[0]);
@@ -1017,7 +1016,8 @@ mod tests {
         let csv_data = "line1\nline2\npartial";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
+        let lines =
+            PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
 
         // Should only get 2 complete lines, not the partial one (no trailing newline)
         assert_eq!(2, lines.len());
@@ -1031,7 +1031,8 @@ mod tests {
         let csv_data = "line1\nline2\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
+        let lines =
+            PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12], LineOrientedFormat::Csv);
 
         // Should get all 3 complete lines
         assert_eq!(3, lines.len());
@@ -1061,7 +1062,8 @@ mod tests {
     fn test_extract_lines_csv_preserves_whitespace() {
         // "a\r\n" (0-2), "   \n" (3-6), "\n" (7), " b \n" (8-11)
         let data = b"a\r\n   \n\n b \n";
-        let lines = PageMapDataSource::extract_lines(data, 0, &[0, 3, 7, 8], LineOrientedFormat::Csv);
+        let lines =
+            PageMapDataSource::extract_lines(data, 0, &[0, 3, 7, 8], LineOrientedFormat::Csv);
         assert_eq!(vec!["a", "   ", " b "], lines);
     }
 
@@ -1096,7 +1098,8 @@ mod tests {
         let bytes = data.as_bytes();
 
         // Row offsets are absolute file positions
-        let lines = PageMapDataSource::extract_lines(bytes, 100, &[100, 117], LineOrientedFormat::Csv);
+        let lines =
+            PageMapDataSource::extract_lines(bytes, 100, &[100, 117], LineOrientedFormat::Csv);
 
         assert_eq!(2, lines.len());
         assert_eq!("middle_row,value", lines[0]);

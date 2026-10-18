@@ -197,6 +197,7 @@ impl TryFrom<&url::Url> for Scope {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

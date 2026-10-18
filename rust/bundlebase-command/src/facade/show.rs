@@ -143,6 +143,7 @@ impl BundleFacadeCommand for ShowReportsCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use crate::parser::parse_command;
     use crate::BundleCommand;

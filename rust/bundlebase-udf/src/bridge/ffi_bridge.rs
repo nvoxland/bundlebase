@@ -375,7 +375,6 @@ impl LibAccumulator {
 
         Ok(())
     }
-
 }
 
 impl datafusion::logical_expr::Accumulator for LibAccumulator {
@@ -403,7 +402,9 @@ impl datafusion::logical_expr::Accumulator for LibAccumulator {
             use std::sync::Mutex;
             static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
             let key = format!("{}::{}", self.lib_path, self.symbol);
-            let mut warned = WARNED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut warned = WARNED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if warned.get_or_insert_with(HashSet::new).insert(key) {
                 log::warn!(
                     "Lib aggregate '{}' in '{}' has no {}_merge export; merging partial \
@@ -674,8 +675,7 @@ mod tests {
         // (correct for sum-style aggregates) with a one-time warning.
         use datafusion::logical_expr::Accumulator;
         let path = test_lib_path();
-        let mut acc =
-            LibAccumulator::new(&path, "int_sum", DataType::Int64).expect("accumulator");
+        let mut acc = LibAccumulator::new(&path, "int_sum", DataType::Int64).expect("accumulator");
         let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1i64, 2, 3]));
         acc.update_batch(&[input]).expect("accumulate");
         let partial: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![10i64]));
@@ -695,7 +695,13 @@ mod tests {
     fn test_invoke_lib_scalar_double_val() {
         let path = test_lib_path();
         let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1, 2, 3, 4, 5]));
-        let result = invoke_lib_scalar(&path, "double_val", &[input.clone()], input.len()).unwrap();
+        let result = invoke_lib_scalar(
+            &path,
+            "double_val",
+            std::slice::from_ref(&input),
+            input.len(),
+        )
+        .unwrap();
 
         let int_result = result
             .as_any()
@@ -713,7 +719,13 @@ mod tests {
             None,
             Some(30),
         ]));
-        let result = invoke_lib_scalar(&path, "double_val", &[input.clone()], input.len()).unwrap();
+        let result = invoke_lib_scalar(
+            &path,
+            "double_val",
+            std::slice::from_ref(&input),
+            input.len(),
+        )
+        .unwrap();
 
         let int_result = result
             .as_any()
@@ -730,7 +742,12 @@ mod tests {
     fn test_invoke_lib_scalar_symbol_not_found() {
         let path = test_lib_path();
         let input: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![1]));
-        let result = invoke_lib_scalar(&path, "nonexistent_func", &[input.clone()], input.len());
+        let result = invoke_lib_scalar(
+            &path,
+            "nonexistent_func",
+            std::slice::from_ref(&input),
+            input.len(),
+        );
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

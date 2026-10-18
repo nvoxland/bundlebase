@@ -210,6 +210,7 @@ impl RecordBatchStream for DeletedRowFilterStream {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::test_support::{collect_source, MockMultiPartitionSource};
@@ -274,7 +275,7 @@ mod tests {
         ));
         let src = Arc::new(DeletedRowFilterDataSource::new(inner, Arc::new(vec![1, 4])));
         let out = collect_source(src).await;
-        let got: Vec<i64> = out.iter().flat_map(|b| vals(b)).collect();
+        let got: Vec<i64> = out.iter().flat_map(vals).collect();
         // ordinal 1 -> value 11, ordinal 4 -> value 14 removed
         assert_eq!(got, vec![10, 12, 13, 15]);
     }

@@ -193,11 +193,14 @@ fn cast_batch_column(
     columns[col_idx] = cast_array;
     let mut fields: Vec<Arc<Field>> = batch.schema().fields().iter().cloned().collect();
     let old_field = &fields[col_idx];
-    fields[col_idx] = Arc::new(Field::new(old_field.name(), target.clone(), old_field.is_nullable()));
+    fields[col_idx] = Arc::new(Field::new(
+        old_field.name(),
+        target.clone(),
+        old_field.is_nullable(),
+    ));
     let new_schema = Arc::new(Schema::new(fields));
-    RecordBatch::try_new(new_schema, columns).map_err(|e| {
-        BundlebaseError::from(format!("Failed to rebuild batch after cast: {}", e))
-    })
+    RecordBatch::try_new(new_schema, columns)
+        .map_err(|e| BundlebaseError::from(format!("Failed to rebuild batch after cast: {}", e)))
 }
 
 impl IndexBlocksOp {
@@ -250,7 +253,7 @@ impl IndexBlocksOp {
         // Use stable internal names — these match the DataBlock schema
         let columns: Vec<String> = column_ids
             .iter()
-            .map(|id| bundle_schema::generate_internal_name(id))
+            .map(bundle_schema::generate_internal_name)
             .collect();
 
         // Dispatch to appropriate index building method
@@ -345,16 +348,22 @@ impl IndexBlocksOp {
         let mut sorter = ExternalSortWriter::new(sort_config)?;
 
         // Stream entries to sorter (replaces HashMap accumulation)
-        iterate_blocks(&block_infos, bundle, &progress, Some(&data_type), |batch, row_ids| {
-            let array = batch.column(0);
+        iterate_blocks(
+            &block_infos,
+            bundle,
+            &progress,
+            Some(&data_type),
+            |batch, row_ids| {
+                let array = batch.column(0);
 
-            for (row, row_id) in row_ids.iter().enumerate() {
-                let scalar = ScalarValue::try_from_array(array, row)?;
-                let indexed_value = IndexedValue::from_scalar(&scalar)?;
-                sorter.add(indexed_value, *row_id)?;
-            }
-            Ok(())
-        })
+                for (row, row_id) in row_ids.iter().enumerate() {
+                    let scalar = ScalarValue::try_from_array(array, row)?;
+                    let indexed_value = IndexedValue::from_scalar(&scalar)?;
+                    sorter.add(indexed_value, *row_id)?;
+                }
+                Ok(())
+            },
+        )
         .await?;
 
         // Build index from sorted stream
@@ -610,7 +619,7 @@ impl IndexBlocksOp {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
+            let mut bundle_schema = bundle_schema::BundleSchema::initial(operations);
             for op in operations.iter() {
                 df = op
                     .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
@@ -689,8 +698,8 @@ impl IndexBlocksOp {
             .await
             .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
-        let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
-        let cast_active = resolve_cast_ops(&operations);
+        let mut bundle_schema = bundle_schema::BundleSchema::initial(operations);
+        let cast_active = resolve_cast_ops(operations);
         for (op, active) in operations.iter().zip(cast_active.iter()) {
             if *active {
                 df = op
@@ -736,8 +745,7 @@ impl IndexBlocksOp {
             .first()
             .map(|(b, _, _)| b.schema())
             .ok_or_else(|| BundlebaseError::from("No blocks to index"))?;
-        let data_type =
-            Self::infer_computed_column_type(column, &operations, &base_schema).await?;
+        let data_type = Self::infer_computed_column_type(column, &operations, &base_schema).await?;
 
         let progress = ProgressScope::new(
             &format!("Indexing computed column '{}'", column),

@@ -246,6 +246,7 @@ async fn verify_index_exists(path: &str, builder: &BundleBuilder) -> FileVerific
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

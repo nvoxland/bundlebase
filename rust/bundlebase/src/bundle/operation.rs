@@ -11,7 +11,9 @@ mod create_report;
 mod create_source;
 mod create_view;
 mod declare_key;
+mod define_metric;
 mod delete;
+mod describe_column;
 mod detach_block;
 mod drop_always_delete;
 mod drop_always_update;
@@ -30,8 +32,6 @@ mod import_connector;
 mod import_function;
 mod index_blocks;
 mod parameter_value;
-mod define_metric;
-mod describe_column;
 mod rename_column;
 mod rename_connector;
 mod rename_function;
@@ -39,8 +39,8 @@ mod rename_join;
 mod rename_view;
 mod replace_block;
 mod save_config;
-pub(crate) mod serde_util;
 mod semantic_validation;
+pub(crate) mod serde_util;
 mod set_ai_context;
 mod set_ai_context_member;
 mod set_column_label;
@@ -54,8 +54,6 @@ mod set_name;
 mod update_data;
 mod update_version;
 
-pub use semantic_validation::SemanticTarget;
-pub(crate) use semantic_validation::check_semantic_replay;
 use crate::bundle::bundle_schema::BundleSchema;
 pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
@@ -72,7 +70,9 @@ pub use crate::bundle::operation::create_report::CreateReportOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::declare_key::DeclareKeyOp;
+pub use crate::bundle::operation::define_metric::{DefineMetricOp, MetricDefinition};
 pub use crate::bundle::operation::delete::DeleteOp;
+pub use crate::bundle::operation::describe_column::DescribeColumnOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_always_delete::DropAlwaysDeleteOp;
 pub use crate::bundle::operation::drop_always_update::DropAlwaysUpdateOp;
@@ -83,15 +83,13 @@ pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_join::DropJoinOp;
 pub use crate::bundle::operation::drop_key::DropKeyOp;
+pub use crate::bundle::operation::drop_metric::DropMetricOp;
 pub use crate::bundle::operation::drop_report::DropReportOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::import_connector::ImportConnectorOp;
 pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
-pub use crate::bundle::operation::define_metric::{DefineMetricOp, MetricDefinition};
-pub use crate::bundle::operation::describe_column::DescribeColumnOp;
-pub use crate::bundle::operation::drop_metric::DropMetricOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_connector::RenameConnectorOp;
 pub use crate::bundle::operation::rename_function::RenameFunctionOp;
@@ -117,6 +115,8 @@ use crate::{versioning, Bundle, BundlebaseError};
 use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{DataFrame, SessionContext};
+pub(crate) use semantic_validation::check_semantic_replay;
+pub use semantic_validation::SemanticTarget;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -169,6 +169,8 @@ impl Display for BundleChange {
 }
 
 /// Trait for all operations
+// Native async operations are dispatched through AnyOperation; no public Send future bound is needed.
+#[allow(async_fn_in_trait)]
 pub trait Operation: Send + Sync + Clone + Serialize + Debug + Into<AnyOperation> {
     /// Get a human-readable description of this operation
     fn describe(&self) -> String;

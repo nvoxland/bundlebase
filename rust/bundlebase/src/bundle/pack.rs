@@ -132,7 +132,7 @@ impl JoinTypeOption {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "left" => JoinTypeOption::Left,
             "right" => JoinTypeOption::Right,
@@ -188,12 +188,12 @@ mod tests {
 
     #[test]
     fn test_join_type_from_str() {
-        assert_eq!(JoinTypeOption::from_str("inner"), JoinTypeOption::Inner);
-        assert_eq!(JoinTypeOption::from_str("left"), JoinTypeOption::Left);
-        assert_eq!(JoinTypeOption::from_str("right"), JoinTypeOption::Right);
-        assert_eq!(JoinTypeOption::from_str("full"), JoinTypeOption::Full);
-        assert_eq!(JoinTypeOption::from_str("outer"), JoinTypeOption::Full);
-        assert_eq!(JoinTypeOption::from_str("unknown"), JoinTypeOption::Inner);
+        assert_eq!(JoinTypeOption::from_name("inner"), JoinTypeOption::Inner);
+        assert_eq!(JoinTypeOption::from_name("left"), JoinTypeOption::Left);
+        assert_eq!(JoinTypeOption::from_name("right"), JoinTypeOption::Right);
+        assert_eq!(JoinTypeOption::from_name("full"), JoinTypeOption::Full);
+        assert_eq!(JoinTypeOption::from_name("outer"), JoinTypeOption::Full);
+        assert_eq!(JoinTypeOption::from_name("unknown"), JoinTypeOption::Inner);
     }
 
     #[test]

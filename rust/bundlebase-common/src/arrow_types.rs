@@ -195,6 +195,7 @@ pub fn widen_type(a: &DataType, b: &DataType) -> DataType {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

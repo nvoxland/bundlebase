@@ -55,7 +55,7 @@ impl TableProvider for BundleHistoryTable {
         let commits = CommitHistory::from(self.facade()?.history());
         let stream = Box::new(commits)
             .into_stream()
-            .map_err(|e| datafusion::error::DataFusionError::External(e))?;
+            .map_err(datafusion::error::DataFusionError::External)?;
         let batches: Vec<_> = stream.try_collect().await?;
         let mem_table = MemTable::try_new(self.schema(), vec![batches])?;
         mem_table.scan(state, projection, filters, limit).await

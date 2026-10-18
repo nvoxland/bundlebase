@@ -56,7 +56,7 @@ impl ProgressTracker for PyProgressTracker {
             let msg = message.map(|s| s.to_string());
             let _ = Python::attach(|py| {
                 let callback = self.callback.clone_ref(py);
-                let message_py = msg.as_ref().map(|s| s.as_str()).unwrap_or("");
+                let message_py = msg.as_deref().unwrap_or("");
                 let args = (
                     "update",
                     op_name,

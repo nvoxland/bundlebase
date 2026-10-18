@@ -163,6 +163,7 @@ impl ExportWriter for JsonLinesExportWriter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use arrow::array::{Int32Array, StringArray};

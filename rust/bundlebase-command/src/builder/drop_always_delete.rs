@@ -50,9 +50,10 @@ impl BundleBuilderCommand for DropAlwaysDeleteCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Translate user-visible column names to stable internal name references
         // so the WHERE clause matches the stored rule format.
-        let translated = self.where_clause.as_ref().map(|wc| {
-                        builder.translate_sql(wc)
-        });
+        let translated = self
+            .where_clause
+            .as_ref()
+            .map(|wc| builder.translate_sql(wc));
 
         let op = DropAlwaysDeleteOp::new(translated.clone());
         builder.apply_operation(op.into()).await?;

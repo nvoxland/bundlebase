@@ -28,7 +28,7 @@ pub fn render_table(
     // Table opening with column count
     let columns_spec = get_opt_str(opts, "columns")
         .unwrap_or_else(|| format!("({})", vec!["auto"; num_cols].join(", ")));
-    lines.push(format!("#table("));
+    lines.push("#table(".to_string());
     lines.push(format!("  columns: {},", columns_spec));
 
     // Border/stroke

@@ -442,6 +442,7 @@ impl CommandResponse for SendableRecordBatchStream {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use futures::StreamExt;

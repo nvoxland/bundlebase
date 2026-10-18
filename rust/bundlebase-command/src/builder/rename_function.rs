@@ -76,6 +76,7 @@ impl BundleBuilderCommand for RenameFunctionCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

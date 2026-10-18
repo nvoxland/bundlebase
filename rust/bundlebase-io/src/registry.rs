@@ -236,6 +236,7 @@ pub fn io_registry() -> &'static IORegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

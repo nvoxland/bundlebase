@@ -95,7 +95,7 @@ impl SourceFormat {
             "xlsx" => SourceFormat::Xlsx,
             "xls" => SourceFormat::Xls,
             "ods" => SourceFormat::Ods,
-            "auto" | _ => SourceFormat::Auto,
+            _ => SourceFormat::Auto,
         }
     }
 
@@ -254,11 +254,7 @@ pub struct FetchResults {
 
 impl FetchResults {
     /// Create empty results.
-    pub fn empty(
-        connector: String,
-        source_id: crate::object_id::ObjectId,
-        pack: String,
-    ) -> Self {
+    pub fn empty(connector: String, source_id: crate::object_id::ObjectId, pack: String) -> Self {
         Self {
             connector,
             source_id,

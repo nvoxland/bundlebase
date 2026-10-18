@@ -393,9 +393,9 @@ async fn materialize_bundled_file(
         ))
     })?;
 
-    let parent = dest.parent().ok_or_else(|| {
-        BundlebaseError::from(format!("Invalid cache path '{}'", dest.display()))
-    })?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| BundlebaseError::from(format!("Invalid cache path '{}'", dest.display())))?;
     tokio::fs::create_dir_all(parent).await.map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to create cache directory '{}': {}",
@@ -823,7 +823,12 @@ mod tests {
         let rt = UdfRuntime::parse_from(&format!("ipc::{}", script.display())).unwrap();
 
         // The source tempdir's name is unique, so reuse it for the bundle URL.
-        let unique = src.path().file_name().unwrap().to_string_lossy().to_string();
+        let unique = src
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let url = Url::parse(&format!("memory:///resolve_local_{}", unique)).unwrap();
         let data_dir = writable_dir_from_url(&url, Arc::new(EmptyConfig))
             .await
@@ -854,7 +859,10 @@ mod tests {
         }
 
         // Synchronous resolve_path agrees with the materialized location.
-        assert_eq!(bundled.resolve_path(&data_dir).file_path(), Some(path.as_str()));
+        assert_eq!(
+            bundled.resolve_path(&data_dir).file_path(),
+            Some(path.as_str())
+        );
     }
 
     #[tokio::test]
@@ -869,8 +877,16 @@ mod tests {
         });
         tampered.write_stream(Box::pin(stream)).await.unwrap();
 
-        let err = bundled.resolve_local(&data_dir).await.unwrap_err().to_string();
-        assert!(err.contains("hash"), "expected a hash mismatch error: {}", err);
+        let err = bundled
+            .resolve_local(&data_dir)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("hash"),
+            "expected a hash mismatch error: {}",
+            err
+        );
     }
 
     #[test]

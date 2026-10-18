@@ -135,7 +135,7 @@ impl Operation for RenameConnectorOp {
         // Update sources referencing the old connector name
         if let Some(old_name) = old_name {
             let sources = bundle.sources.read();
-            for (_, source) in sources.iter() {
+            for source in sources.values() {
                 if source.connector() == old_name {
                     source.set_connector_name(self.new_name.clone());
                 }
@@ -147,6 +147,7 @@ impl Operation for RenameConnectorOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::connector_entry::ConnectorEntry;

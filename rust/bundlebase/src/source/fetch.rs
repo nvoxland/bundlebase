@@ -126,7 +126,10 @@ pub async fn download_http_to_data_dir(
             progress.increment(chunk.len() as u64, None);
             Ok(chunk)
         }
-        Err(e) => Err(std::io::Error::other(format!("Failed to read response: {}", e))),
+        Err(e) => Err(std::io::Error::other(format!(
+            "Failed to read response: {}",
+            e
+        ))),
     });
     let mut body_stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>> =
         Box::pin(body_stream);
@@ -488,6 +491,8 @@ fn make_fetched_data(
 ///    - If not in attached_files: get data and emit Add
 /// 3. For Sync mode: emit Remove for attached locations not in discovered set
 /// 4. "Get data" tries `func.data()` first, then `func.stable_url()`
+// This boundary accepts the existing block/fetch context explicitly.
+#[allow(clippy::too_many_arguments)]
 pub async fn orchestrate_fetch(
     func: &dyn Connector,
     args: &HashMap<String, String>,
@@ -553,8 +558,7 @@ pub async fn orchestrate_fetch(
                 }
             } else {
                 let data =
-                    get_data_for_location(func, &location, args, config, data_dir, &save_as)
-                        .await?;
+                    get_data_for_location(func, &location, args, config, data_dir, save_as).await?;
                 MaterializedData {
                     attach_location: data.attach_location,
                     source_location: location.location.clone(),
@@ -611,11 +615,10 @@ pub async fn read_parquet_batches(
         .map_err(|e| BundlebaseError::from(format!("Failed to read {}: {}", location, e)))?
         .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
 
-    let builder =
-        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(Bytes::from(bytes))
-            .map_err(|e| {
-                BundlebaseError::from(format!("Failed to read parquet {}: {}", location, e))
-            })?;
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes)
+        .map_err(|e| {
+            BundlebaseError::from(format!("Failed to read parquet {}: {}", location, e))
+        })?;
 
     let schema = builder.schema().clone();
     let reader = builder.build().map_err(|e| {
@@ -710,7 +713,10 @@ mod tests {
         let stream = chunked(vec![b"  ", b"{\"a\":1}\n", b"{\"a\":2}\n"]);
         let (detected, replay) = peek_detect_format(stream).await.expect("peek");
         assert_eq!(detected, Some("jsonl"));
-        assert_eq!(collect_all(replay).await, b"  {\"a\":1}\n{\"a\":2}\n".to_vec());
+        assert_eq!(
+            collect_all(replay).await,
+            b"  {\"a\":1}\n{\"a\":2}\n".to_vec()
+        );
     }
 
     /// Magic bytes split across chunk boundaries must still be detected.

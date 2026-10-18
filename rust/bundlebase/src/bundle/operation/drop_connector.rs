@@ -113,6 +113,7 @@ impl Operation for DropConnectorOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::connector_entry::ConnectorEntry;

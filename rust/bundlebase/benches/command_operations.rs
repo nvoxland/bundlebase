@@ -546,9 +546,7 @@ fn bench_fetch(c: &mut Criterion) {
                                     let bundle = BundleBuilder::create(&bundle_url, None).await?;
                                     let mut args = HashMap::new();
                                     args.insert("url".to_string(), format!("{}/", source_url));
-                                    bundle
-                                        .create_source("remote_dir", args, None, true)
-                                        .await?;
+                                    bundle.create_source("remote_dir", args, None, true).await?;
                                     bundle.commit("Setup with source").await?;
                                     Ok::<_, Box<dyn std::error::Error + Send + Sync>>(bundle)
                                 })

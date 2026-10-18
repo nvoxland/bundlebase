@@ -176,7 +176,7 @@ mod tests {
             ParameterValue::Null,
             ParameterValue::Boolean(true),
             ParameterValue::Int64(42),
-            ParameterValue::Float64(3.14),
+            ParameterValue::Float64(3.25),
             ParameterValue::String("hello".to_string()),
         ];
 

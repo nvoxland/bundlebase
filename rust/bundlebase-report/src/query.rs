@@ -155,8 +155,8 @@ mod tests {
 
     #[test]
     fn test_extract_float_value() {
-        let array = Float64Array::from(vec![3.14, 2.71]);
-        assert_eq!(extract_value(&array, 0), serde_json::json!(3.14));
+        let array = Float64Array::from(vec![3.5, 2.25]);
+        assert_eq!(extract_value(&array, 0), serde_json::json!(3.5));
     }
 
     #[test]

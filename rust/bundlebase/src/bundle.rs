@@ -10,9 +10,9 @@ mod indexed_blocks;
 mod init;
 pub mod operation;
 mod pack;
-mod source;
-pub mod semantic_state;
 pub mod semantic_model;
+pub mod semantic_state;
+mod source;
 pub mod connector_entry {
     pub use bundlebase_udf::{parse_connector_name, resolve_connector, ConnectorEntry};
 }
@@ -25,9 +25,9 @@ pub mod function_entry {
 pub mod deleted_row_filter;
 pub mod schema_rename_filter;
 mod sql;
-mod text_ordering;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod text_ordering;
 pub mod tombstone;
 pub mod update_overlay;
 pub mod update_overlay_filter;
@@ -61,9 +61,6 @@ pub use verification::{FileVerificationResult, VerificationResults};
 
 use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::UpdateVersionOp;
-pub(crate) use text_ordering::{
-    check_text_ordering_comparison, check_text_ordering_comparison_named,
-};
 use crate::bundle_config::PassedBundleConfig;
 use crate::bundle_config::Scope;
 use crate::catalog::CATALOG_NAME;
@@ -82,7 +79,6 @@ use crate::ConfigProvider;
 use crate::{BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
-use bundlebase_io::IOReadFile;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{LogicalPlan, ScalarUDF};
@@ -94,6 +90,9 @@ use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
 use std::any::Any;
 use std::sync::{Arc, Weak};
+pub(crate) use text_ordering::{
+    check_text_ordering_comparison, check_text_ordering_comparison_named,
+};
 use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
@@ -926,13 +925,13 @@ impl Bundle {
 
     /// Modifies this bundle with the given operation using interior mutability.
     pub(crate) async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
-        let description = &op.describe();
-        debug!("Applying operation to bundle: {}...", &description);
+        let description = op.describe();
+        debug!("Applying operation to bundle: {}...", description);
 
-        debug!("Checking: {}", &description);
+        debug!("Checking: {}", description);
         op.check(self).await?;
 
-        debug!("Apply: {}", &description);
+        debug!("Apply: {}", description);
         op.apply(self).await?;
         self.update_version_for_op(&op);
         self.operations.write().push(op);
@@ -941,7 +940,7 @@ impl Bundle {
         *self.bundle_schema.write() = BundleSchema::new();
         debug!("Cleared dataframe");
 
-        debug!("Applying operation to bundle: {}...DONE", &description);
+        debug!("Applying operation to bundle: {}...DONE", description);
 
         Ok(())
     }
@@ -950,8 +949,8 @@ impl Bundle {
     /// Used during bulk manifest loading where intermediate versions are never read.
     /// Call `recompute_version()` once after all operations are applied.
     async fn apply_operation_deferred(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
-        let description = &op.describe();
-        debug!("Applying operation (deferred): {}...", &description);
+        let description = op.describe();
+        debug!("Applying operation (deferred): {}...", description);
 
         if let Some(result) = operation::check_semantic_replay(&op) {
             result?;
@@ -965,7 +964,7 @@ impl Bundle {
         self.dataframe.clear();
         *self.bundle_schema.write() = BundleSchema::new();
 
-        debug!("Applying operation (deferred): {}...DONE", &description);
+        debug!("Applying operation (deferred): {}...DONE", description);
         Ok(())
     }
 
@@ -1122,7 +1121,7 @@ impl Bundle {
         // Create a temporary pack with translated expression for parsing
         let translated_pack = Pack::new(
             *pack.id(),
-            &pack.name(),
+            pack.name(),
             &translated_expression,
             *pack.join_type().expect("Pack must have join_type"),
         );
@@ -1144,7 +1143,7 @@ impl Bundle {
             .collect();
 
         let mut joined_df = base_df.join_on(
-            self.ctx.table(&join_table).await?.alias(&name)?,
+            self.ctx.table(&join_table).await?.alias(name)?,
             join_type.to_datafusion(),
             expr,
         )?;
@@ -1251,6 +1250,8 @@ impl Bundle {
     /// - `packs` and each block's DELETE/UPDATE edit state (tombstones,
     ///   overlays): the builder's uncommitted edits must not show through the
     ///   source Bundle's blocks
+    /// - `indexes` and each definition's indexed-block registry: creating,
+    ///   dropping, rebuilding, or pruning indexes belongs to this builder
     /// - `ctx` (and the function registry bound to it): the builder registers
     ///   its own schema providers / `search()` against the context, which
     ///   would otherwise make the source Bundle's queries resolve `bundle`
@@ -1271,6 +1272,27 @@ impl Bundle {
         self.operations = Arc::new(RwLock::new(current_operations));
         self.bundle_schema = Arc::new(RwLock::new(BundleSchema::new()));
 
+        // Each definition owns mutable indexed-block registrations. Keep immutable
+        // index-file metadata shared, but isolate registry additions and pruning.
+        let indexes = self
+            .indexes
+            .read()
+            .iter()
+            .map(|index| {
+                let copy = IndexDefinition::new(
+                    index.id(),
+                    index.name().to_string(),
+                    index.index_type().clone(),
+                    index.column_ids().to_vec(),
+                );
+                for blocks in index.all_indexed_blocks() {
+                    copy.add_indexed_blocks(blocks);
+                }
+                Arc::new(copy)
+            })
+            .collect();
+        self.indexes = Arc::new(RwLock::new(indexes));
+
         // Deep-copy packs and their blocks' edit state. Re-adding every block
         // in its original order keeps the pack's block order unchanged.
         let packs: HashMap<ObjectId, Arc<Pack>> = self
@@ -1281,7 +1303,7 @@ impl Bundle {
                 let copy = pack.as_ref().clone();
                 for block in pack.blocks() {
                     copy.remove_block(block.id());
-                    copy.add_block(Arc::new(block.detached_clone()));
+                    copy.add_block(Arc::new(block.detached_clone(Arc::clone(&self.indexes))));
                 }
                 (*id, Arc::new(copy))
             })
@@ -1329,7 +1351,7 @@ impl Bundle {
         self.packs
             .read()
             .values()
-            .filter_map(|p| Some(p.name().to_string()))
+            .map(|p| p.name().to_string())
             .collect()
     }
 
@@ -1673,8 +1695,7 @@ impl BundleFacade for Bundle {
         self.commits
             .read()
             .iter()
-            .filter(|x| x.data_dir != Some(current_data_dir_url.clone()))
-            .last()
+            .rfind(|x| x.data_dir != Some(current_data_dir_url.clone()))
             .and_then(|c| c.data_dir.clone())
     }
 
@@ -1709,7 +1730,7 @@ impl BundleFacade for Bundle {
             .clone()
             .count()
             .await
-            .map_err(|e| e.into())
+            .map_err(Into::into)
     }
 
     async fn dataframe(&self) -> Result<Arc<DataFrame>, BundlebaseError> {
@@ -1752,7 +1773,7 @@ impl BundleFacade for Bundle {
                 if !active {
                     continue;
                 }
-                debug!("Applying to dataframe: {}", &op.describe());
+                debug!("Applying to dataframe: {}", op.describe());
                 if let AnyOperation::CreateJoin(create_join) = op {
                     if let Some(pack) = packs_snapshot.get(&create_join.id) {
                         if pack.is_join() && !pack.is_empty() {
@@ -1894,10 +1915,10 @@ impl BundleFacade for Bundle {
         // and explicitly `finish()`-ed so any final compressed block lands on
         // disk before we report success.
         let mut builder = if gzip {
-            Builder::new(WriteEither::Gz(GzEncoder::new(
+            Builder::new(WriteEither::Gz(Box::new(GzEncoder::new(
                 tar_file,
                 Compression::default(),
-            )))
+            ))))
         } else {
             Builder::new(WriteEither::Plain(tar_file))
         };
@@ -2156,7 +2177,7 @@ impl BundleFacade for Bundle {
 
         // Update sources referencing the old connector name
         let sources = self.sources.read();
-        for (_, source) in sources.iter() {
+        for source in sources.values() {
             if source.connector() == old_name {
                 source.set_connector_name(new_name.to_string());
             }
@@ -2176,7 +2197,7 @@ impl BundleFacade for Bundle {
         let new_namespaced = crate::NamespacedName::parse(new_name, "Function")?;
         self.function_registry
             .write()
-            .rename_temp(&old_name, &new_namespaced)?;
+            .rename_temp(old_name, &new_namespaced)?;
         self.function_registry
             .read()
             .refresh_version_udf("TEMP".to_string());
@@ -2299,7 +2320,7 @@ impl<R: std::io::Read> std::io::Read for CountingReader<R> {
 /// bytes flush to disk before we return success.
 enum WriteEither {
     Plain(std::fs::File),
-    Gz(flate2::write::GzEncoder<std::fs::File>),
+    Gz(Box<flate2::write::GzEncoder<std::fs::File>>),
 }
 
 impl std::io::Write for WriteEither {
@@ -2381,7 +2402,7 @@ mod tests {
                     let df = facade
                         .dataframe()
                         .await
-                        .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;
+                        .map_err(datafusion::error::DataFusionError::External)?;
                     Ok(Some(Arc::new(BundleViewTable::new((*df).clone()))))
                 } else {
                     Ok(None)
@@ -2533,42 +2554,6 @@ mod tests {
 
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total_rows, 0, "Empty bundle should have 0 rows");
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "Needs bundlebase-command extension trait"]
-    async fn test_import_temp_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
-        use crate::bundle::facade::BundleFacade;
-
-        let bundle = Bundle::empty(None).await?;
-        assert_eq!(bundle.version(), "empty");
-
-        todo!("Uses bundlebase-command extension trait");
-
-        assert_eq!(bundle.version(), "TEMP");
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "Needs bundlebase-command extension trait"]
-    async fn test_import_temp_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
-        use arrow::array::StringArray;
-
-        let _bundle = Bundle::empty(None).await?;
-
-        todo!("Uses bundlebase-command extension trait");
-
-        let df = _bundle.ctx().sql("SELECT version() AS ver").await?;
-        let batches = df.collect().await?;
-        let ver_col = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .expect("version() should return StringArray");
-        assert_eq!(ver_col.value(0), "TEMP");
 
         Ok(())
     }

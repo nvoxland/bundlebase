@@ -13,11 +13,13 @@ use url::Url;
 #[derive(Copy, Clone)]
 pub enum Format {
     Parquet,
+    #[allow(dead_code)] // Shared fixture; some benchmark binaries only use Parquet.
     Csv,
     Json,
 }
 
 /// All supported formats for iteration in benchmarks.
+#[allow(dead_code)] // Shared fixture; not every benchmark varies the format.
 pub const ALL_FORMATS: [Format; 3] = [Format::Parquet, Format::Csv, Format::Json];
 
 impl Format {
@@ -86,7 +88,8 @@ pub fn get_data_url(rows: usize, format: &Format) -> String {
     })
 }
 
-/// Return a file:// URL to cached lookup table, generating on first call.
+/// Return a file:// URL to cached lookup data, generating it on first use.
+#[allow(dead_code)] // Shared helper; only join benchmarks need lookup data.
 pub fn get_lookup_url(rows: usize, format: &Format) -> String {
     let path = data_dir().join(format!("lookup_{}.{}", rows, format.name()));
     ensure_cached(&path, || {

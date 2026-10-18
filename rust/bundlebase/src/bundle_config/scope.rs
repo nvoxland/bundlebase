@@ -25,6 +25,7 @@ pub fn validated_scope_from_url(url: &Url) -> Result<Scope, BundlebaseError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

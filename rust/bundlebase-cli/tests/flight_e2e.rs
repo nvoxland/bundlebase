@@ -787,7 +787,10 @@ async fn test_handshake_succeeds_without_request_body() {
     // Should get back a HandshakeResponse carrying the bearer token.
     let mut stream = resp.into_inner();
     let first = futures::StreamExt::next(&mut stream).await;
-    assert!(first.is_some(), "expected one HandshakeResponse from server");
+    assert!(
+        first.is_some(),
+        "expected one HandshakeResponse from server"
+    );
     let payload = first.unwrap().unwrap().payload;
     let s = String::from_utf8_lossy(&payload);
     assert!(

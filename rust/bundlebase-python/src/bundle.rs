@@ -274,7 +274,7 @@ impl PyBundle {
         self.inner
             .history()
             .into_iter()
-            .map(|commit| PyCommit::new(commit))
+            .map(PyCommit::new)
             .collect()
     }
 

@@ -124,6 +124,7 @@ impl Operation for RenameFunctionOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::function_entry::{FunctionEntry, FunctionKind};

@@ -14,7 +14,7 @@ const INTERNAL_NAME_PREFIX: &str = "col_";
 ///
 /// Threaded through `apply_dataframe` calls so operations can update column names
 /// as they apply renames, adds, and drops.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BundleSchema {
     columns: HashMap<ColumnId, String>,
     computed_columns: HashSet<ColumnId>,
@@ -98,12 +98,10 @@ impl BundleSchema {
                         }
                     }
                 }
-                AnyOperation::AddColumn(add) => {
-                    if !name_to_id.contains_key(&add.name) {
-                        name_to_id.insert(add.name.clone(), add.id);
-                        id_to_name.insert(add.id, add.name.clone());
-                        computed.insert(add.id);
-                    }
+                AnyOperation::AddColumn(add) if !name_to_id.contains_key(&add.name) => {
+                    name_to_id.insert(add.name.clone(), add.id);
+                    id_to_name.insert(add.id, add.name.clone());
+                    computed.insert(add.id);
                 }
                 _ => {}
             }
@@ -185,12 +183,10 @@ impl BundleSchema {
                         }
                     }
                 }
-                AnyOperation::AddColumn(add) => {
-                    if !name_to_id.contains_key(&add.name) {
-                        name_to_id.insert(add.name.clone(), add.id);
-                        id_to_name.insert(add.id, add.name.clone());
-                        computed.insert(add.id);
-                    }
+                AnyOperation::AddColumn(add) if !name_to_id.contains_key(&add.name) => {
+                    name_to_id.insert(add.name.clone(), add.id);
+                    id_to_name.insert(add.id, add.name.clone());
+                    computed.insert(add.id);
                 }
                 AnyOperation::RenameColumn(rename) => {
                     if let Some(old_name) = id_to_name.get(&rename.id).cloned() {
@@ -472,7 +468,7 @@ fn rewrite_identifiers_in_sql(
     quote_bare: bool,
 ) -> String {
     let mut names: Vec<(&String, &String)> = name_map.iter().collect();
-    names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    names.sort_by_key(|a| std::cmp::Reverse(a.0.len()));
 
     let bytes = sql.as_bytes();
     let mut result = String::with_capacity(sql.len());

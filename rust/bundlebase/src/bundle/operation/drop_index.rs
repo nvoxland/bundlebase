@@ -47,6 +47,7 @@ impl Operation for DropIndexOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     #[test]

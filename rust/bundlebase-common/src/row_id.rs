@@ -120,6 +120,7 @@ impl RowIdBatch {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -196,7 +197,7 @@ mod tests {
     fn test_rowid_clone_and_copy() {
         let block_ref = ObjectIdAlias::from(110u16);
         let original = RowId::new(block_ref, 2000);
-        let cloned = original.clone();
+        let cloned = original;
         let copied = original;
         assert_eq!(original, cloned);
         assert_eq!(original, copied);

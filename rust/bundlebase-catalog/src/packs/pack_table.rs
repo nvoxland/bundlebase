@@ -203,7 +203,7 @@ impl TableProvider for PackTable {
                 }
                 kept
             }
-            None => blocks.iter().cloned().collect(),
+            None => blocks.to_vec(),
         };
 
         // Build per-block plans concurrently. Each future is independent —

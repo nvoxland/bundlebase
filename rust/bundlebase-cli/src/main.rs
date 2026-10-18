@@ -170,9 +170,8 @@ fn init_logging(cli: &Cli) {
     } else {
         format!("{},tantivy=warn,{}", log_config.level, user_filter)
     };
-    let env_filter = tracing_subscriber::EnvFilter::try_new(&combined).unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(log_config.level.to_string())
-    });
+    let env_filter = tracing_subscriber::EnvFilter::try_new(&combined)
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_config.level.to_string()));
 
     // Initialize tracing/logging with the configured level
     if log_config.ui_mode {

@@ -126,6 +126,7 @@ fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use arrow::array::Array;

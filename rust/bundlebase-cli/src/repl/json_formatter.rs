@@ -256,10 +256,9 @@ pub async fn write_stream_json(
                         array_value_to_json(batch.column(i), 0),
                     );
                 }
-                let text =
-                    serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
-                        BundlebaseError::from(format!("JSON serialization error: {}", e))
-                    })?;
+                let text = serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
+                    BundlebaseError::from(format!("JSON serialization error: {}", e))
+                })?;
                 return out.write_all(text.as_bytes()).map_err(io_err);
             }
             _ => {}
@@ -282,9 +281,8 @@ pub async fn write_stream_json(
                     array_value_to_json(batch.column(col_idx), row_idx),
                 );
             }
-            let pretty = serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| {
-                BundlebaseError::from(format!("JSON serialization error: {}", e))
-            })?;
+            let pretty = serde_json::to_string_pretty(&Value::Object(obj))
+                .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))?;
             if wrote_any {
                 out.write_all(b",").map_err(io_err)?;
             }
@@ -306,7 +304,6 @@ pub async fn write_stream_json(
         let batch = batch_result?;
         write_batch(&batch, out)?;
     }
-    drop(write_batch);
 
     if wrote_any {
         out.write_all(b"\n]").map_err(io_err)?;
@@ -345,8 +342,8 @@ fn format_as_array(
         }
     }
 
-    Ok(serde_json::to_string_pretty(&rows)
-        .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))?)
+    serde_json::to_string_pretty(&rows)
+        .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))
 }
 
 #[cfg(test)]
@@ -359,11 +356,7 @@ mod tests {
         pulled: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> SendableRecordBatchStream {
         use std::sync::atomic::Ordering;
-        let schema = Arc::new(Schema::new(vec![Field::new(
-            "id",
-            DataType::Int64,
-            false,
-        )]));
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let schema_for_iter = schema.clone();
         let stream = futures::stream::iter((0..100).map(move |i| {
             pulled.fetch_add(1, Ordering::SeqCst);
@@ -394,11 +387,9 @@ mod tests {
                 vec![Arc::new(Int64Array::from(Vec::<i64>::new()))],
             )
             .expect("static batch");
-            let one = RecordBatch::try_new(
-                schema.clone(),
-                vec![Arc::new(Int64Array::from(vec![42]))],
-            )
-            .expect("static batch");
+            let one =
+                RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![42]))])
+                    .expect("static batch");
             Box::pin(RecordBatchStreamAdapter::new(
                 schema,
                 futures::stream::iter(vec![Ok(empty), Ok(one)]),
@@ -421,7 +412,10 @@ mod tests {
         )
         .await
         .expect("format");
-        assert!(text.contains("42"), "dictionary must render the row: {text}");
+        assert!(
+            text.contains("42"),
+            "dictionary must render the row: {text}"
+        );
     }
 
     /// write_stream_json must produce byte-identical output to

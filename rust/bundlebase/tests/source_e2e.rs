@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
@@ -1332,8 +1331,7 @@ async fn test_csv_quoted_newlines_indexed_lookup() -> Result<(), BundlebaseError
         let mut w = std::io::BufWriter::new(f);
         writeln!(w, "id,name,description").expect("header");
         for i in 0..200 {
-            writeln!(w, "r{i:03},name_{i:03},\"line one\nline two for row {i}\"")
-                .expect("row");
+            writeln!(w, "r{i:03},name_{i:03},\"line one\nline two for row {i}\"").expect("row");
         }
         w.flush().expect("flush");
     }
@@ -1426,9 +1424,7 @@ async fn test_jsonl_malformed_line_is_an_error() -> Result<(), BundlebaseError> 
                         // valid rows and nothing was silently dropped — which
                         // is impossible with the malformed line, so fail.
                         let n: usize = batches.iter().map(|b| b.num_rows()).sum();
-                        panic!(
-                            "malformed JSONL was silently tolerated ({n} rows returned)"
-                        );
+                        panic!("malformed JSONL was silently tolerated ({n} rows returned)");
                     }
                 }
             }

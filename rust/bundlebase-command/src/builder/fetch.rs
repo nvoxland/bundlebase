@@ -323,13 +323,13 @@ async fn fetch_from_source(
     // walks blocks (cheap), not rows (expensive). Returns None if any block
     // belonging to the source lacks num_rows metadata, so the caller can tell
     // "actually 0 rows" apart from "I don't know".
-    let rows_before: Option<u64> = sum_source_rows(&builder.bundle(), &source_id);
+    let rows_before: Option<u64> = sum_source_rows(builder.bundle(), &source_id);
 
     let actions = source.fetch(builder, mode, dry_run).await?;
 
     // Capture (version, num_rows) for every Remove/Replace target *before* any
     // ops are applied — once Phase 4 detaches a block we can't look it up.
-    let removed_metadata = remove_action_metadata(&builder.bundle(), &source_id, &actions);
+    let removed_metadata = remove_action_metadata(builder.bundle(), &source_id, &actions);
 
     // Dry run: report what would change without materializing data or applying ops.
     if dry_run {
@@ -349,20 +349,23 @@ async fn fetch_from_source(
                     Some(n) => delta = delta.saturating_add(n as i64),
                     None => estimate_complete = false,
                 },
-                FetchAction::Replace { old_source_location, data } => {
+                FetchAction::Replace {
+                    old_source_location,
+                    data,
+                } => {
                     match data.num_rows {
                         Some(n) => delta = delta.saturating_add(n as i64),
                         None => estimate_complete = false,
                     }
                     delta = delta.saturating_sub(rows_for_source_location(
-                        &builder.bundle(),
+                        builder.bundle(),
                         &source_id,
                         old_source_location,
                     ) as i64);
                 }
                 FetchAction::Remove { source_location } => {
                     delta = delta.saturating_sub(rows_for_source_location(
-                        &builder.bundle(),
+                        builder.bundle(),
                         &source_id,
                         source_location,
                     ) as i64);
@@ -489,7 +492,8 @@ async fn fetch_from_source(
     // old merged parquet so unchanged sources keep their existing rows and
     // replaced/removed sources are swapped in or dropped.
     let pre_phase4_bundle = builder.bundle().clone();
-    let grouped = group_sequential_actions_by_block(&pre_phase4_bundle, &source_id, &sequential_actions);
+    let grouped =
+        group_sequential_actions_by_block(&pre_phase4_bundle, &source_id, &sequential_actions);
 
     for (snapshot, action_refs) in grouped {
         if snapshot.source_info.batch_sources.len() > 1 {
@@ -572,7 +576,7 @@ async fn fetch_from_source(
     // Add/Replace/Remove ops above are applied. Sum num_rows over the bundle's
     // current blocks for our source_id (post-apply state). `None` is faithfully
     // propagated when any block lacks metadata.
-    let rows_after: Option<u64> = sum_source_rows(&builder.bundle(), &source_id);
+    let rows_after: Option<u64> = sum_source_rows(builder.bundle(), &source_id);
 
     let mut results = FetchResults::from_actions(
         connector,
@@ -597,7 +601,10 @@ fn remove_action_metadata(
     let mut targets: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for action in actions {
         match action {
-            FetchAction::Replace { old_source_location, .. } => {
+            FetchAction::Replace {
+                old_source_location,
+                ..
+            } => {
                 targets.insert(old_source_location.as_str());
             }
             FetchAction::Remove { source_location } => {
@@ -611,9 +618,11 @@ fn remove_action_metadata(
     }
 
     let mut out = std::collections::HashMap::new();
-    for (_pack_id, pack) in bundle.packs().iter() {
+    for pack in bundle.packs().values() {
         for block in pack.blocks() {
-            let Some(info) = block.source_info() else { continue };
+            let Some(info) = block.source_info() else {
+                continue;
+            };
             if &info.id != source_id {
                 continue;
             }
@@ -642,7 +651,7 @@ fn remove_action_metadata(
 fn sum_source_rows(bundle: &Bundle, source_id: &ObjectId) -> Option<u64> {
     let mut total: u64 = 0;
     let mut any_block = false;
-    for (_pack_id, pack) in bundle.packs().iter() {
+    for pack in bundle.packs().values() {
         for block in pack.blocks() {
             if !block
                 .source_info()
@@ -652,10 +661,7 @@ fn sum_source_rows(bundle: &Bundle, source_id: &ObjectId) -> Option<u64> {
                 continue;
             }
             any_block = true;
-            match block.num_rows() {
-                Some(n) => total = total.saturating_add(n as u64),
-                None => return None,
-            }
+            total = total.saturating_add(block.num_rows()? as u64);
         }
     }
     // No blocks → known zero.
@@ -670,9 +676,11 @@ fn sum_source_rows(bundle: &Bundle, source_id: &ObjectId) -> Option<u64> {
 /// Remove action would drop. Walks block metadata (cheap).
 fn rows_for_source_location(bundle: &Bundle, source_id: &ObjectId, source_location: &str) -> u64 {
     let mut total: u64 = 0;
-    for (_pack_id, pack) in bundle.packs().iter() {
+    for pack in bundle.packs().values() {
         for block in pack.blocks() {
-            let Some(info) = block.source_info() else { continue };
+            let Some(info) = block.source_info() else {
+                continue;
+            };
             if &info.id != source_id {
                 continue;
             }
@@ -774,18 +782,20 @@ fn group_sequential_actions_by_block<'a>(
             continue;
         };
         let block_location = info.location.clone();
-        let slot = by_location.entry(block_location.clone()).or_insert_with(|| {
-            let snap = bundle
-                .find_block_by_current_location(&block_location)
-                .and_then(|block| {
-                    block.source_info().cloned().map(|si| BlockSnapshot {
-                        id: *block.id(),
-                        location: block_location.clone(),
-                        source_info: si,
-                    })
-                });
-            (snap, Vec::new())
-        });
+        let slot = by_location
+            .entry(block_location.clone())
+            .or_insert_with(|| {
+                let snap = bundle
+                    .find_block_by_current_location(&block_location)
+                    .and_then(|block| {
+                        block.source_info().cloned().map(|si| BlockSnapshot {
+                            id: *block.id(),
+                            location: block_location.clone(),
+                            source_info: si,
+                        })
+                    });
+                (snap, Vec::new())
+            });
         slot.1.push(action);
     }
 
@@ -865,7 +875,10 @@ async fn rebuild_batch_block(
     drop(read_progress);
 
     let source_progress = ProgressScope::new(
-        &format!("Rebuilding batch block: processing {} sources", total_sources),
+        &format!(
+            "Rebuilding batch block: processing {} sources",
+            total_sources
+        ),
         Some(total_sources as u64),
     );
 
@@ -1068,7 +1081,7 @@ async fn batch_small_ops(
     let parquet_chunks = group_by_size(parquet_ops, batch_bytes);
     for (batch_idx, chunk) in parquet_chunks.into_iter().enumerate() {
         if chunk.len() == 1 {
-            result.push(chunk.into_iter().next().unwrap());
+            result.extend(chunk);
             processed += 1;
             progress.update(processed as u64, None);
             continue;
@@ -1092,7 +1105,7 @@ async fn batch_small_ops(
                 ),
                 BundlebaseError,
             >,
-        > = futures::stream::iter(locations.into_iter())
+        > = futures::stream::iter(locations)
             .map(|location| {
                 let dir = data_dir_clone.clone();
                 async move { read_parquet_batches(&location, dir.as_ref()).await }
@@ -1278,10 +1291,8 @@ fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> 
 pub(crate) fn populate_batch_source_num_rows(op: &mut AttachBlockOp) {
     let total = op.num_rows;
     if let Some(ref mut si) = op.source_info {
-        if si.batch_sources.len() == 1 {
-            if si.batch_sources[0].num_rows.is_none() {
-                si.batch_sources[0].num_rows = total;
-            }
+        if si.batch_sources.len() == 1 && si.batch_sources[0].num_rows.is_none() {
+            si.batch_sources[0].num_rows = total;
         }
     }
 }
@@ -1389,6 +1400,7 @@ fn validate_schema_against_expected(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

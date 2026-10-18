@@ -118,12 +118,11 @@ fn find_text_ordering_comparison(
         for expr in node.expressions() {
             expr.apply(|e| {
                 let found = match e {
-                    Expr::BinaryExpr(BinaryExpr { left, op, right })
-                        if matches!(
-                            op,
-                            Operator::Gt | Operator::GtEq | Operator::Lt | Operator::LtEq
-                        ) =>
-                    {
+                    Expr::BinaryExpr(BinaryExpr {
+                        left,
+                        op: Operator::Gt | Operator::GtEq | Operator::Lt | Operator::LtEq,
+                        right,
+                    }) => {
                         // Either orientation: `col > 100` or `100 < col`.
                         offending(left, right).or_else(|| offending(right, left))
                     }
@@ -156,21 +155,21 @@ fn find_text_ordering_comparison(
 
 fn text_ordering_error(col: &str, lit: &str) -> BundlebaseError {
     BundlebaseError::from(format!(
-            "Column \"{col}\" is text (Utf8) but is being compared to the number {lit}. Text \
+        "Column \"{col}\" is text (Utf8) but is being compared to the number {lit}. Text \
              compares lexicographically — \"9\" > \"50\" — so this would silently return the \
              wrong rows. Bundlebase imports CSV, TSV, and JSONL columns as text.\n\n  \
              • To compare numerically, cast the column:   CAST COLUMN \"{col}\" TO DOUBLE\n  \
              • To compare as text on purpose, quote it:   \"{col}\" > '{lit}'"
-        ))
+    ))
 }
 
 #[cfg(test)]
 mod text_ordering_tests {
     use super::*;
     use arrow::array::{Int64Array, RecordBatch, StringArray};
-    use std::sync::Arc;
     use arrow::datatypes::{DataType, Field, Schema};
     use datafusion::prelude::SessionContext;
+    use std::sync::Arc;
 
     /// `a(id, amount: Utf8)` and `b(id, amount: Int64)`.
     async fn plan(sql: &str) -> LogicalPlan {
@@ -199,10 +198,7 @@ mod text_ordering_tests {
         .expect("batch b");
         ctx.register_batch("a", a).expect("register a");
         ctx.register_batch("b", b).expect("register b");
-        ctx.state()
-            .create_logical_plan(sql)
-            .await
-            .expect("plan")
+        ctx.state().create_logical_plan(sql).await.expect("plan")
     }
 
     fn rejected(plan: &LogicalPlan) -> bool {
@@ -211,8 +207,7 @@ mod text_ordering_tests {
 
     #[tokio::test]
     async fn join_resolves_column_by_qualifier() {
-        let numeric_side =
-            plan("SELECT * FROM a JOIN b ON a.id = b.id WHERE b.amount > 5").await;
+        let numeric_side = plan("SELECT * FROM a JOIN b ON a.id = b.id WHERE b.amount > 5").await;
         assert!(
             !rejected(&numeric_side),
             "b.amount is Int64 — must not be judged by a.amount's Utf8 type"
@@ -223,8 +218,12 @@ mod text_ordering_tests {
 
     #[tokio::test]
     async fn between_numeric_bounds_on_text_is_rejected() {
-        assert!(rejected(&plan("SELECT * FROM a WHERE amount BETWEEN 1 AND 100").await));
-        assert!(!rejected(&plan("SELECT * FROM b WHERE amount BETWEEN 1 AND 100").await));
+        assert!(rejected(
+            &plan("SELECT * FROM a WHERE amount BETWEEN 1 AND 100").await
+        ));
+        assert!(!rejected(
+            &plan("SELECT * FROM b WHERE amount BETWEEN 1 AND 100").await
+        ));
         assert!(!rejected(
             &plan("SELECT * FROM a WHERE amount BETWEEN '1' AND '100'").await
         ));

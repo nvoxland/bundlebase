@@ -334,11 +334,7 @@ fn verify_macho(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), Bundl
     const MH_MAGIC_64: u32 = 0xFEEDFACF;
     const MH_MAGIC_32: u32 = 0xFEEDFACE;
     if magic != MH_MAGIC_64 && magic != MH_MAGIC_32 {
-        return Err(format!(
-            "'{}' is not a Mach-O binary (expected for darwin/*).",
-            path
-        )
-        .into());
+        return Err(format!("'{}' is not a Mach-O binary (expected for darwin/*).", path).into());
     }
     if target_arch == "*" {
         return Ok(());
@@ -348,8 +344,8 @@ fn verify_macho(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), Bundl
     // Strip the 0x01000000 ABI64 bit before comparing.
     let base_cputype = cputype & 0x00FFFFFF;
     let expected = match target_arch {
-        "amd64" => 7u32,    // CPU_TYPE_X86_64 = CPU_TYPE_X86 (7) | ABI64
-        "arm64" => 12u32,   // CPU_TYPE_ARM64 = CPU_TYPE_ARM (12) | ABI64
+        "amd64" => 7u32,  // CPU_TYPE_X86_64 = CPU_TYPE_X86 (7) | ABI64
+        "arm64" => 12u32, // CPU_TYPE_ARM64 = CPU_TYPE_ARM (12) | ABI64
         other => {
             return Err(format!(
                 "Unsupported darwin arch '{}' for structural verification.",
@@ -419,6 +415,12 @@ fn verify_pe(bytes: &[u8], path: &str, target_arch: &str) -> Result<(), Bundleba
 /// - `python:module:Class` — Python in-process via PyO3
 pub struct FfiConnector {
     lib_handle: tokio::sync::Mutex<Option<SharedLibHandle>>,
+}
+
+impl Default for FfiConnector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FfiConnector {
@@ -717,6 +719,7 @@ impl Connector for FfiConnector {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -845,7 +848,9 @@ mod tests {
         };
 
         let result = func.data(&location, &args, &config).await;
-        let err = result.err().expect("should fail");
+        let Err(err) = result else {
+            panic!("external code should be disabled");
+        };
         assert!(err
             .to_string()
             .contains("External code execution is disabled"));
@@ -866,7 +871,7 @@ mod tests {
         };
 
         let result = func.stable_url(&location, &args, &config).await;
-        let err = result.err().expect("should fail");
+        let err = result.expect_err("should fail");
         assert!(err
             .to_string()
             .contains("External code execution is disabled"));
@@ -1059,11 +1064,7 @@ mod tests {
     fn test_verify_header_wildcard_os_rejected() {
         let p = write_tmp("any.so", &fake_elf(0x3E));
         let err = verify_shared_lib_header(p.to_str().unwrap(), "*", "amd64").unwrap_err();
-        assert!(
-            err.to_string().contains("wildcard os"),
-            "got: {}",
-            err
-        );
+        assert!(err.to_string().contains("wildcard os"), "got: {}", err);
         std::fs::remove_file(&p).ok();
     }
 
@@ -1081,8 +1082,8 @@ mod tests {
 
     #[test]
     fn test_verify_header_missing_file() {
-        let err = verify_shared_lib_header("/nonexistent/path/lib.so", "linux", "amd64")
-            .unwrap_err();
+        let err =
+            verify_shared_lib_header("/nonexistent/path/lib.so", "linux", "amd64").unwrap_err();
         assert!(err.to_string().contains("Failed to read"), "got: {}", err);
     }
 }

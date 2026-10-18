@@ -945,7 +945,6 @@ mod tests {
     /// so every FTS query returned 0 hits.
     #[tokio::test]
     async fn test_extract_rowids_stream_honors_projection() -> Result<(), BundlebaseError> {
-        use crate::DataReader;
         let plugin = ParquetPlugin::default();
         let binding = test_context();
         let reader = plugin

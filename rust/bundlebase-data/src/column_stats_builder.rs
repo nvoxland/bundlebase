@@ -343,7 +343,7 @@ impl ColumnAccumulator {
 
     fn prune_top_candidates(&mut self) {
         let mut entries: Vec<(String, u64)> = self.top_candidates.drain().collect();
-        entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.1));
         entries.truncate(TOP_CANDIDATES_PRUNE_TO);
         self.top_candidates = entries.into_iter().collect();
     }
@@ -354,7 +354,7 @@ impl ColumnAccumulator {
 
         // Build top_values: take top N by count
         let mut entries: Vec<(String, u64)> = self.top_candidates.drain().collect();
-        entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_unstable_by_key(|entry| std::cmp::Reverse(entry.1));
         entries.truncate(TOP_VALUES_COUNT);
 
         let (is_strictly_increasing, is_strictly_decreasing) = if self.is_all_numeric {
@@ -395,9 +395,9 @@ impl ColumnAccumulator {
         let page_stats = self
             .page_mins
             .into_iter()
-            .zip(self.page_maxs.into_iter())
-            .zip(self.page_distinct.into_iter())
-            .zip(self.page_bloom_bits.into_iter())
+            .zip(self.page_maxs)
+            .zip(self.page_distinct)
+            .zip(self.page_bloom_bits)
             .map(|(((min, max), distinct_set), bloom_bits)| {
                 let bloom_filter = if drop_blooms {
                     None
@@ -464,7 +464,7 @@ fn str_to_stat_value(s: String, is_numeric: bool) -> StatValue {
 /// Both numeric and string columns use equal-height buckets: sort the samples and
 /// divide into deciles. For numeric columns the bucket boundaries are Float64 values;
 /// for string columns they are Utf8 values.
-fn build_histogram(samples: &mut Vec<String>, is_all_numeric: bool) -> Vec<HistogramBucket> {
+fn build_histogram(samples: &mut [String], is_all_numeric: bool) -> Vec<HistogramBucket> {
     if samples.is_empty() {
         return vec![];
     }
@@ -695,6 +695,7 @@ fn enforce_bloom_budget(stats: &mut [ColumnStats], data_size: u64) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use arrow::array::StringArray;

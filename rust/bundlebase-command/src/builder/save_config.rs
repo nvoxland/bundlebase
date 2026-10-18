@@ -96,8 +96,8 @@ impl BundleBuilderCommand for SaveConfigCommand {
         // scope name to look up hooks under.
         let key_spec =
             bundlebase::bundle_config::BundleConfig::get_config_key(&self.scope, &self.key);
-        let old_value = key_spec
-            .and_then(|spec| builder.config().get(&self.scope, &spec).ok().flatten());
+        let old_value =
+            key_spec.and_then(|spec| builder.config().get(&self.scope, &spec).ok().flatten());
 
         let op = SaveConfigOp::setup(&self.scope, &self.key, &self.value);
         builder.apply_operation(op.into()).await?;
@@ -122,11 +122,9 @@ impl BundleBuilderCommand for SaveConfigCommand {
             }
         }
 
-        let is_secure = bundlebase::bundle_config::BundleConfig::get_config_key(
-            &self.scope,
-            &self.key,
-        )
-        .map_or(false, |spec| spec.secure);
+        let is_secure =
+            bundlebase::bundle_config::BundleConfig::get_config_key(&self.scope, &self.key)
+                .is_some_and(|spec| spec.secure);
         let display_value = if is_secure {
             "*****".to_string()
         } else {
@@ -137,6 +135,7 @@ impl BundleBuilderCommand for SaveConfigCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

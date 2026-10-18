@@ -213,7 +213,7 @@ mod tests {
     fn test_lru_eviction() {
         // Tiny budget: each batch is ~800 bytes, budget allows ~2
         let batch = make_batch(100);
-        let batch_size: usize = vec![batch.clone()]
+        let batch_size: usize = [batch.clone()]
             .iter()
             .map(|b| b.get_array_memory_size())
             .sum();
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn test_would_cache_matches_insert_threshold() {
         let cache = BlockCache::new(1000); // budget/2 == 500
-        // At-or-below the threshold is cacheable; strictly above is not.
+                                           // At-or-below the threshold is cacheable; strictly above is not.
         assert!(cache.would_cache(500));
         assert!(cache.would_cache(0));
         assert!(!cache.would_cache(501));
@@ -262,11 +262,11 @@ mod tests {
         // Cross-check against actual insert() behavior: a block whose size
         // exceeds budget/2 is rejected, one at-or-below is accepted.
         let small = make_batch(10);
-        let small_size: usize = vec![small.clone()]
+        let small_size: usize = [small.clone()]
             .iter()
             .map(|b| b.get_array_memory_size())
             .sum();
         assert!(small_size <= cache.max_cacheable_bytes());
-        assert_eq!(cache.would_cache(small_size), true);
+        assert!(cache.would_cache(small_size));
     }
 }

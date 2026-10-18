@@ -28,7 +28,10 @@ async fn test_export_and_reopen_tar() {
     bundle.commit("Initial data").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Verify tar file exists
     assert!(tar_path.exists(), "Tar file should be created");
@@ -61,15 +64,16 @@ async fn test_commit_to_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Open tar and make changes
     let opened_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
-    let tar_builder = BundleBuilder::extend(opened_bundle.into(), None)
-        .await
-        .unwrap();
+    let tar_builder = BundleBuilder::extend(opened_bundle, None).await.unwrap();
     tar_builder.filter("id > 100", vec![]).await.unwrap();
     tar_builder.commit("v2 - filtered").await.unwrap();
 
@@ -103,14 +107,17 @@ async fn test_multiple_commits_to_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Make multiple commits to the tar file
     for i in 2..=5 {
         let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
             .await
             .unwrap();
-        let builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
+        let builder = BundleBuilder::extend(opened, None).await.unwrap();
         builder
             .filter(&format!("id > {}", i * 50), vec![])
             .await
@@ -149,7 +156,10 @@ async fn test_tar_preserves_metadata() {
     bundle.commit("Initial commit").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Open from tar and verify metadata
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
@@ -178,13 +188,16 @@ async fn test_create_index_in_tar() {
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Open tar and create index
     let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
-    let builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
+    let builder = BundleBuilder::extend(opened, None).await.unwrap();
     builder
         .create_index(&["id"], IndexType::BTree, None)
         .await
@@ -361,7 +374,10 @@ async fn test_tar_file_listing() {
     bundle.commit("v1").await.unwrap();
 
     // Export to tar
-    bundle.export_tar(tar_path.to_str().unwrap(), false).await.unwrap();
+    bundle
+        .export_tar(tar_path.to_str().unwrap(), false)
+        .await
+        .unwrap();
 
     // Open tar and list files
     let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
@@ -444,7 +460,8 @@ async fn test_export_tar_bytes_match_source() {
             .get(&path)
             .unwrap_or_else(|| panic!("tar entry '{}' has no matching source file", path));
         assert_eq!(
-            &buf, expected,
+            &buf,
+            expected,
             "tar entry '{}' bytes ({}) must exactly match source ({})",
             path,
             buf.len(),

@@ -210,6 +210,7 @@ pub async fn load_layout_cached(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::page_map::PageGroup;

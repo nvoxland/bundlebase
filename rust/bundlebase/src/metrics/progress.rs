@@ -40,9 +40,9 @@ impl ProgressTracker for SpanProgressTracker {
 
         // Set progress metadata as span attributes
         if let Some(total) = total {
-            span.set_attribute("progress.total", &total.to_string());
+            span.set_attribute("progress.total", total.to_string());
         }
-        span.set_attribute("progress.determinate", &total.is_some().to_string());
+        span.set_attribute("progress.determinate", total.is_some().to_string());
         span.set_attribute("progress.operation", operation);
 
         self.spans.write().insert(id, span);

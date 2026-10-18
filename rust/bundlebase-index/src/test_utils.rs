@@ -36,11 +36,3 @@ pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     )
     .expect("memory dir creation should not fail")
 }
-
-pub fn random_memory_dir_concrete() -> bundlebase_io::plugin::object_store::ObjectStoreDir {
-    bundlebase_io::plugin::object_store::ObjectStoreDir::from_url(
-        &random_memory_url(),
-        test_config(),
-    )
-    .expect("memory dir creation should not fail")
-}

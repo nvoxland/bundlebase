@@ -47,7 +47,7 @@ impl SchemaProvider for DefaultSchemaProvider {
             let df = facade
                 .dataframe()
                 .await
-                .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;
+                .map_err(datafusion::error::DataFusionError::External)?;
 
             Ok(Some(Arc::new(BundleViewTable::new((*df).clone()))))
         } else {

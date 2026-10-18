@@ -70,7 +70,11 @@ pub async fn open_bundle_with_create_hint(
 
     result.map_err(|e| {
         let msg = e.to_string();
-        if msg.contains("init.yaml") || msg.contains("not found") || msg.contains("No such file") || msg.contains("does not exist") {
+        if msg.contains("init.yaml")
+            || msg.contains("not found")
+            || msg.contains("No such file")
+            || msg.contains("does not exist")
+        {
             BundlebaseError::from(format!(
                 "No bundle found at '{}'. {}\n\nUnderlying error: {}",
                 args.bundle, create_hint, msg

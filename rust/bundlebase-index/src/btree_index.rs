@@ -140,7 +140,10 @@ impl IndexedValue {
         // Bound every read by the remaining bytes: lengths come from the
         // (possibly corrupt) file, and bytes::Buf panics on underflow.
         fn need(cursor: &Cursor<&[u8]>, bytes: usize) -> Result<(), BundlebaseError> {
-            let remaining = cursor.get_ref().len().saturating_sub(cursor.position() as usize);
+            let remaining = cursor
+                .get_ref()
+                .len()
+                .saturating_sub(cursor.position() as usize);
             if remaining < bytes {
                 return Err("Unexpected end of index data".into());
             }
@@ -316,7 +319,10 @@ impl IndexBlock {
         // the remaining bytes so bit rot past the header returns Err instead
         // of a huge allocation or a bytes::Buf underflow panic.
         fn ensure_remaining(cursor: &Cursor<&[u8]>, needed: usize) -> Result<(), BundlebaseError> {
-            let remaining = cursor.get_ref().len().saturating_sub(cursor.position() as usize);
+            let remaining = cursor
+                .get_ref()
+                .len()
+                .saturating_sub(cursor.position() as usize);
             if remaining < needed {
                 return Err(format!(
                     "Corrupt index block: needs {} more bytes, {} remain",
@@ -1005,6 +1011,7 @@ impl Index for BTreeIndex {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -1065,7 +1072,7 @@ mod tests {
         let values = vec![
             IndexedValue::Null,
             IndexedValue::Int64(42),
-            IndexedValue::Float64(OrderedFloat(3.14)),
+            IndexedValue::Float64(OrderedFloat(3.125)),
             IndexedValue::Utf8("hello".to_string()),
             IndexedValue::Boolean(true),
             IndexedValue::Timestamp(1234567890),

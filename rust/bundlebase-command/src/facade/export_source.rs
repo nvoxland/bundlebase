@@ -52,11 +52,10 @@ impl CommandParsing for ExportSourceCommand {
                 _ => {}
             }
         }
-        let connector_name = connector_name.ok_or_else(|| -> BundlebaseError {
-            "EXPORT SOURCE: missing connector name".into()
-        })?;
-        let path = path
-            .ok_or_else(|| -> BundlebaseError { "EXPORT SOURCE: missing TO path".into() })?;
+        let connector_name = connector_name
+            .ok_or_else(|| -> BundlebaseError { "EXPORT SOURCE: missing connector name".into() })?;
+        let path =
+            path.ok_or_else(|| -> BundlebaseError { "EXPORT SOURCE: missing TO path".into() })?;
         Ok(ExportSourceCommand {
             connector_name,
             path,
@@ -92,7 +91,11 @@ impl BundleFacadeCommand for ExportSourceCommand {
             .collect();
 
         if entries.is_empty() {
-            return Err(format!("No connector named '{}' is registered.", self.connector_name).into());
+            return Err(format!(
+                "No connector named '{}' is registered.",
+                self.connector_name
+            )
+            .into());
         }
 
         // Find the first src — they should all be the same when produced by
@@ -110,13 +113,16 @@ impl BundleFacadeCommand for ExportSourceCommand {
 
         let data_dir = facade.data_dir();
         let src_file = data_dir.file(&src)?;
-        let bytes = src_file.read_bytes().await?.ok_or_else(|| -> BundlebaseError {
-            format!(
-                "Connector '{}' references src '{}' but the file is missing from data_dir.",
-                self.connector_name, src
-            )
-            .into()
-        })?;
+        let bytes = src_file
+            .read_bytes()
+            .await?
+            .ok_or_else(|| -> BundlebaseError {
+                format!(
+                    "Connector '{}' references src '{}' but the file is missing from data_dir.",
+                    self.connector_name, src
+                )
+                .into()
+            })?;
 
         // Resolve the output path: absolute paths go straight to disk; relative
         // paths resolve against cwd.
@@ -155,6 +161,7 @@ impl BundleFacadeCommand for ExportSourceCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;

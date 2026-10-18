@@ -14,18 +14,26 @@ async fn test_column_description_persists_across_commit_reopen() -> Result<(), B
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Set a column description via the SQL command, then commit.
     builder
         .as_ref()
-        .execute("DESCRIBE COLUMN salary AS 'annual gross pay in USD'", vec![])
+        .execute(
+            "DESCRIBE COLUMN salary AS 'annual gross pay in USD'",
+            vec![],
+        )
         .await?;
 
     // Visible in-session (from the operation list).
     let salary_id = builder.column_id("salary").expect("salary column");
     assert_eq!(
-        builder.column_descriptions().get(&salary_id).map(|s| s.as_str()),
+        builder
+            .column_descriptions()
+            .get(&salary_id)
+            .map(|s| s.as_str()),
         Some("annual gross pay in USD"),
         "description must be visible in-session"
     );
@@ -34,7 +42,9 @@ async fn test_column_description_persists_across_commit_reopen() -> Result<(), B
 
     // Reopen from disk — the description must have been persisted in the manifest.
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
-    let reopened_id = reopened.column_id("salary").expect("salary column after reopen");
+    let reopened_id = reopened
+        .column_id("salary")
+        .expect("salary column after reopen");
     assert_eq!(
         reopened
             .column_descriptions()
@@ -53,7 +63,9 @@ async fn test_column_description_last_write_wins() -> Result<(), BundlebaseError
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     builder
         .as_ref()
@@ -80,7 +92,9 @@ async fn test_metric_persists_across_commit_reopen() -> Result<(), BundlebaseErr
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     builder
         .as_ref()
@@ -102,7 +116,10 @@ async fn test_metric_persists_across_commit_reopen() -> Result<(), BundlebaseErr
         .iter()
         .find(|m| m.name == "total_salary")
         .expect("metric after reopen");
-    assert_eq!(m.expression, "SUM(salary) / 1000", "last definition must win");
+    assert_eq!(
+        m.expression, "SUM(salary) / 1000",
+        "last definition must win"
+    );
     // Updating the expression leaves independently owned metadata intact.
     assert_eq!(m.description.as_deref(), Some("gross payroll"));
     Ok(())
@@ -114,7 +131,9 @@ async fn test_drop_metric_removes_and_persists() -> Result<(), BundlebaseError> 
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     builder
         .as_ref()
@@ -146,7 +165,9 @@ async fn test_drop_then_redefine_metric() -> Result<(), BundlebaseError> {
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     builder
         .as_ref()
@@ -162,7 +183,11 @@ async fn test_drop_then_redefine_metric() -> Result<(), BundlebaseError> {
         .await?;
 
     let metrics = builder.metrics();
-    assert_eq!(metrics.len(), 1, "the re-definition must resolve exactly once");
+    assert_eq!(
+        metrics.len(),
+        1,
+        "the re-definition must resolve exactly once"
+    );
     assert_eq!(metrics[0].expression, "SUM(salary) * 2");
     Ok(())
 }
@@ -174,10 +199,15 @@ async fn test_described_schema_carries_column_descriptions() -> Result<(), Bundl
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     builder
         .as_ref()
-        .execute("DESCRIBE COLUMN salary AS 'annual gross pay in USD'", vec![])
+        .execute(
+            "DESCRIBE COLUMN salary AS 'annual gross pay in USD'",
+            vec![],
+        )
         .await?;
 
     let schema = builder.described_schema().await?;
@@ -215,7 +245,10 @@ async fn first_f64(
         if batch.num_rows() == 0 {
             continue;
         }
-        let col = arrow::compute::cast(batch.column(batch.num_columns() - 1), &arrow::datatypes::DataType::Float64)?;
+        let col = arrow::compute::cast(
+            batch.column(batch.num_columns() - 1),
+            &arrow::datatypes::DataType::Float64,
+        )?;
         let arr = col
             .as_any()
             .downcast_ref::<arrow::array::Float64Array>()
@@ -232,7 +265,9 @@ async fn test_metric_survives_rename_column() -> Result<(), BundlebaseError> {
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     builder
         .as_ref()
@@ -257,8 +292,7 @@ async fn test_metric_survives_rename_column() -> Result<(), BundlebaseError> {
     builder.commit("rename").await?;
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
     assert_eq!(reopened.metrics()[0].expression, "SUM(\"Annual Pay\")");
-    let reopened_value =
-        first_f64(reopened.compute_metric("payroll", &[], None).await?).await?;
+    let reopened_value = first_f64(reopened.compute_metric("payroll", &[], None).await?).await?;
     assert_eq!(before, reopened_value);
     Ok(())
 }
@@ -270,7 +304,9 @@ async fn test_define_metric_rejects_unknown_column() -> Result<(), BundlebaseErr
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     let err = builder
         .as_ref()
@@ -278,7 +314,10 @@ async fn test_define_metric_rejects_unknown_column() -> Result<(), BundlebaseErr
         .await
         .err()
         .ok_or("unknown column must be rejected")?;
-    assert!(err.to_string().contains("salaryy"), "error names the bad column: {err}");
+    assert!(
+        err.to_string().contains("salaryy"),
+        "error names the bad column: {err}"
+    );
 
     let err = builder
         .as_ref()
@@ -286,8 +325,14 @@ async fn test_define_metric_rejects_unknown_column() -> Result<(), BundlebaseErr
         .await
         .err()
         .ok_or("syntax error must be rejected")?;
-    assert!(err.to_string().contains("bad"), "error names the metric: {err}");
-    assert!(builder.metrics().is_empty(), "a rejected metric is not recorded");
+    assert!(
+        err.to_string().contains("bad"),
+        "error names the metric: {err}"
+    );
+    assert!(
+        builder.metrics().is_empty(),
+        "a rejected metric is not recorded"
+    );
     Ok(())
 }
 
@@ -298,12 +343,19 @@ async fn test_column_description_survives_rename() -> Result<(), BundlebaseError
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
-    builder.describe_column("salary", "annual gross pay").await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
+    builder
+        .describe_column("salary", "annual gross pay")
+        .await?;
     builder.rename_column("salary", "pay").await?;
 
     let by_name = builder.column_descriptions_by_name();
-    assert_eq!(by_name.get("pay").map(|s| s.as_str()), Some("annual gross pay"));
+    assert_eq!(
+        by_name.get("pay").map(|s| s.as_str()),
+        Some("annual gross pay")
+    );
     assert!(!by_name.contains_key("salary"));
     Ok(())
 }
@@ -314,7 +366,9 @@ async fn test_drop_metric_builder_method() -> Result<(), BundlebaseError> {
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     builder
         .define_metric("headcount", "COUNT(*)", None)
         .await?
@@ -331,7 +385,9 @@ async fn test_compute_metric_grouped_and_errors() -> Result<(), BundlebaseError>
     common::init_catalog();
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     builder.define_metric("headcount", "COUNT(*)", None).await?;
 
     let mut stream = builder
@@ -351,7 +407,10 @@ async fn test_compute_metric_grouped_and_errors() -> Result<(), BundlebaseError>
         .await
         .err()
         .ok_or("unknown metric must error")?;
-    assert!(err.to_string().contains("headcount"), "lists available: {err}");
+    assert!(
+        err.to_string().contains("headcount"),
+        "lists available: {err}"
+    );
 
     let err = builder
         .compute_metric("headcount", &["not_a_col".to_string()], None)
@@ -372,9 +431,14 @@ async fn test_data_quality_keeps_real_no_data_column() -> Result<(), BundlebaseE
 
     let empty = builder.data_quality().await?;
     assert_eq!(empty.total_rows, 0);
-    assert!(empty.columns.is_empty(), "the empty-bundle sentinel is skipped");
+    assert!(
+        empty.columns.is_empty(),
+        "the empty-bundle sentinel is skipped"
+    );
 
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     builder.rename_column("gender", "no_data").await?;
     let report = builder.data_quality().await?;
     assert!(report.total_rows > 0);

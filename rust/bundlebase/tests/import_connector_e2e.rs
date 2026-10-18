@@ -53,16 +53,32 @@ fn stage_fake_binaries() -> FakeBinaries {
 
     // Pick three foreign platforms — host is always darwin/arm64 or linux/amd64
     // in CI, so this set excludes both common dev hosts.
-    std::fs::write(dir.path().join("weather-windows-amd64.dll"), fake_pe(0x8664)).unwrap();
-    std::fs::write(dir.path().join("weather-windows-arm64.dll"), fake_pe(0xAA64)).unwrap();
+    std::fs::write(
+        dir.path().join("weather-windows-amd64.dll"),
+        fake_pe(0x8664),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("weather-windows-arm64.dll"),
+        fake_pe(0xAA64),
+    )
+    .unwrap();
     let foreign_elf = if Platform::current().os == "linux" {
         // host is linux — pick a non-host arch and a non-linux os
         std::fs::write(dir.path().join("weather-linux-arm64.so"), fake_elf(0xB7)).unwrap();
-        std::fs::write(dir.path().join("weather-darwin-arm64.dylib"), fake_macho(0x0100000C)).unwrap();
+        std::fs::write(
+            dir.path().join("weather-darwin-arm64.dylib"),
+            fake_macho(0x0100000C),
+        )
+        .unwrap();
         ("linux/arm64", "darwin/arm64")
     } else {
         std::fs::write(dir.path().join("weather-linux-amd64.so"), fake_elf(0x3E)).unwrap();
-        std::fs::write(dir.path().join("weather-darwin-amd64.dylib"), fake_macho(0x01000007)).unwrap();
+        std::fs::write(
+            dir.path().join("weather-darwin-amd64.dylib"),
+            fake_macho(0x01000007),
+        )
+        .unwrap();
         ("linux/amd64", "darwin/amd64")
     };
 
@@ -71,15 +87,28 @@ fn stage_fake_binaries() -> FakeBinaries {
         files: vec![
             ("windows/amd64", "weather-windows-amd64.dll"),
             ("windows/arm64", "weather-windows-arm64.dll"),
-            (foreign_elf.0, if foreign_elf.0 == "linux/arm64" { "weather-linux-arm64.so" } else { "weather-linux-amd64.so" }),
-            (foreign_elf.1, if foreign_elf.1 == "darwin/arm64" { "weather-darwin-arm64.dylib" } else { "weather-darwin-amd64.dylib" }),
+            (
+                foreign_elf.0,
+                if foreign_elf.0 == "linux/arm64" {
+                    "weather-linux-arm64.so"
+                } else {
+                    "weather-linux-amd64.so"
+                },
+            ),
+            (
+                foreign_elf.1,
+                if foreign_elf.1 == "darwin/arm64" {
+                    "weather-darwin-arm64.dylib"
+                } else {
+                    "weather-darwin-amd64.dylib"
+                },
+            ),
         ],
     }
 }
 
 #[tokio::test]
-async fn test_import_connector_platform_map_registers_all_entries() -> Result<(), BundlebaseError>
-{
+async fn test_import_connector_platform_map_registers_all_entries() -> Result<(), BundlebaseError> {
     init();
     let stage = stage_fake_binaries();
 
@@ -93,10 +122,7 @@ async fn test_import_connector_platform_map_registers_all_entries() -> Result<()
         .collect::<Vec<_>>()
         .join(", ");
 
-    let sql = format!(
-        "IMPORT CONNECTOR acme.weather FROM {{ {} }}",
-        map_body
-    );
+    let sql = format!("IMPORT CONNECTOR acme.weather FROM {{ {} }}", map_body);
 
     let bundle_dir = tempfile::tempdir().unwrap();
     let builder = BundleBuilder::create(
@@ -116,7 +142,7 @@ async fn test_import_connector_platform_map_registers_all_entries() -> Result<()
         .read()
         .entries()
         .iter()
-        .filter(|e| e.name.to_string() == "acme.weather")
+        .filter(|e| e.name == "acme.weather")
         .cloned()
         .collect();
     assert_eq!(
@@ -176,7 +202,7 @@ async fn test_import_connector_glob_expands_filesystem() -> Result<(), Bundlebas
         .read()
         .entries()
         .iter()
-        .filter(|e| e.name.to_string() == "acme.weather")
+        .filter(|e| e.name == "acme.weather")
         .cloned()
         .collect();
     assert_eq!(entries.len(), 4, "glob should match all 4 staged files");
@@ -185,8 +211,7 @@ async fn test_import_connector_glob_expands_filesystem() -> Result<(), Bundlebas
 }
 
 #[tokio::test]
-async fn test_import_connector_platform_map_duplicate_rejected(
-) -> Result<(), BundlebaseError> {
+async fn test_import_connector_platform_map_duplicate_rejected() -> Result<(), BundlebaseError> {
     init();
     let stage = stage_fake_binaries();
     let p1 = stage.dir.path().join("weather-windows-amd64.dll");
@@ -202,11 +227,8 @@ async fn test_import_connector_platform_map_duplicate_rejected(
     );
 
     let bundle_dir = tempfile::tempdir().unwrap();
-    let builder = BundleBuilder::create(
-        &format!("file://{}/dup", bundle_dir.path().display()),
-        None,
-    )
-    .await?;
+    let builder =
+        BundleBuilder::create(&format!("file://{}/dup", bundle_dir.path().display()), None).await?;
 
     let cmd = match parse_command(&sql).expect("parse") {
         BundleCommand::ImportConnector(c) => c,
@@ -242,10 +264,7 @@ async fn test_export_empty_includes_all_platform_binaries() -> Result<(), Bundle
     let builder = BundleBuilder::create(&src_url, None).await?;
 
     // Run the import, then commit so the change is persisted.
-    let sql = format!(
-        "IMPORT CONNECTOR acme.weather FROM {{ {} }}",
-        map_body
-    );
+    let sql = format!("IMPORT CONNECTOR acme.weather FROM {{ {} }}", map_body);
     let cmd = match parse_command(&sql).expect("parse") {
         BundleCommand::ImportConnector(c) => c,
         other => panic!("expected ImportConnector, got {:?}", other),
@@ -254,18 +273,22 @@ async fn test_export_empty_includes_all_platform_binaries() -> Result<(), Bundle
     builder.commit("import").await?;
 
     // Snapshot the data_dir's files so we know what to look for in the empty.
-    let src_files: std::collections::HashSet<String> = std::fs::read_dir(bundle_dir.path().join("src"))
-        .unwrap()
-        .flatten()
-        .filter(|e| e.path().is_dir() && e.file_name() != "_bundlebase")
-        .flat_map(|sub| {
-            let parent = sub.file_name().to_string_lossy().into_owned();
-            std::fs::read_dir(sub.path()).unwrap().flatten().map(move |e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                format!("{}/{}", parent, name)
+    let src_files: std::collections::HashSet<String> =
+        std::fs::read_dir(bundle_dir.path().join("src"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().is_dir() && e.file_name() != "_bundlebase")
+            .flat_map(|sub| {
+                let parent = sub.file_name().to_string_lossy().into_owned();
+                std::fs::read_dir(sub.path())
+                    .unwrap()
+                    .flatten()
+                    .map(move |e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        format!("{}/{}", parent, name)
+                    })
             })
-        })
-        .collect();
+            .collect();
     assert_eq!(
         src_files.len(),
         4,
@@ -289,10 +312,13 @@ async fn test_export_empty_includes_all_platform_binaries() -> Result<(), Bundle
         .filter(|e| e.path().is_dir() && e.file_name() != "_bundlebase")
         .flat_map(|sub| {
             let parent = sub.file_name().to_string_lossy().into_owned();
-            std::fs::read_dir(sub.path()).unwrap().flatten().map(move |e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                format!("{}/{}", parent, name)
-            })
+            std::fs::read_dir(sub.path())
+                .unwrap()
+                .flatten()
+                .map(move |e| {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    format!("{}/{}", parent, name)
+                })
         })
         .collect();
     assert_eq!(
@@ -346,7 +372,7 @@ async fn test_import_connector_with_src_bundles_archive() -> Result<(), Bundleba
         .read()
         .entries()
         .iter()
-        .filter(|e| e.name.to_string() == "acme.weather")
+        .filter(|e| e.name == "acme.weather")
         .cloned()
         .collect();
     assert_eq!(entries.len(), 4);
@@ -374,11 +400,8 @@ async fn test_export_source_writes_archive() -> Result<(), BundlebaseError> {
     std::fs::write(&src_path, archive_bytes).unwrap();
 
     let bundle_dir = tempfile::tempdir().unwrap();
-    let builder = BundleBuilder::create(
-        &format!("file://{}/exp", bundle_dir.path().display()),
-        None,
-    )
-    .await?;
+    let builder =
+        BundleBuilder::create(&format!("file://{}/exp", bundle_dir.path().display()), None).await?;
 
     let (plat, file) = &stage.files[0];
     let bin_path = stage.dir.path().join(file);
@@ -510,11 +533,8 @@ async fn test_import_ipc_connector_does_not_run_code_when_external_code_disabled
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let bundle_dir = tempfile::tempdir().unwrap();
-    let builder = BundleBuilder::create(
-        &format!("file://{}/b", bundle_dir.path().display()),
-        None,
-    )
-    .await?;
+    let builder =
+        BundleBuilder::create(&format!("file://{}/b", bundle_dir.path().display()), None).await?;
 
     let sql = format!(
         "IMPORT CONNECTOR acme.marker FROM 'ipc::{}'",

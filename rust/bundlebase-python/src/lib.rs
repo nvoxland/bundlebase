@@ -39,7 +39,7 @@ pub fn create<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         BundleBuilder::create(data_dir.as_str(), config_inner)
             .await
-            .map(|o| PyBundleBuilder::new(o))
+            .map(PyBundleBuilder::new)
             // Map to the same typed exceptions as open()/upgrade_bundle() (e.g.
             // FileNotFoundError) instead of a bare ValueError (bb-cko).
             .map_err(crate::builder::map_bundlebase_error)
@@ -58,7 +58,7 @@ pub fn open<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         Bundle::open(url.as_str(), config_inner)
             .await
-            .map(|o| PyBundle::new(o))
+            .map(PyBundle::new)
             .map_err(crate::builder::map_bundlebase_error)
     })
 }

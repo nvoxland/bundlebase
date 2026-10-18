@@ -788,8 +788,10 @@ async fn test_bm25_unified_across_indexed_blocks_entries() -> Result<(), Bundleb
     // both blocks.
     let dir_one = random_memory_dir();
     let one = bundlebase::BundleBuilder::create(dir_one.url().as_str(), None).await?;
-    one.attach(test_datafile("customers-0-100.csv"), None).await?;
-    one.attach(test_datafile("customers-101-150.csv"), None).await?;
+    one.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    one.attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
     one.create_index(
         &["Company"],
         IndexType::text(TokenizerConfig::default()),
@@ -803,7 +805,8 @@ async fn test_bm25_unified_across_indexed_blocks_entries() -> Result<(), Bundleb
     // attached and auto-reindex creates entry #2.
     let dir_two = random_memory_dir();
     let two = bundlebase::BundleBuilder::create(dir_two.url().as_str(), None).await?;
-    two.attach(test_datafile("customers-0-100.csv"), None).await?;
+    two.attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
     two.create_index(
         &["Company"],
         IndexType::text(TokenizerConfig::default()),
@@ -811,7 +814,8 @@ async fn test_bm25_unified_across_indexed_blocks_entries() -> Result<(), Bundleb
     )
     .await?;
     two.commit("entry #1").await?;
-    two.attach(test_datafile("customers-101-150.csv"), None).await?;
+    two.attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
     two.commit("entry #2 via auto-reindex").await?;
     let multi = search_scores(&two, "Group").await?;
 
@@ -886,7 +890,10 @@ async fn test_prune_stale_indexed_blocks_after_detach() -> Result<(), Bundlebase
         .expect("index defined")
         .all_indexed_blocks()
         .len();
-    assert_eq!(count_after_first, 1, "one IndexedBlocks entry after CREATE INDEX");
+    assert_eq!(
+        count_after_first, 1,
+        "one IndexedBlocks entry after CREATE INDEX"
+    );
 
     bundle
         .attach(test_datafile("customers-101-150.csv"), None)
@@ -899,12 +906,15 @@ async fn test_prune_stale_indexed_blocks_after_detach() -> Result<(), Bundlebase
         .expect("index defined")
         .all_indexed_blocks()
         .len();
-    assert_eq!(count_after_second, 2, "second attach adds another IndexedBlocks entry");
+    assert_eq!(
+        count_after_second, 2,
+        "second attach adds another IndexedBlocks entry"
+    );
 
     // Detach the first block. The IndexedBlocks entry covering it should
     // be pruned since its sole VersionedBlockId is no longer current.
     let detach_path = test_datafile("customers-0-100.csv");
-    bundle.detach_block(&detach_path).await?;
+    bundle.detach_block(detach_path).await?;
     bundle.commit("detach first block").await?;
     let count_after_detach = bundle
         .indexes()
@@ -2690,7 +2700,9 @@ async fn test_index_lookup_on_tsv_returns_correct_columns() -> Result<(), Bundle
     bundle
         .attach(&format!("file://{}", path.display()), None)
         .await?;
-    bundle.create_index(&["name"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["name"], IndexType::BTree, None)
+        .await?;
     bundle.commit("Index on name").await?;
 
     let sql = "SELECT id, city FROM bundle WHERE name = 'person7'";
@@ -2734,5 +2746,150 @@ async fn test_index_lookup_on_tsv_returns_correct_columns() -> Result<(), Bundle
         .unwrap()
         .value(0);
     assert_eq!(n, 50);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_extend_isolates_index_creation_drop_and_rebuild() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let original = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    original
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    original
+        .create_index(&["Email"], IndexType::BTree, Some("email_index"))
+        .await?;
+    original.commit("Indexed source").await?;
+
+    let source = Bundle::open(data_dir.url().as_str(), None).await?;
+    let sibling = source.extend(None).await?;
+    let builder = source.extend(None).await?;
+    let source_index = source.indexes()[0].clone();
+    let original_entries = source_index.all_indexed_blocks().len();
+    assert!(!std::sync::Arc::ptr_eq(
+        &source_index,
+        &builder.indexes()[0]
+    ));
+    assert!(!std::sync::Arc::ptr_eq(
+        &sibling.indexes()[0],
+        &builder.indexes()[0]
+    ));
+
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder.rebuild_index("email_index").await?;
+    assert!(builder.indexes()[0].all_indexed_blocks().len() > original_entries);
+    assert_eq!(source_index.all_indexed_blocks().len(), original_entries);
+    assert_eq!(
+        sibling.indexes()[0].all_indexed_blocks().len(),
+        original_entries
+    );
+
+    builder
+        .create_index(&["City"], IndexType::BTree, Some("city_index"))
+        .await?;
+    assert_eq!(builder.indexes().len(), 2);
+    assert_eq!(source.indexes().len(), 1);
+    assert_eq!(sibling.indexes().len(), 1);
+    builder.drop_index("email_index").await?;
+    assert_eq!(source.indexes()[0].name(), "email_index");
+    assert_eq!(sibling.indexes()[0].name(), "email_index");
+    assert_eq!(builder.indexes()[0].name(), "city_index");
+
+    // Source block providers must retain the source's index registry too.
+    let mut rows = source
+        .query(
+            "SELECT Email FROM bundle WHERE Email = 'elizabethbarr@ewing.com'",
+            vec![],
+            None,
+        )
+        .await?;
+    let mut count = 0;
+    while let Some(batch) = rows.next().await {
+        count += batch?.num_rows();
+    }
+    assert_eq!(count, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_stream_applies_global_operations_across_blocks() -> Result<(), BundlebaseError>
+{
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    for _ in 0..3 {
+        builder
+            .attach(test_datafile("customers-0-100.csv"), None)
+            .await?;
+    }
+    builder
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    builder
+        .add_column("company_upper", "upper(\"Company\")")
+        .await?;
+    builder
+        .filter("SELECT * FROM bundle LIMIT 1", vec![])
+        .await?;
+
+    // LIMIT belongs to the complete search input, rather than each block or batch.
+    // COUNT(*) also exercises a zero-column scan projection after transformation.
+    let mut stream = builder
+        .query(
+            "SELECT count(*) AS hits FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let batch = stream.next().await.expect("count batch")?;
+    let hits = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .expect("count is Int64");
+    assert_eq!(hits.value(0), 1);
+    assert!(stream.next().await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_replays_drop_column_without_other_transforms() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    builder
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    builder.drop_column("Email").await?;
+    let mut stream = builder
+        .query(
+            "SELECT * FROM search('company_search', 'Group')",
+            vec![],
+            None,
+        )
+        .await?;
+    let mut count = 0;
+    while let Some(batch) = stream.next().await {
+        let batch = batch?;
+        assert!(batch.schema().field_with_name("Email").is_err());
+        assert!(batch.schema().field_with_name("Company").is_ok());
+        assert!(batch.schema().field_with_name("_score").is_ok());
+        count += batch.num_rows();
+    }
+    assert!(count > 0);
     Ok(())
 }

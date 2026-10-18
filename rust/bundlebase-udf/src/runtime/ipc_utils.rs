@@ -39,12 +39,12 @@ pub(crate) fn invoke_ipc_scalar_impl(
         &arrays,
         args.number_rows,
     )
-        .map_err(|e| {
-            datafusion::common::DataFusionError::Execution(format!(
-                "IPC function '{}' ({}) failed: {}",
-                name, entrypoint, e
-            ))
-        })?;
+    .map_err(|e| {
+        datafusion::common::DataFusionError::Execution(format!(
+            "IPC function '{}' ({}) failed: {}",
+            name, entrypoint, e
+        ))
+    })?;
 
     Ok(ColumnarValue::Array(result))
 }
@@ -230,11 +230,7 @@ mod tests {
                 true,
             ))],
             number_rows: 3,
-            return_field: Arc::new(arrow::datatypes::Field::new(
-                "out",
-                DataType::Int64,
-                true,
-            )),
+            return_field: Arc::new(arrow::datatypes::Field::new("out", DataType::Int64, true)),
             config_options: Arc::new(datafusion::common::config::ConfigOptions::default()),
         };
 

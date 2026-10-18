@@ -158,7 +158,10 @@ mod tests {
             .args(["hash-object", path.to_str().unwrap()])
             .output()
             .unwrap();
-        let expected_oid = String::from_utf8(expected.stdout).unwrap().trim().to_string();
+        let expected_oid = String::from_utf8(expected.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(oid, expected_oid);
     }
 

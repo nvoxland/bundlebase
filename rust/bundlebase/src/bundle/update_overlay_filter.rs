@@ -364,6 +364,7 @@ impl RecordBatchStream for UpdateOverlayStream {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::test_support::MockMultiPartitionSource;

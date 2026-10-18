@@ -20,8 +20,8 @@ mod pest_parser;
 // Re-export pest parser infrastructure
 pub use pest_parser::{
     available_commands, escape_string, extract_identifier, extract_string_content,
-    format_pest_error, is_command_statement, is_input_complete, is_syntax_error,
-    parse_join_type, quote_identifier, split_statements, BundlebaseParser, Rule,
+    format_pest_error, is_command_statement, is_input_complete, is_syntax_error, parse_join_type,
+    quote_identifier, split_statements, BundlebaseParser, Rule,
 };
 
 use crate::{parse_from_rule, BundleCommand, CommandParsing, FetchAllCommand, FetchCommand};
@@ -118,6 +118,7 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use super::*;
 

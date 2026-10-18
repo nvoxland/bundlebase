@@ -14,16 +14,6 @@ use std::sync::Arc;
 /// every row their SQL asked for.
 pub const CLI_QUERY_LIMIT: usize = 1000;
 
-/// Execute a SQL statement or bundlebase command. Convenience wrapper
-/// around [`execute_with_hard_limit`] that applies the interactive REPL
-/// cap to SELECT queries.
-pub async fn execute(
-    bundle: &Arc<dyn BundleFacade>,
-    sql: &str,
-) -> Result<(SendableRecordBatchStream, OutputShape), BundlebaseError> {
-    execute_with_hard_limit(bundle, sql, Some(CLI_QUERY_LIMIT)).await
-}
-
 /// Execute a SQL statement or bundlebase command with an explicit hard
 /// row limit (or `None` for unlimited). Commands (UPDATE / FILTER /
 /// COMMIT / etc.) ignore the limit; only SELECTs honour it.

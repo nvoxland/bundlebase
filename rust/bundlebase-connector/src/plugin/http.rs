@@ -47,10 +47,10 @@ config_scopes!(scopes, {
 // shared bundle. Injected at request time by `perform_request`.
 config_keys!(configs, {
     pub const AUTH_CFG: ConfigKey = HTTP_SCOPE.define("auth").runtime_only().secure();
-// SECRET_HEADERS_CFG holds additional credential-bearing request headers
-// (e.g. Cookie, Proxy-Authorization, API-key headers) in the same one
-// 'Name: Value' pair per line format as the `headers` arg. Runtime-only and
-// secure so the values never touch the persisted manifest (bb-rbo).
+    // SECRET_HEADERS_CFG holds additional credential-bearing request headers
+    // (e.g. Cookie, Proxy-Authorization, API-key headers) in the same one
+    // 'Name: Value' pair per line format as the `headers` arg. Runtime-only and
+    // secure so the values never touch the persisted manifest (bb-rbo).
     pub const SECRET_HEADERS_CFG: ConfigKey =
         HTTP_SCOPE.define("secret_headers").runtime_only().secure();
 });
@@ -297,14 +297,11 @@ impl Connector for HttpConnector {
         // placed there would leak to anyone the bundle is shared with. Require
         // credential headers to be supplied via secure config instead (bb-rbo).
         const CREDENTIAL_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
-        if let Some((name, _)) = parse_headers(args)
-            .iter()
-            .find(|(name, _)| {
-                CREDENTIAL_HEADERS
-                    .iter()
-                    .any(|c| name.eq_ignore_ascii_case(c))
-            })
-        {
+        if let Some((name, _)) = parse_headers(args).iter().find(|(name, _)| {
+            CREDENTIAL_HEADERS
+                .iter()
+                .any(|c| name.eq_ignore_ascii_case(c))
+        }) {
             return Err(format!(
                 "Do not put a {} header in `headers` — it would be persisted in the \
                  bundle and shared with it. Set it via secure config instead: \
@@ -427,8 +424,8 @@ impl Connector for HttpConnector {
         })?;
         // When credentials must be injected, the io layer's direct fetch can't
         // add them, so data() must perform the request instead of a stable URL.
-        let has_secrets =
-            resolve_auth(&url, config)?.is_some() || !resolve_secret_headers(&url, config)?.is_empty();
+        let has_secrets = resolve_auth(&url, config)?.is_some()
+            || !resolve_secret_headers(&url, config)?.is_empty();
         if needs_custom_request(args, has_secrets) {
             // data() handles this request
             return Ok(None);
@@ -438,6 +435,7 @@ impl Connector for HttpConnector {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -581,7 +579,10 @@ mod tests {
     fn test_validate_args_rejects_authorization_header() {
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://api.example.com/data".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://api.example.com/data".to_string(),
+        );
         args.insert(
             "headers".to_string(),
             "Accept: text/csv\nAuthorization: Bearer topsecret".to_string(),
@@ -589,7 +590,7 @@ mod tests {
 
         let result = connector.validate_args(&args);
         assert!(result.is_err(), "Authorization in headers must be rejected");
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(
             err.to_lowercase().contains("authorization"),
             "error should name the offending header: {err}"
@@ -604,11 +605,11 @@ mod tests {
     fn test_validate_args_rejects_authorization_header_case_insensitive() {
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://api.example.com/data".to_string());
         args.insert(
-            "headers".to_string(),
-            "authorization: Bearer x".to_string(),
+            "url".to_string(),
+            "https://api.example.com/data".to_string(),
         );
+        args.insert("headers".to_string(), "authorization: Bearer x".to_string());
         assert!(connector.validate_args(&args).is_err());
     }
 
@@ -616,7 +617,10 @@ mod tests {
     fn test_validate_args_allows_non_credential_headers() {
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://api.example.com/data".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://api.example.com/data".to_string(),
+        );
         args.insert(
             "headers".to_string(),
             "Accept: text/csv\nUser-Agent: bundlebase".to_string(),
@@ -839,13 +843,11 @@ mod tests {
 
         let server_url = url::Url::parse(&server.uri()).expect("server url");
         let host_scope = format!("http/{}", server_url.host_str().expect("host"));
-        let config = crate::test_utils::test_config_with_values(&[
-            (
-                &host_scope,
-                SECRET_HEADERS_CFG.key,
-                "Cookie: session=abc\nX-Api-Key: k123",
-            ),
-        ]);
+        let config = crate::test_utils::test_config_with_values(&[(
+            &host_scope,
+            SECRET_HEADERS_CFG.key,
+            "Cookie: session=abc\nX-Api-Key: k123",
+        )]);
         let config: Arc<dyn ConfigProvider> = config;
 
         let connector = HttpConnector;
@@ -903,9 +905,11 @@ mod tests {
 
         let server_url = url::Url::parse(&server.uri()).expect("server url");
         let host_scope = format!("http/{}", server_url.host_str().expect("host"));
-        let config = crate::test_utils::test_config_with_values(&[
-            (&host_scope, AUTH_CFG.key, "Bearer tok123"),
-        ]);
+        let config = crate::test_utils::test_config_with_values(&[(
+            &host_scope,
+            AUTH_CFG.key,
+            "Bearer tok123",
+        )]);
         let config: Arc<dyn ConfigProvider> = config;
 
         let connector = HttpConnector;

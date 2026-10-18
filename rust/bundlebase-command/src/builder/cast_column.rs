@@ -45,15 +45,12 @@ impl CommandParsing for CastColumnCommand {
         let mut new_type = None;
 
         for inner in pair.into_inner() {
-            match inner.as_rule() {
-                Rule::identifier => {
-                    if name.is_none() {
-                        name = Some(extract_identifier(&inner));
-                    } else {
-                        new_type = Some(inner.as_str().to_string());
-                    }
+            if inner.as_rule() == Rule::identifier {
+                if name.is_none() {
+                    name = Some(extract_identifier(&inner));
+                } else {
+                    new_type = Some(inner.as_str().to_string());
                 }
-                _ => {}
             }
         }
 
@@ -150,6 +147,7 @@ impl BundleBuilderCommand for CastColumnCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use crate::parser::parse_command;
     use crate::{BundleCommand, CommandParsing};

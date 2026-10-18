@@ -216,6 +216,23 @@ async fn test_version_temp_with_temporary_connector_only() {
         .unwrap();
 
     assert_eq!(bundle.version(), "TEMP");
+
+    use futures::StreamExt;
+    let mut stream = bundle
+        .query("SELECT version() AS ver", vec![], None)
+        .await
+        .expect("version query");
+    let batch = stream
+        .next()
+        .await
+        .expect("version batch")
+        .expect("query succeeds");
+    let versions = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::StringArray>()
+        .expect("version is Utf8");
+    assert_eq!(versions.value(0), "TEMP");
 }
 
 #[tokio::test]
@@ -458,7 +475,9 @@ async fn test_commands_without_operations_leave_no_status_change() -> Result<(),
         builder.status_changes()
     );
 
-    builder.execute_command(parse_command("VERIFY DATA")?).await?;
+    builder
+        .execute_command(parse_command("VERIFY DATA")?)
+        .await?;
     assert!(
         builder.status_changes().is_empty(),
         "VERIFY DATA left a change: {:?}",
@@ -485,7 +504,9 @@ async fn test_verify_data_runs_on_read_only_bundle() -> Result<(), BundlebaseErr
     builder.commit("initial").await?;
 
     let bundle = bundlebase::Bundle::open(url.as_str(), None).await?;
-    bundle.execute_command(parse_command("VERIFY DATA")?).await?;
+    bundle
+        .execute_command(parse_command("VERIFY DATA")?)
+        .await?;
 
     let err = bundle
         .execute_command(parse_command("VERIFY DATA UPDATE")?)

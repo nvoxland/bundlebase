@@ -42,12 +42,13 @@ impl FileInfo {
     pub fn filename(&self) -> Option<&str> {
         self.url
             .path_segments()
-            .and_then(|segments| segments.last())
+            .and_then(|mut segments| segments.next_back())
             .filter(|s| !s.is_empty())
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

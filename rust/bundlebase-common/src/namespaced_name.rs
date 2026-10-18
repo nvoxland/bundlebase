@@ -13,7 +13,7 @@ use std::str::FromStr;
 ///
 /// Stores the namespace and name parts separately but serializes/deserializes
 /// as the dotted string form (e.g., `"acme.double_val"`) for backwards compatibility.
-#[derive(Debug, Clone, Eq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct NamespacedName {
     pub namespace: String,
     pub name: String,
@@ -54,12 +54,6 @@ impl FromStr for NamespacedName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         NamespacedName::parse(s, "Name")
-    }
-}
-
-impl PartialEq for NamespacedName {
-    fn eq(&self, other: &Self) -> bool {
-        self.namespace == other.namespace && self.name == other.name
     }
 }
 
@@ -151,8 +145,29 @@ pub fn parse_dotted_name<'a>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_namespaced_name_hash_keys() {
+        use std::collections::{HashMap, HashSet};
+
+        let name = NamespacedName::new("acme", "weather");
+        let equal = NamespacedName::new("acme", "weather");
+        let different_case = NamespacedName::new("ACME", "weather");
+        let different_name = NamespacedName::new("acme", "forecast");
+        let names = HashSet::from([name.clone(), equal.clone(), different_case.clone()]);
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&equal));
+        assert!(names.contains(&different_case));
+        assert!(!names.contains(&different_name));
+
+        let mut values = HashMap::from([(name, 1)]);
+        assert_eq!(values.insert(equal.clone(), 2), Some(1));
+        assert_eq!(values.get(&equal), Some(&2));
+        assert_eq!(values.get(&different_case), None);
+    }
 
     #[test]
     fn test_namespaced_name_display() {

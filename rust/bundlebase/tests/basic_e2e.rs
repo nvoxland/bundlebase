@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{op_field, AnyOperation, BundleConfig};
@@ -126,7 +125,7 @@ changes:
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     assert_eq!(loaded_bundle.history().len(), 1);
-    assert_eq!(loaded_bundle.history().get(0).unwrap().url, Some(url));
+    assert_eq!(loaded_bundle.history().first().unwrap().url, Some(url));
 
     // Verify data can be queried
     let df = loaded_bundle.dataframe().await?;
@@ -590,7 +589,7 @@ async fn test_upgrade_bundle_fixes_too_old_bundle() -> Result<(), BundlebaseErro
 
     // Verify it would fail to open
     assert!(
-        matches!(Bundle::open(data_dir.url().as_str(), None).await, Err(_)),
+        Bundle::open(data_dir.url().as_str(), None).await.is_err(),
         "Expected version check to fail"
     );
 
@@ -612,7 +611,9 @@ async fn test_utf8_aggregate_error_suggests_cast() -> Result<(), BundlebaseError
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
     // "Index" is a numeric-looking column, imported as text (Utf8) like all CSV columns.
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     // Not expect_err: the Ok type (a stream) isn't Debug.
     let err = match bundle
@@ -646,7 +647,9 @@ async fn test_text_ordering_comparison_fails_with_cast_hint() -> Result<(), Bund
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     let err = match bundle
         .query(r#"SELECT * FROM bundle WHERE "Index" > 50"#, vec![], None)
@@ -656,7 +659,10 @@ async fn test_text_ordering_comparison_fails_with_cast_hint() -> Result<(), Bund
         Err(e) => e,
     };
     let msg = err.to_string();
-    assert!(msg.contains("CAST COLUMN"), "must give the remedy, got: {msg}");
+    assert!(
+        msg.contains("CAST COLUMN"),
+        "must give the remedy, got: {msg}"
+    );
     assert!(
         msg.contains("lexicographic"),
         "must explain why it's wrong, got: {msg}"
@@ -705,7 +711,9 @@ async fn test_text_ordering_comparison_rejected_in_filter_and_add_column(
     init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
 
     let err = match bundle
         .filter(r#"SELECT * FROM bundle WHERE "Index" > 50"#, vec![])
@@ -715,14 +723,23 @@ async fn test_text_ordering_comparison_rejected_in_filter_and_add_column(
         Err(e) => e.to_string(),
     };
     assert!(err.contains("lexicographic"), "got: {err}");
-    assert!(err.contains("\"Index\""), "must name the user column, got: {err}");
+    assert!(
+        err.contains("\"Index\""),
+        "must name the user column, got: {err}"
+    );
 
-    let err = match bundle.add_column("big", r#""Index" BETWEEN 10 AND 50"#).await {
+    let err = match bundle
+        .add_column("big", r#""Index" BETWEEN 10 AND 50"#)
+        .await
+    {
         Ok(_) => panic!("add_column comparing a text column to a number must fail"),
         Err(e) => e.to_string(),
     };
     assert!(err.contains("lexicographic"), "got: {err}");
-    assert!(err.contains("\"Index\""), "must name the user column, got: {err}");
+    assert!(
+        err.contains("\"Index\""),
+        "must name the user column, got: {err}"
+    );
 
     // The bundle is still usable, and the cast spelling is accepted.
     bundle
@@ -736,5 +753,56 @@ async fn test_text_ordering_comparison_rejected_in_filter_and_add_column(
         .await?;
     assert_eq!(50, bundle.num_rows().await?);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_attach_local_paths_commit_and_reopen() -> Result<(), BundlebaseError> {
+    use futures::StreamExt;
+
+    init();
+    let temp = tempfile::tempdir()?;
+    for (extension, data) in [
+        ("csv", "id,amount\n1,10\n"),
+        ("tsv", "id\tamount\n1\t10\n"),
+        ("jsonl", "{\"id\":\"1\",\"amount\":\"10\"}\n"),
+    ] {
+        let bundle_path = temp.path().join(format!("bundle_{extension}"));
+        let absolute_path = temp.path().join(format!("sales 100% #é.{extension}"));
+        std::fs::write(&absolute_path, data)?;
+        let bundle =
+            bundlebase::BundleBuilder::create(bundle_path.to_str().expect("UTF-8 test path"), None)
+                .await?;
+        bundle
+            .attach(absolute_path.to_str().expect("UTF-8 test path"), None)
+            .await?;
+        assert_eq!(bundle.num_rows().await?, 1);
+        bundle.commit("absolute attachment").await?;
+
+        let reopened = Bundle::open(bundle_path.to_str().expect("UTF-8 test path"), None).await?;
+        assert_eq!(reopened.num_rows().await?, 1);
+        let extended = reopened.extend(None).await?;
+        // Relative attachments must keep resolving within the bundle data directory.
+        let relative = format!("relative.{extension}");
+        std::fs::write(bundle_path.join(&relative), data)?;
+        extended.attach(&relative, None).await?;
+        let file_url = Url::from_file_path(&absolute_path).expect("absolute file URL");
+        extended.attach(file_url.as_str(), None).await?;
+        assert_eq!(extended.num_rows().await?, 3);
+        extended
+            .commit("relative and explicit URL attachments")
+            .await?;
+        let reopened = Bundle::open(bundle_path.to_str().expect("UTF-8 test path"), None).await?;
+        assert_eq!(reopened.num_rows().await?, 3);
+        // Read real batches too: metadata counts alone do not exercise the scan path.
+        let mut rows = reopened
+            .query("SELECT id FROM bundle", vec![], None)
+            .await?;
+        let mut count = 0;
+        while let Some(batch) = rows.next().await {
+            count += batch?.num_rows();
+        }
+        assert_eq!(count, 3, "{extension} scan after reopen");
+    }
     Ok(())
 }

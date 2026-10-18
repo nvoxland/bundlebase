@@ -57,11 +57,11 @@ impl TableProvider for BundleConfigTable {
             self.facade()?
                 .config()
                 .all_values()
-                .map_err(|e| datafusion::error::DataFusionError::External(e))?,
+                .map_err(datafusion::error::DataFusionError::External)?,
         );
         let stream = Box::new(entries)
             .into_stream()
-            .map_err(|e| datafusion::error::DataFusionError::External(e))?;
+            .map_err(datafusion::error::DataFusionError::External)?;
         let batches: Vec<_> = stream.try_collect().await?;
         let mem_table = MemTable::try_new(self.schema(), vec![batches])?;
         mem_table.scan(state, projection, filters, limit).await

@@ -43,7 +43,7 @@ async fn test_bundle_data_table() {
     assert!(!batches.is_empty(), "Should have at least one batch");
     let schema = batches[0].schema();
     println!("Result schema has {} fields", schema.fields().len());
-    assert!(schema.fields().len() > 0, "Schema should have fields");
+    assert!(!schema.fields().is_empty(), "Schema should have fields");
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn test_bundle_status_table_with_uncommitted_changes() {
         "Description should mention ATTACH"
     );
     assert!(
-        changes[0].operations.len() >= 1,
+        !changes[0].operations.is_empty(),
         "Should have at least 1 operation"
     );
 }

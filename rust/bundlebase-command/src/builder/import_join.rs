@@ -103,9 +103,7 @@ fn find_bundle_source_url(
         }
     }
 
-    Err(format!(
-        "Join pack has no bundle:// data source. IMPORT JOIN only works on joins created with 'JOIN bundle://...'."
-    ).into())
+    Err("Join pack has no bundle:// data source. IMPORT JOIN only works on joins created with 'JOIN bundle://...'.".into())
 }
 
 /// Remap an operation from the source bundle context to the target bundle context.
@@ -206,7 +204,7 @@ fn build_pack_remap(source: &Bundle, target_join_pack_id: ObjectId) -> HashMap<O
     remap.insert(ObjectId::BASE_PACK, target_join_pack_id);
 
     // Source join packs → new unique IDs (avoid collisions in target)
-    for (pack_id, _pack) in source.packs().iter() {
+    for pack_id in source.packs().keys() {
         if *pack_id != ObjectId::BASE_PACK {
             remap.insert(*pack_id, ObjectId::generate());
         }
@@ -372,7 +370,7 @@ async fn copy_data_files(
         let pinned: std::pin::Pin<
             Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>,
         > = Box::pin(futures::StreamExt::map(stream, |r| {
-            r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            r.map_err(|e| std::io::Error::other(e.to_string()))
         }));
         target_file.write_stream(pinned).await?;
 
@@ -386,6 +384,7 @@ async fn copy_data_files(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use super::*;
     use crate::parser::parse_command;

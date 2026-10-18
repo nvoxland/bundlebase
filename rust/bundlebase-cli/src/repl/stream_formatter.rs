@@ -250,17 +250,12 @@ mod tests {
         assert!(result.contains("Charlie"));
     }
 
-
     /// A 100-batch stream that counts how many batches were pulled.
     fn create_counted_stream(
         pulled: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> SendableRecordBatchStream {
         use std::sync::atomic::Ordering;
-        let schema = Arc::new(Schema::new(vec![Field::new(
-            "id",
-            DataType::Int64,
-            false,
-        )]));
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let schema_for_iter = schema.clone();
         let stream = futures::stream::iter((0..100).map(move |i| {
             pulled.fetch_add(1, Ordering::SeqCst);
@@ -297,13 +292,19 @@ mod tests {
                 Some(OutputShape::Dictionary),
                 Box::new(create_table_stream),
             ),
-            ("empty", Some(OutputShape::Table), Box::new(create_empty_stream)),
+            (
+                "empty",
+                Some(OutputShape::Table),
+                Box::new(create_empty_stream),
+            ),
             ("no hint", None, Box::new(create_table_stream)),
         ];
         for (name, shape, factory) in cases {
             let expected = format_stream(factory(), shape, None).await.expect("format");
             let mut written: Vec<u8> = Vec::new();
-            write_stream(factory(), shape, &mut written).await.expect("write");
+            write_stream(factory(), shape, &mut written)
+                .await
+                .expect("write");
             assert_eq!(
                 expected,
                 String::from_utf8(written).expect("utf8"),

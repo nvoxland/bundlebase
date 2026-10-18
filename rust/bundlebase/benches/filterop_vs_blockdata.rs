@@ -330,7 +330,12 @@ async fn verify_bundle(
 /// write-up can attribute timings to the path actually measured.
 async fn report_plan_path(label: &str, bundle: &Arc<Bundle>, sql: &str) {
     let mut stream = bundle
-        .explain(false, false, datafusion::logical_expr::ExplainFormat::Indent, Some(sql))
+        .explain(
+            false,
+            false,
+            datafusion::logical_expr::ExplainFormat::Indent,
+            Some(sql),
+        )
         .await
         .expect("explain");
     let mut plan = String::new();

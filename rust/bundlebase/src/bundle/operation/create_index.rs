@@ -72,8 +72,11 @@ impl Operation for CreateIndexOp {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let column_name_set: std::collections::HashSet<&str> =
-            bundle_schema.columns().values().map(|s| s.as_str()).collect();
+        let column_name_set: std::collections::HashSet<&str> = bundle_schema
+            .columns()
+            .values()
+            .map(|s| s.as_str())
+            .collect();
 
         if self.index_type.is_inverted() {
             // Validate all columns exist and (for physical columns) are
@@ -149,6 +152,7 @@ impl Operation for CreateIndexOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

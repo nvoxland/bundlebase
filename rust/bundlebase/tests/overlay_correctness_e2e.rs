@@ -105,12 +105,16 @@ async fn test_update_visible_through_index_lookup() -> Result<(), BundlebaseErro
         .await?;
     // Index the column we filter on, but update a DIFFERENT column so the index
     // still locates the row correctly — the bug is the stale projected value.
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
     bundle.commit("index on Email").await?;
 
     let email = "zunigavanessa@smith.info";
     bundle
-        .update(&format!("SET City = 'OVERLAY_CITY' WHERE Email = '{email}'"))
+        .update(&format!(
+            "SET City = 'OVERLAY_CITY' WHERE Email = '{email}'"
+        ))
         .await?;
     // Commit so the update is persisted as a block-level overlay parquet, then
     // reopen: a fresh Bundle loads the committed overlay via UpdateDataOp and
@@ -211,7 +215,9 @@ async fn test_delete_excluded_through_index_lookup() -> Result<(), BundlebaseErr
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
-    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
+    bundle
+        .create_index(&["Email"], IndexType::BTree, None)
+        .await?;
     bundle.commit("index on Email").await?;
 
     let deleted_email = "zunigavanessa@smith.info";
@@ -228,7 +234,10 @@ async fn test_delete_excluded_through_index_lookup() -> Result<(), BundlebaseErr
         &format!("SELECT COUNT(*) AS cnt FROM bundle WHERE Email = '{deleted_email}'"),
     )
     .await;
-    assert_eq!(gone, 0, "deleted row reappeared through the index fast-path");
+    assert_eq!(
+        gone, 0,
+        "deleted row reappeared through the index fast-path"
+    );
 
     // A different, non-deleted row is still reachable through the index.
     let kept = query_count(
@@ -324,9 +333,7 @@ async fn test_page_filtered_read_respects_tombstones() -> Result<(), BundlebaseE
 
     // Delete rows in the FIRST page. Ids are sequential from r000000, so the
     // numeric suffix equals the block-local row number.
-    builder
-        .delete("id >= 'r001000' AND id < 'r009000'")
-        .await?;
+    builder.delete("id >= 'r001000' AND id < 'r009000'").await?;
     builder.commit("delete first-page rows").await?;
 
     let reopened = bundlebase::Bundle::open(data_dir.url().as_str(), None).await?;
@@ -489,11 +496,7 @@ async fn test_failed_command_rolls_back_flushed_block_state() -> Result<(), Bund
     let result = builder
         .run_command("update then fail".to_string(), async {
             builder
-                .evaluate_update_cols(
-                    std::slice::from_ref(&col),
-                    &["-777.0".to_string()],
-                    &wc,
-                )
+                .evaluate_update_cols(std::slice::from_ref(&col), &["-777.0".to_string()], &wc)
                 .await?;
             builder.flush_pending_updates_to_blocks()?;
             Err::<(), BundlebaseError>("simulated failure".into())
@@ -635,7 +638,6 @@ async fn test_search_excludes_block_level_deletes() -> Result<(), BundlebaseErro
     Ok(())
 }
 
-
 /// Collect the given string column of a search() result into a sorted Vec.
 async fn search_strings(facade: &dyn BundleFacade, sql: &str, column: &str) -> Vec<String> {
     let batches = query_collect(facade, sql).await;
@@ -644,8 +646,8 @@ async fn search_strings(facade: &dyn BundleFacade, sql: &str, column: &str) -> V
         let col = batch
             .column_by_name(column)
             .unwrap_or_else(|| panic!("missing column {column}"));
-        let col = arrow::compute::cast(col, &arrow::datatypes::DataType::Utf8)
-            .expect("cast to Utf8");
+        let col =
+            arrow::compute::cast(col, &arrow::datatypes::DataType::Utf8).expect("cast to Utf8");
         let arr = col
             .as_any()
             .downcast_ref::<StringArray>()
@@ -741,16 +743,16 @@ async fn test_filter_then_update_filter_sees_updated_values() -> Result<(), Bund
         .await?;
     builder.commit("attach").await?;
 
-    builder.filter("SELECT * FROM bundle WHERE id <= 10", vec![]).await?;
+    builder
+        .filter("SELECT * FROM bundle WHERE id <= 10", vec![])
+        .await?;
     assert_eq!(
         query_count(builder.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
         10
     );
 
     // Move row 3 out of the earlier filter's range.
-    builder
-        .update("SET id = 500 WHERE id = 3")
-        .await?;
+    builder.update("SET id = 500 WHERE id = 3").await?;
     assert_eq!(
         query_count(builder.as_ref(), "SELECT COUNT(*) AS c FROM bundle").await,
         9,

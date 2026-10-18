@@ -128,6 +128,8 @@ impl DataBlock {
         format!("__block_{}", id)
     }
 
+    // This boundary accepts the existing block/fetch context explicitly.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: BlockId,
         physical_schema: SchemaRef,
@@ -190,11 +192,16 @@ impl DataBlock {
 
     /// A copy of this block whose DELETE/UPDATE edit state (tombstones,
     /// committed and session overlays) is independent of the original.
-    /// Everything else — reader, schema, caches — stays shared. Used when a
+    /// Rebinds index lookup to the detached bundle registry; reader, schema,
+    /// and caches stay shared. Used when a
     /// Bundle is extended into a builder, so the builder's uncommitted edits
     /// never show through the source Bundle's blocks.
-    pub(crate) fn detached_clone(&self) -> DataBlock {
+    pub(crate) fn detached_clone(
+        &self,
+        indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
+    ) -> DataBlock {
         let mut block = self.clone();
+        block.indexes = indexes;
         block.deleted_rows = Arc::new(RwLock::new(self.deleted_rows.read().clone()));
         block.update_overlays = Arc::new(RwLock::new(self.update_overlays.read().clone()));
         block.session_overlay = Arc::new(RwLock::new(self.session_overlay.read().clone()));
@@ -377,7 +384,7 @@ impl DataBlock {
             .reader
             .column_stats()
             .await
-            .map_err(|e| datafusion::common::DataFusionError::External(e))?;
+            .map_err(datafusion::common::DataFusionError::External)?;
 
         // Cache DataFusion statistics (column cardinality / min / max) for the optimizer.
         // Hold the write lock for the entire check-and-set to avoid redundant concurrent builds.
@@ -1009,7 +1016,7 @@ impl TableProvider for DataBlock {
                     .reader
                     .data_source_filtered_pages(projection, &physical_filters, limit)
                     .await
-                    .map_err(|e| datafusion::common::DataFusionError::External(e))?
+                    .map_err(datafusion::common::DataFusionError::External)?
                 {
                     log::debug!(
                         "Block {} using page-filtered read (bypassing block cache)",

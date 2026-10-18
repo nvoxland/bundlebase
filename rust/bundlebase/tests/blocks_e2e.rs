@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::op_field;
 use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile};

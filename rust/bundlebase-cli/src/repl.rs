@@ -13,11 +13,11 @@ pub mod table_utils;
 
 use crate::OutputFormat;
 use bundlebase::BundleFacade;
+use bundlebase_command::parser::is_input_complete;
 use bundlebase_common::BundlebaseError;
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
 use json_formatter::format_stream_json;
-use bundlebase_command::parser::is_input_complete;
 use reedline::{
     default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
     Reedline, Signal, ValidationResult, Validator,
@@ -110,6 +110,7 @@ pub fn print_header(bundle: &dyn BundleFacade) {
 ///
 /// * `Ok(())` - REPL exited normally
 /// * `Err(BundlebaseError)` - An error occurred
+///
 /// Execute one or more semicolon-separated commands non-interactively and exit.
 pub async fn execute_single(
     bundle: Arc<dyn BundleFacade>,
@@ -159,8 +160,7 @@ pub async fn execute_single(
                 let mut stdout = std::io::stdout();
                 match format {
                     OutputFormat::Json => {
-                        json_formatter::write_stream_json(stream, Some(shape), &mut stdout)
-                            .await?
+                        json_formatter::write_stream_json(stream, Some(shape), &mut stdout).await?
                     }
                     OutputFormat::Table => {
                         stream_formatter::write_stream(stream, Some(shape), &mut stdout).await?
@@ -224,7 +224,7 @@ pub async fn start(
         .with_edit_mode(Box::new(Emacs::new(default_emacs_keybindings())));
 
     let prompt = DefaultPrompt {
-        left_prompt: DefaultPromptSegment::Basic(prompt_label(&bundle.url().to_string())),
+        left_prompt: DefaultPromptSegment::Basic(prompt_label(bundle.url().as_str())),
         right_prompt: DefaultPromptSegment::CurrentDateTime,
     };
 

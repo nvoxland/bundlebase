@@ -389,7 +389,7 @@ impl BundleConfig {
 
         // Sort each key's entries by scope length descending (longest first, global last)
         for entries in cache.values_mut() {
-            entries.sort_by(|a, b| b.scope.as_str().len().cmp(&a.scope.as_str().len()));
+            entries.sort_by_key(|a| std::cmp::Reverse(a.scope.as_str().len()));
         }
 
         inner.active_cache = Some(cache);
@@ -462,9 +462,9 @@ impl BundleConfig {
                 let winner_key = (entry.key.clone(), scope.clone());
                 let is_active = winners
                     .get(&winner_key)
-                    .map_or(false, |(p, _)| *p == priority);
+                    .is_some_and(|(p, _)| *p == priority);
                 let is_secure = BundleConfig::get_config_key(&scope, &entry.key)
-                    .map_or(false, |spec| spec.secure);
+                    .is_some_and(|spec| spec.secure);
                 result.push(ConfigValueDetails {
                     key: entry.key.clone(),
                     value: entry.value.clone(),
@@ -729,6 +729,7 @@ impl CommandResponse for ConfigValueDetails {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::io::plugin::object_store::{
@@ -1299,7 +1300,7 @@ mod tests {
         let gcs = Scope::try_from("gs").unwrap();
         let azure = Scope::try_from("azure").unwrap();
         let is_secure = |scope: &Scope, key: &str| {
-            BundleConfig::get_config_key(scope, key).map_or(false, |spec| spec.secure)
+            BundleConfig::get_config_key(scope, key).is_some_and(|spec| spec.secure)
         };
 
         // Secure keys (scoped)
@@ -1634,7 +1635,8 @@ mod tests {
             let err = validate_key_source(&scope, "git_versioning", &source)
                 .expect_err("StoredOnly must reject non-Stored sources");
             assert!(
-                err.to_string().contains("must be set in the bundle manifest"),
+                err.to_string()
+                    .contains("must be set in the bundle manifest"),
                 "got: {}",
                 err
             );

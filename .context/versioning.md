@@ -125,31 +125,21 @@ await extended.commit("Added new data")
 
 ### Path Resolution
 
-The `attach()` method handles paths flexibly:
+`attach()` resolves paths through `bundlebase_io::readable_file_from_path`:
 
-```rust
-pub async fn attach(&mut self, path: &str) -> Result<&mut Self> {
-    let url = if path.contains(":") {
-        Url::parse(path)?  // Already a URL (file://, ipc::, etc.)
-    } else {
-        // Convert relative/absolute file path to file:// URL
-        Url::from_file_path(std::fs::canonicalize(path)?).unwrap()
-    };
-    // ...
-    Ok(self)
-}
-```
+- Absolute filesystem paths (`"/full/path/to/sales.csv"`) become local `file://`
+  URLs, regardless of the bundle's storage protocol. URL conversion escapes
+  spaces, literal percent signs, and other special characters.
+- Explicit URLs (`"file:///full/path/to/sales.csv"`, `"s3://bucket/sales.csv"`)
+  retain their protocol and location.
+- Relative paths (`"data/sales.csv"`) resolve within the bundle's data directory,
+  retaining its storage protocol. Their persisted relative representation remains
+  portable with the bundle; they are not canonicalized against the process's
+  working directory.
 
-**Supported formats:**
-- Relative paths: `"test_data/file.parquet"` → resolves to absolute file:// URL
-- Absolute paths: `"/full/path/to/file.csv"` → converts to file:// URL
-- File URLs: `"file:///full/path/to/file.json"` → used as-is
-- IPC URLs: `"ipc::./my_connector"` → handled by IPC subprocess connector
-
-**Path resolution:**
-- Relative paths resolved using `std::fs::canonicalize()` (resolves from current working directory)
-- Result converted to absolute file:// URL
-- DataFusion handles file:// URLs natively
+Absolute path conversion does not require the file to exist; normal attachment
+validation reports missing files. Relative directory/file helpers keep their
+existing joining behavior.
 
 **Test data location:**
 - All test data in `test_data/` directory at project root

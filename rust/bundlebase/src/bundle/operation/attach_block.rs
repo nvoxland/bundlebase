@@ -108,6 +108,8 @@ impl AttachBlockOp {
     /// * `expected_schema` - Optional expected columns for pre-reserved ID reuse (from CreateSourceOp)
     /// * `builder` - Bundle builder
     /// * `shared` - Optional shared batch context for parallel setup calls
+    // This boundary accepts the existing block/fetch context explicitly.
+    #[allow(clippy::too_many_arguments)]
     pub async fn setup(
         pack: &ObjectId,
         location: &str,
@@ -345,8 +347,7 @@ impl AttachBlockOp {
 
 /// Wire form of an Arrow Schema for the standalone `.block.schema.yaml`
 /// sidecar file. Reuses the same YAML shape as the previous inline `schema:`
-/// field by delegating to `serde_util::serialize_schema_option` /
-/// `deserialize_schema_option`.
+/// field by delegating to the schema helpers in `serde_util`.
 #[derive(Debug)]
 struct SchemaWire<'a>(&'a SchemaRef);
 
@@ -483,6 +484,7 @@ impl Operation for AttachBlockOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::io::plugin::object_store::ObjectStoreFile;

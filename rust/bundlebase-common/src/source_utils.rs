@@ -79,7 +79,7 @@ pub fn require_url(
 /// Extract a filename from a URL path.
 pub fn filename_from_url(url: &Url) -> String {
     url.path_segments()
-        .and_then(|s| s.last())
+        .and_then(|mut s| s.next_back())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "data".to_string())
@@ -108,7 +108,7 @@ pub fn http_status_error(url: &Url, status: reqwest::StatusCode, detail: Option<
         500 => {
             " The server encountered an internal error. The service may be temporarily unavailable."
         }
-        502 | 503 | 504 => " The service is temporarily unavailable. Try again later.",
+        502..=504 => " The service is temporarily unavailable. Try again later.",
         _ => " Verify the URL is correct and accessible.",
     };
     let detail_snippet = match detail {
@@ -304,7 +304,7 @@ pub fn detect_format_from_bytes(data: &[u8]) -> Option<&'static str> {
         return Some("parquet");
     }
     // Skip BOM if present
-    let skip = if data.len() >= 3 && &data[0..3] == &[0xEF, 0xBB, 0xBF] {
+    let skip = if data.len() >= 3 && data[0..3] == [0xEF, 0xBB, 0xBF] {
         3
     } else {
         0
@@ -381,8 +381,7 @@ pub async fn record_batch_stream_to_parquet(
     {
         let props = parquet::file::properties::WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(
-                parquet::basic::ZstdLevel::try_new(3)
-                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+                parquet::basic::ZstdLevel::try_new(3).unwrap_or_default(),
             ))
             .set_max_row_group_row_count(Some(128 * 1024)) // 128K rows per row group
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
@@ -439,7 +438,7 @@ pub fn json_to_parquet_with_options(
         .iter()
         .filter_map(|path| {
             json_navigate_path(&root, path).map(|v| {
-                let col_name = path.split('.').last().unwrap_or(path).to_string();
+                let col_name = path.split('.').next_back().unwrap_or(path).to_string();
                 (col_name, v.clone())
             })
         })
@@ -500,8 +499,7 @@ pub fn json_to_parquet_with_options(
     {
         let props = parquet::file::properties::WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(
-                parquet::basic::ZstdLevel::try_new(3)
-                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+                parquet::basic::ZstdLevel::try_new(3).unwrap_or_default(),
             ))
             .set_max_row_group_row_count(Some(128 * 1024))
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
@@ -640,7 +638,7 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
 
         // Push value or null for each column
         for col_name in &col_order {
-            let value = map.get(col_name).map(|v| json_value_to_string(v));
+            let value = map.get(col_name).map(json_value_to_string);
             col_data[col_index[col_name]].push(value);
         }
         row_count += 1;
@@ -678,8 +676,7 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
     {
         let props = parquet::file::properties::WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(
-                parquet::basic::ZstdLevel::try_new(3)
-                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+                parquet::basic::ZstdLevel::try_new(3).unwrap_or_default(),
             ))
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
             .set_bloom_filter_enabled(true)
@@ -715,7 +712,7 @@ fn csv_to_parquet(data: &[u8], delimiter: u8) -> Result<Bytes, BundlebaseError> 
 
     // Read rows as raw strings using the all-text schema.
     let schema = all_utf8_schema(&col_names);
-    let mut reader = ReaderBuilder::new(schema.clone())
+    let reader = ReaderBuilder::new(schema.clone())
         .with_delimiter(delimiter)
         .with_header(true)
         .build(Cursor::new(data))
@@ -741,10 +738,7 @@ fn jsonl_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
         }
         let obj: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(line)
             .map_err(|e| BundlebaseError::from(format!("JSONL parse error: {}", e)))?;
-        if col_names.is_none() {
-            col_names = Some(obj.keys().cloned().collect());
-        }
-        let names = col_names.as_ref().unwrap();
+        let names = col_names.get_or_insert_with(|| obj.keys().cloned().collect());
         rows.push(
             names
                 .iter()
@@ -810,7 +804,7 @@ fn record_batches_to_parquet(
     let mut buffer = Vec::new();
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(
-            parquet::basic::ZstdLevel::try_new(3).unwrap_or(parquet::basic::ZstdLevel::default()),
+            parquet::basic::ZstdLevel::try_new(3).unwrap_or_default(),
         ))
         .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
         .set_bloom_filter_enabled(true)
@@ -843,6 +837,7 @@ pub fn json_value_to_string(value: &serde_json::Value) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

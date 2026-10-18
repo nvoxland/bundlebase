@@ -309,12 +309,7 @@ impl CommandParsing for CreateSourceCommand {
         if self.args.is_empty() {
             return format!(
                 "CREATE SOURCE{} USING {}{}{}{}{}",
-                pack_part,
-                self.connector,
-                save_as_part,
-                min_batch_part,
-                fetch_part,
-                schema_part
+                pack_part, self.connector, save_as_part, min_batch_part, fetch_part, schema_part
             );
         }
 
@@ -492,6 +487,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod parsing_tests {
     use super::*;
     use crate::parser::parse_command;
@@ -893,11 +889,7 @@ mod parsing_tests {
         let mut cmd = CreateSourceCommand::new("remote_dir", args, None);
         cmd.fetch = false;
         let stmt = cmd.to_statement();
-        assert!(
-            stmt.contains("NO FETCH"),
-            "expected NO FETCH in {}",
-            stmt
-        );
+        assert!(stmt.contains("NO FETCH"), "expected NO FETCH in {}", stmt);
         let parsed = parse_command(&stmt).unwrap();
         match parsed {
             BundleCommand::CreateSource(c) => assert!(!c.fetch),

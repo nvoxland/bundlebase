@@ -1,5 +1,5 @@
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_yaml_ng::{Mapping, Value};
 use std::sync::Arc;
 
@@ -201,14 +201,14 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
         }
         Value::Mapping(map) => {
             let type_str = map
-                .get(&Value::String("type".to_string()))
+                .get(Value::String("type".to_string()))
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "missing 'type' field".to_string())?;
 
             match type_str {
                 "Timestamp" => {
                     let unit_str = map
-                        .get(&Value::String("unit".to_string()))
+                        .get(Value::String("unit".to_string()))
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| "missing 'unit' field in Timestamp".to_string())?;
 
@@ -221,7 +221,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                     };
 
                     let tz = map
-                        .get(&Value::String("timezone".to_string()))
+                        .get(Value::String("timezone".to_string()))
                         .and_then(|v| match v {
                             Value::Null => Some(None),
                             Value::String(s) => Some(Some(Arc::from(s.as_str()))),
@@ -233,7 +233,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Time32" => {
                     let unit_str = map
-                        .get(&Value::String("unit".to_string()))
+                        .get(Value::String("unit".to_string()))
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| "missing 'unit' field in Time32".to_string())?;
 
@@ -247,7 +247,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Time64" => {
                     let unit_str = map
-                        .get(&Value::String("unit".to_string()))
+                        .get(Value::String("unit".to_string()))
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| "missing 'unit' field in Time64".to_string())?;
 
@@ -261,7 +261,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Duration" => {
                     let unit_str = map
-                        .get(&Value::String("unit".to_string()))
+                        .get(Value::String("unit".to_string()))
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| "missing 'unit' field in Duration".to_string())?;
 
@@ -277,7 +277,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Interval" => {
                     let unit_str = map
-                        .get(&Value::String("unit".to_string()))
+                        .get(Value::String("unit".to_string()))
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| "missing 'unit' field in Interval".to_string())?;
 
@@ -292,13 +292,13 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Decimal128" => {
                     let precision = map
-                        .get(&Value::String("precision".to_string()))
+                        .get(Value::String("precision".to_string()))
                         .and_then(|v| v.as_u64())
                         .ok_or_else(|| "missing 'precision' field in Decimal128".to_string())?
                         as u8;
 
                     let scale = map
-                        .get(&Value::String("scale".to_string()))
+                        .get(Value::String("scale".to_string()))
                         .and_then(|v| v.as_i64())
                         .ok_or_else(|| "missing 'scale' field in Decimal128".to_string())?
                         as i8;
@@ -307,13 +307,13 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Decimal256" => {
                     let precision = map
-                        .get(&Value::String("precision".to_string()))
+                        .get(Value::String("precision".to_string()))
                         .and_then(|v| v.as_u64())
                         .ok_or_else(|| "missing 'precision' field in Decimal256".to_string())?
                         as u8;
 
                     let scale = map
-                        .get(&Value::String("scale".to_string()))
+                        .get(Value::String("scale".to_string()))
                         .and_then(|v| v.as_i64())
                         .ok_or_else(|| "missing 'scale' field in Decimal256".to_string())?
                         as i8;
@@ -322,7 +322,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "List" => {
                     let element_value = map
-                        .get(&Value::String("element".to_string()))
+                        .get(Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in List".to_string())?;
 
                     let field = deserialize_field_internal(element_value)?;
@@ -330,7 +330,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "LargeList" => {
                     let element_value = map
-                        .get(&Value::String("element".to_string()))
+                        .get(Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in LargeList".to_string())?;
 
                     let field = deserialize_field_internal(element_value)?;
@@ -338,13 +338,13 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "FixedSizeList" => {
                     let element_value = map
-                        .get(&Value::String("element".to_string()))
+                        .get(Value::String("element".to_string()))
                         .ok_or_else(|| "missing 'element' field in FixedSizeList".to_string())?;
 
                     let field = deserialize_field_internal(element_value)?;
 
                     let size = map
-                        .get(&Value::String("size".to_string()))
+                        .get(Value::String("size".to_string()))
                         .and_then(|v| v.as_i64())
                         .ok_or_else(|| "missing 'size' field in FixedSizeList".to_string())?
                         as i32;
@@ -353,7 +353,7 @@ pub fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
                 }
                 "Struct" => {
                     let fields_value = map
-                        .get(&Value::String("fields".to_string()))
+                        .get(Value::String("fields".to_string()))
                         .ok_or_else(|| "missing 'fields' field in Struct".to_string())?;
 
                     let fields: Result<Vec<Field>, String> = match fields_value {
@@ -400,24 +400,24 @@ fn deserialize_field_internal(value: &Value) -> Result<Field, String> {
         .ok_or_else(|| "Field must be a mapping".to_string())?;
 
     let name = map
-        .get(&Value::String("name".to_string()))
+        .get(Value::String("name".to_string()))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'name' field".to_string())?
         .to_string();
 
     let data_type_value = map
-        .get(&Value::String("data_type".to_string()))
+        .get(Value::String("data_type".to_string()))
         .ok_or_else(|| "missing 'data_type' field".to_string())?;
 
     let data_type = deserialize_data_type(data_type_value)?;
 
     let nullable = map
-        .get(&Value::String("nullable".to_string()))
+        .get(Value::String("nullable".to_string()))
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
     let metadata = map
-        .get(&Value::String("metadata".to_string()))
+        .get(Value::String("metadata".to_string()))
         .and_then(|v| v.as_mapping())
         .map(|m| {
             m.iter()
@@ -515,21 +515,6 @@ where
     }
 }
 
-/// Deserialize Option<Arc<Schema>>
-pub fn deserialize_schema_option<'de, D>(deserializer: D) -> Result<Option<Arc<Schema>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: Option<serde_yaml_ng::Value> =
-        Option::deserialize(deserializer).map_err(serde::de::Error::custom)?;
-    match value {
-        Some(v) => deserialize_schema_internal(&v)
-            .map(Some)
-            .map_err(serde::de::Error::custom),
-        None => Ok(None),
-    }
-}
-
 pub(crate) fn deserialize_schema_internal(
     value: &serde_yaml_ng::Value,
 ) -> Result<Arc<Schema>, String> {
@@ -538,7 +523,7 @@ pub(crate) fn deserialize_schema_internal(
         .ok_or_else(|| "Schema must be a mapping".to_string())?;
 
     let fields_value = map
-        .get(&Value::String("fields".to_string()))
+        .get(Value::String("fields".to_string()))
         .ok_or_else(|| "missing 'fields' field".to_string())?;
 
     let fields: Result<Vec<Field>, String> = match fields_value {
@@ -551,6 +536,7 @@ pub(crate) fn deserialize_schema_internal(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rstest::rstest;
@@ -841,9 +827,9 @@ mod tests {
         );
 
         let map = result.as_mapping().unwrap();
-        assert!(map.contains_key(&Value::String("type".to_string())));
-        assert!(map.contains_key(&Value::String("unit".to_string())));
-        assert!(map.contains_key(&Value::String("timezone".to_string())));
+        assert!(map.contains_key(Value::String("type".to_string())));
+        assert!(map.contains_key(Value::String("unit".to_string())));
+        assert!(map.contains_key(Value::String("timezone".to_string())));
     }
 
     #[test]

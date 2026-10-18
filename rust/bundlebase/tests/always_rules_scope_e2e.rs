@@ -16,10 +16,7 @@ async fn scalar_f64(facade: &dyn BundleFacade, sql: &str) -> f64 {
     let stream = facade.query(sql, vec![], None).await.expect("query");
     let batches: Vec<arrow::record_batch::RecordBatch> =
         stream.try_collect().await.expect("collect");
-    let batch = batches
-        .iter()
-        .find(|b| b.num_rows() > 0)
-        .expect("one row");
+    let batch = batches.iter().find(|b| b.num_rows() > 0).expect("one row");
     batch
         .column(0)
         .as_any()
@@ -32,10 +29,7 @@ async fn scalar_i64(facade: &dyn BundleFacade, sql: &str) -> i64 {
     let stream = facade.query(sql, vec![], None).await.expect("query");
     let batches: Vec<arrow::record_batch::RecordBatch> =
         stream.try_collect().await.expect("collect");
-    let batch = batches
-        .iter()
-        .find(|b| b.num_rows() > 0)
-        .expect("one row");
+    let batch = batches.iter().find(|b| b.num_rows() > 0).expect("one row");
     batch
         .column(0)
         .as_any()
@@ -55,10 +49,14 @@ async fn test_always_update_not_reapplied_to_existing_blocks() -> Result<(), Bun
 
     // userdata.parquet: id=1 has salary 49756.53.
     let base_salary = 49756.53_f64;
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     // Rule created after attach → applies to the existing block once.
-    builder.always_update("SET salary = salary + 1000 WHERE id = 1").await?;
+    builder
+        .always_update("SET salary = salary + 1000 WHERE id = 1")
+        .await?;
     let after_rule = scalar_f64(&*builder, "SELECT salary FROM bundle WHERE id = 1").await;
     assert!(
         (after_rule - (base_salary + 1000.0)).abs() < 0.01,
@@ -67,7 +65,9 @@ async fn test_always_update_not_reapplied_to_existing_blocks() -> Result<(), Bun
 
     // Second attach adds a new block; the rule applies to IT, not to the
     // already-updated first block.
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
 
     let distinct = scalar_i64(
         &*builder,
@@ -80,7 +80,11 @@ async fn test_always_update_not_reapplied_to_existing_blocks() -> Result<(), Bun
          first block (bb-c6l) would produce two distinct values"
     );
 
-    let min = scalar_f64(&*builder, "SELECT MIN(salary) AS s FROM bundle WHERE id = 1").await;
+    let min = scalar_f64(
+        &*builder,
+        "SELECT MIN(salary) AS s FROM bundle WHERE id = 1",
+    )
+    .await;
     assert!(
         (min - (base_salary + 1000.0)).abs() < 0.01,
         "salary must be base + 1000 (applied once), got {min}"
@@ -97,7 +101,9 @@ async fn test_always_delete_applies_to_new_blocks() -> Result<(), BundlebaseErro
     let data_dir = random_memory_dir();
     let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     builder.always_delete("id = 1").await?;
     assert_eq!(
         scalar_i64(&*builder, "SELECT COUNT(*) AS n FROM bundle WHERE id = 1").await,
@@ -106,7 +112,9 @@ async fn test_always_delete_applies_to_new_blocks() -> Result<(), BundlebaseErro
     );
 
     // New block's id=1 row must also be deleted by the persistent rule.
-    builder.attach(test_datafile("userdata.parquet"), None).await?;
+    builder
+        .attach(test_datafile("userdata.parquet"), None)
+        .await?;
     assert_eq!(
         scalar_i64(&*builder, "SELECT COUNT(*) AS n FROM bundle WHERE id = 1").await,
         0,

@@ -9,7 +9,7 @@ use crate::BundlebaseError;
 /// How fetched data should be stored.
 ///
 /// Configured on the source via `SAVE AS` clause in `CREATE SOURCE`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SaveAs {
     /// Copy original bytes into the data directory. Only valid for attachable formats.
     Copy,
@@ -19,13 +19,8 @@ pub enum SaveAs {
     /// formats and connectors that don't require copying (must_copy=false).
     Ref,
     /// Always convert to Parquet and store in the bundle.
+    #[default]
     Auto,
-}
-
-impl Default for SaveAs {
-    fn default() -> Self {
-        SaveAs::Auto
-    }
 }
 
 impl SaveAs {

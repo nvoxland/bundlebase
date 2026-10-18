@@ -92,6 +92,7 @@ pub(crate) fn stream_from_temp_file(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rstest::rstest;

@@ -73,7 +73,7 @@ impl Operation for SaveConfigOp {
 
     fn describe(&self) -> String {
         let is_secure = crate::bundle_config::BundleConfig::get_config_key(&self.scope, &self.key)
-            .map_or(false, |spec| spec.secure);
+            .is_some_and(|spec| spec.secure);
         let display_value = if is_secure { "*****" } else { &self.value };
         format!(
             "SAVE CONFIG [{}]: {} = {}",
@@ -83,6 +83,7 @@ impl Operation for SaveConfigOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

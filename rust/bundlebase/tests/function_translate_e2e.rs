@@ -8,15 +8,13 @@
 //! Mirrors the existing `col_<id>` invariant for columns.
 
 use arrow::datatypes::DataType;
-use bundlebase::bundle::function_entry::{
-    internal_function_name, FunctionEntry, FunctionKind,
-};
+use bundlebase::bundle::function_entry::{internal_function_name, FunctionEntry, FunctionKind};
 use bundlebase::bundle::BundleFacade;
-use bundlebase_common::namespaced_name::NamespacedName;
-use bundlebase_common::platform::Platform;
-use bundlebase::test_utils::random_memory_url;
 use bundlebase::bundle::UdfRuntime;
+use bundlebase::test_utils::random_memory_url;
+use bundlebase_common::namespaced_name::NamespacedName;
 use bundlebase_common::object_id::ObjectId;
+use bundlebase_common::platform::Platform;
 use bundlebase_common::BundlebaseError;
 use datafusion::execution::FunctionRegistry as DfFunctionRegistry;
 
@@ -53,7 +51,10 @@ async fn test_function_registers_under_fn_internal_name() -> Result<(), Bundleba
 
     let internal = internal_function_name(&id);
     let ctx = builder.bundle().ctx();
-    assert!(ctx.udf(&internal).is_ok(), "fn_<id> registered with DataFusion");
+    assert!(
+        ctx.udf(&internal).is_ok(),
+        "fn_<id> registered with DataFusion"
+    );
     assert!(
         ctx.udf("acme.foo").is_err(),
         "user-visible name must not leak to DataFusion"
@@ -127,7 +128,10 @@ async fn test_rename_function_is_metadata_only() -> Result<(), BundlebaseError> 
 
     // Old name no longer translates (and isn't registered with DataFusion either).
     let translated_old = builder.translate_sql("SELECT acme.foo(x)");
-    assert!(translated_old.contains("acme.foo("), "old name shouldn't map");
+    assert!(
+        translated_old.contains("acme.foo("),
+        "old name shouldn't map"
+    );
 
     Ok(())
 }

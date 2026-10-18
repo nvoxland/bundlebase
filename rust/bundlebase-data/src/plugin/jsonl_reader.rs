@@ -138,7 +138,7 @@ impl DataReader for JsonlReader {
         // over the per-row cost of a wider schema. Lines are processed as
         // chunks arrive — the file is never buffered whole (bb-xn0.2).
         let store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
         let result = store
             .get_opts(&path, object_store::GetOptions::default())
             .await?;
@@ -201,7 +201,12 @@ impl DataReader for JsonlReader {
             let mut consumed = 0usize;
             while let Some(nl_rel) = memchr::memchr(b'\n', &pending[consumed..]) {
                 let line_end = consumed + nl_rel;
-                collect_line_keys(&pending[consumed..line_end], &mut keys, &mut seen, &mut saw_object);
+                collect_line_keys(
+                    &pending[consumed..line_end],
+                    &mut keys,
+                    &mut seen,
+                    &mut saw_object,
+                );
                 consumed = line_end + 1;
             }
             pending.drain(..consumed);
@@ -246,12 +251,12 @@ impl DataReader for JsonlReader {
                 LineOrientedFormat::JsonLines,
             )
             .await
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
 
             let schema = self
                 .read_schema()
                 .await
-                .map_err(|e| DataFusionError::External(e))?
+                .map_err(DataFusionError::External)?
                 .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
             return Ok(Arc::new(PageMapDataSource::new(
@@ -269,7 +274,7 @@ impl DataReader for JsonlReader {
         let schema = self
             .read_schema()
             .await
-            .map_err(|e| DataFusionError::External(e))?
+            .map_err(DataFusionError::External)?
             .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
         let source = crate::streaming_jsonl_data_source::StreamingJsonlDataSource::new(
@@ -291,7 +296,7 @@ impl DataReader for JsonlReader {
         // for a file whose full scan would error (bb-dvo.1). Parsing every
         // line to reconcile would defeat the streaming-COUNT fast path; for
         // well-formed JSONL the count matches the scan exactly (bb-nt8).
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
         let stats = crate::page_map::line_oriented_statistics(
             &self.inner.object_store(),
             &path,
@@ -319,7 +324,7 @@ impl DataReader for JsonlReader {
         use std::collections::HashMap;
 
         let object_store = self.inner.object_store();
-        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let path = self.inner.file().store_path().clone();
 
         // Get column names from the schema for name→idx mapping
         // Use self.read_schema() (not self.inner) to get the fallback-aware schema
@@ -389,7 +394,6 @@ impl DataReader for JsonlReader {
         if !pending.is_empty() {
             process_stats_line(&pending.clone());
         }
-        drop(process_stats_line);
 
         let column_stats = builder.finish(initial_layout.file_size);
 
@@ -398,7 +402,9 @@ impl DataReader for JsonlReader {
             column_stats,
             ..initial_layout
         };
-        Ok(Some(crate::page_map::write_layout(&layout, data_dir).await?))
+        Ok(Some(
+            crate::page_map::write_layout(&layout, data_dir).await?,
+        ))
     }
 
     async fn data_source_filtered_pages(
@@ -761,10 +767,7 @@ mod tests {
     }
 
     /// Write JSONL content to a memory-store file and return the file handle.
-    async fn write_jsonl(
-        path: &str,
-        content: &str,
-    ) -> Result<ObjectStoreFile, BundlebaseError> {
+    async fn write_jsonl(path: &str, content: &str) -> Result<ObjectStoreFile, BundlebaseError> {
         use bundlebase_io::file::IOReadWriteFile;
         let url = Url::parse(path)?;
         let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
@@ -1033,8 +1036,10 @@ mod tests {
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
         // Modify the source file after the reader captured the expected version.
-        file.write(bytes::Bytes::from_static(b"{\"id\":\"9\"}\n{\"id\":\"8\"}\n"))
-            .await?;
+        file.write(bytes::Bytes::from_static(
+            b"{\"id\":\"9\"}\n{\"id\":\"8\"}\n",
+        ))
+        .await?;
 
         let alias = crate::ObjectIdAlias::from(1u16);
         let row_ids = vec![RowId::new(alias, 0)];

@@ -125,8 +125,12 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "ALTER METRIC" => Some(include_str!("../syntax/alter_metric.md")),
         "ALTER SEMANTIC MODEL" => Some(include_str!("../syntax/alter_semantic_model.md")),
         "ALTER DATASET" => Some(include_str!("../syntax/alter_dataset.md")),
-        "DECLARE PRIMARY KEY" | "DECLARE UNIQUE KEY" | "DROP PRIMARY KEY" | "DROP UNIQUE KEY" => Some(include_str!("../syntax/semantic_keys.md")),
-        "SHOW SEMANTIC MODEL" | "EXPORT SEMANTIC MODEL" | "IMPORT SEMANTIC MODEL" => Some(include_str!("../syntax/semantic_model.md")),
+        "DECLARE PRIMARY KEY" | "DECLARE UNIQUE KEY" | "DROP PRIMARY KEY" | "DROP UNIQUE KEY" => {
+            Some(include_str!("../syntax/semantic_keys.md"))
+        }
+        "SHOW SEMANTIC MODEL" | "EXPORT SEMANTIC MODEL" | "IMPORT SEMANTIC MODEL" => {
+            Some(include_str!("../syntax/semantic_model.md"))
+        }
         "ATTACH" => Some(include_str!("../syntax/attach.md")),
         "DETACH" => Some(include_str!("../syntax/detach.md")),
         "FILTER" => Some(include_str!("../syntax/filter.md")),

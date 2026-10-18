@@ -6,6 +6,7 @@
 pub use bundlebase_common::io_dir::{IOReadDir, IOReadWriteDir, WriteResult};
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::test_utils::random_memory_dir;
 

@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase_command::BundleBuilderExt;

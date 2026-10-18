@@ -68,11 +68,11 @@ impl Operation for DeleteOp {
         let data_dir = bundle.data_dir();
         let tomb_file = data_dir
             .file(&self.tombstone)
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
         let bytes = tomb_file
             .read_bytes()
             .await
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
 
         let bytes = bytes.ok_or_else(|| {
             DataFusionError::Execution(format!("DELETE Puffin file not found: {}", self.tombstone))

@@ -253,7 +253,12 @@ mod tests {
         }
 
         fn file_content(&self, path: &str) -> Option<Vec<u8>> {
-            self.state.lock().expect("mock lock").files.get(path).cloned()
+            self.state
+                .lock()
+                .expect("mock lock")
+                .files
+                .get(path)
+                .cloned()
         }
 
         fn file_paths(&self) -> Vec<String> {
@@ -302,9 +307,8 @@ mod tests {
                 state.files.get(&self.path).cloned()
             };
             Ok(content.map(|bytes| {
-                Box::pin(futures::stream::once(async move {
-                    Ok(Bytes::from(bytes))
-                })) as BoxStream<'static, Result<Bytes, BundlebaseError>>
+                Box::pin(futures::stream::once(async move { Ok(Bytes::from(bytes)) }))
+                    as BoxStream<'static, Result<Bytes, BundlebaseError>>
             }))
         }
 
@@ -421,7 +425,9 @@ mod tests {
         }
     }
 
-    fn chunk_stream(chunks: Vec<&'static [u8]>) -> BoxStream<'static, Result<Bytes, std::io::Error>> {
+    fn chunk_stream(
+        chunks: Vec<&'static [u8]>,
+    ) -> BoxStream<'static, Result<Bytes, std::io::Error>> {
         Box::pin(futures::stream::iter(
             chunks.into_iter().map(|c| Ok(Bytes::from_static(c))),
         ))
@@ -485,7 +491,10 @@ mod tests {
         // Final layout: <2-char prefix>/<hash[2..16]>.<ext> with the content
         let hash = expected_hash(b"content");
         let final_path = format!("{}/{}.block.parquet", &hash[..2], &hash[2..16]);
-        assert_eq!(dir.file_content(&final_path).as_deref(), Some(&b"content"[..]));
+        assert_eq!(
+            dir.file_content(&final_path).as_deref(),
+            Some(&b"content"[..])
+        );
         assert_eq!(dir.file_paths(), vec![final_path.clone()]);
         assert!(result.file.url().as_str().ends_with(&final_path));
     }

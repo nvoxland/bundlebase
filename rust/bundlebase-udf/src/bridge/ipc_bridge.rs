@@ -168,14 +168,12 @@ impl SyncSubprocessHandle {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to spawn IPC function process '{}': {}",
-                    command[0], e
-                )
-            })?;
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "Failed to spawn IPC function process '{}': {}",
+                command[0], e
+            )
+        })?;
 
         let stdin = child
             .stdin
@@ -1198,11 +1196,8 @@ mod tests {
         use arrow::array::Int64Array;
 
         let batch = |vals: Vec<i64>| {
-            RecordBatch::try_from_iter(vec![(
-                "r",
-                Arc::new(Int64Array::from(vals)) as ArrayRef,
-            )])
-            .unwrap()
+            RecordBatch::try_from_iter(vec![("r", Arc::new(Int64Array::from(vals)) as ArrayRef)])
+                .unwrap()
         };
 
         // Single batch with the expected row count.

@@ -75,6 +75,19 @@ See [scripts/README.md](../scripts/README.md) for technical details.
 
 ### Step 4: Verify All Tests Pass
 
+Run the workspace formatting and lint gates before the test suite. CI uses the
+same commands, including test, example, and benchmark targets:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --profile test -- -D warnings
+```
+
+Production code retains the crate-level ban on `unwrap()`. Unit-test modules
+may allow `clippy::unwrap_used` locally for assertions and fixture setup, as
+per the test exception in the code review guide. Keep intentional architectural
+lint exceptions narrow and document their rationale at the declaration.
+
 ```bash
 # Test Rust code
 cargo test --profile test

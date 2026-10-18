@@ -358,6 +358,7 @@ impl BundlebaseFlightSqlService {
 
     /// Run one idle-session sweep with the given timeout (the background
     /// cleanup task does the same with `SESSION_IDLE_TIMEOUT`).
+    #[cfg(test)]
     fn sweep_idle_sessions(&self, idle_timeout: std::time::Duration) -> usize {
         sweep_idle_sessions(&self.sessions, &self.expired_tokens, idle_timeout)
     }
@@ -974,7 +975,7 @@ fn encode_schema(schema: &SchemaRef) -> Result<Bytes, Status> {
         .try_with_schema(schema)
         .map_err(|e| Status::internal(format!("Failed to encode schema: {}", e)))?;
 
-    Ok(Bytes::from(flight_info.schema))
+    Ok(flight_info.schema)
 }
 
 #[cfg(test)]

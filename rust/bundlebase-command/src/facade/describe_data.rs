@@ -237,7 +237,7 @@ async fn load_column_stats(
     }
 
     let packs = facade.packs();
-    for (_, pack) in &packs {
+    for pack in packs.values() {
         for block in pack.blocks() {
             let all_stats = match block.reader().column_stats().await {
                 Ok(s) if !s.is_empty() => s,

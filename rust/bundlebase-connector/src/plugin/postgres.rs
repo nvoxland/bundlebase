@@ -891,8 +891,7 @@ mod tests {
         };
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("expected error")
+            .expect_err("expected error")
             .to_string()
             .contains("PostgreSQL"));
     }
@@ -931,7 +930,7 @@ mod tests {
 
         let result = func.validate_args(&args);
         assert!(result.is_err(), "a password in the url must be rejected");
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(
             err.contains("password"),
             "error should explain the password rule: {err}"

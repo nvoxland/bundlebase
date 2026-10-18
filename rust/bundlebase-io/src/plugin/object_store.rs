@@ -17,8 +17,8 @@ use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fmt::{Debug, Display};
 use std::env::current_dir;
+use std::fmt::{Debug, Display};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use url::Url;
@@ -262,13 +262,16 @@ impl ObjectStoreFile {
     }
 
     /// Creates a file from the passed string.
-    /// The string can be either a URL or a path relative to the passed base_dir.
+    /// Absolute filesystem paths are local files; relative paths use the base directory.
+    /// Explicit URLs keep their protocol and location.
     pub fn from_str(
         path: &str,
         base: &dyn IOReadDir,
         config: Arc<dyn ConfigProvider>,
     ) -> Result<ObjectStoreFile, BundlebaseError> {
-        if path.contains(":") {
+        if std::path::Path::new(path).is_absolute() {
+            Self::from_url(&file_url(path)?, config)
+        } else if path.contains(":") {
             // Absolute URL - use provided config
             Self::from_url(&Url::parse(path)?, config)
         } else {
@@ -816,6 +819,7 @@ impl IOFactory for ObjectStoreIOFactory {
 // ============================================================================
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::test_utils::random_memory_file;
@@ -949,9 +953,7 @@ mod tests {
     #[case::memory(false)]
     #[tokio::test]
     async fn test_dir_write_stream_content_addresses(#[case] local: bool) {
-        use bundlebase_common::content_address::{
-            ContentAddress, ContentCategory, ContentFormat,
-        };
+        use bundlebase_common::content_address::{ContentAddress, ContentCategory, ContentFormat};
 
         let _temp_guard;
         let url = if local {
@@ -966,8 +968,7 @@ mod tests {
             ))
             .expect("static url")
         };
-        let dir = ObjectStoreDir::from_url(&url, crate::test_utils::test_config())
-            .expect("dir");
+        let dir = ObjectStoreDir::from_url(&url, crate::test_utils::test_config()).expect("dir");
 
         let address = ContentAddress::new(ContentCategory::Block, ContentFormat::Parquet);
         let result = IOReadWriteDir::write_stream(
@@ -1200,7 +1201,10 @@ mod tests {
             .args(["hash-object", path.to_str().unwrap()])
             .output()
             .unwrap();
-        let expected_oid = String::from_utf8(expected.stdout).unwrap().trim().to_string();
+        let expected_oid = String::from_utf8(expected.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(version, expected_oid);
     }
 
@@ -1232,7 +1236,10 @@ mod tests {
             .args(["hash-object", path.to_str().unwrap()])
             .output()
             .unwrap();
-        let oid = String::from_utf8(oid_output.stdout).unwrap().trim().to_string();
+        let oid = String::from_utf8(oid_output.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
         assert_ne!(
             version, oid,
             "git lookup must not happen when system.git_versioning is off"

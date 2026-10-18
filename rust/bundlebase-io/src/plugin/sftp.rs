@@ -34,13 +34,13 @@ struct SshHandler;
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
-    fn check_server_key(
+    async fn check_server_key(
         &mut self,
         _server_public_key: &PublicKeyOrCertificate,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+    ) -> Result<bool, Self::Error> {
         // Accept all host keys for now
         // TODO: Add known_hosts verification support
-        async { Ok(true) }
+        Ok(true)
     }
 }
 
@@ -556,6 +556,7 @@ impl IOFactory for SftpIOFactory {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -217,6 +217,6 @@ async fn test_count_star_with_where_correct() -> Result<(), BundlebaseError> {
         .downcast_ref::<arrow::array::Int64Array>()
         .expect("Int64");
     let cnt = col.value(0);
-    assert!(cnt >= 0 && cnt <= 100);
+    assert!((0..=100).contains(&cnt));
     Ok(())
 }

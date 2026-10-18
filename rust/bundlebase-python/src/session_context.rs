@@ -33,11 +33,9 @@ impl PySessionContext {
             )?;
             let mut record_batches = Vec::new();
             while let Some(batch) = futures::StreamExt::next(&mut stream).await {
-                record_batches.push(batch.map_err(
-                    |e: datafusion::error::DataFusionError| {
-                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
-                    },
-                )?);
+                record_batches.push(batch.map_err(|e: datafusion::error::DataFusionError| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
+                })?);
             }
 
             Python::attach(|py| -> PyResult<Py<PyAny>> {

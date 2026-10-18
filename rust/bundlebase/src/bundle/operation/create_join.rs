@@ -34,7 +34,7 @@ impl CreateJoinOp {
 
 impl Operation for CreateJoinOp {
     fn describe(&self) -> String {
-        format!("CREATE JOIN '{}' ON {}", &self.name, &self.expression)
+        format!("CREATE JOIN '{}' ON {}", self.name, self.expression)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -60,6 +60,7 @@ impl Operation for CreateJoinOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     #[test]

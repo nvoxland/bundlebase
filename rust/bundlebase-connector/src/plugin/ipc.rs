@@ -344,6 +344,12 @@ pub struct IpcConnector {
     handle: tokio::sync::Mutex<Option<SubprocessHandle>>,
 }
 
+impl Default for IpcConnector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IpcConnector {
     /// Create a new IpcConnector (no subprocess spawned yet).
     pub fn new() -> Self {

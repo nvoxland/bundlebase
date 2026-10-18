@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn test_logging_tracker_clone() {
         let tracker1 = LoggingTracker::new();
-        let tracker2 = tracker1.clone();
+        let tracker2 = tracker1;
 
         let id = tracker1.start("Test", Some(100));
         tracker1.finish(id);

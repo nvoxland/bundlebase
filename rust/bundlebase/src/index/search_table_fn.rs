@@ -25,11 +25,11 @@ use arrow::array::{Float64Array, RecordBatch, UInt64Array};
 use arrow::compute;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
+use datafusion::catalog::streaming::StreamingTable;
 use datafusion::catalog::{Session, TableFunctionImpl, TableProvider};
 use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::{project_schema, Statistics};
 use datafusion::datasource::source::{DataSource, DataSourceExec};
-use datafusion::datasource::MemTable;
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
@@ -38,10 +38,10 @@ use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use datafusion::physical_plan::streaming::PartitionStream;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use futures::stream::{self, StreamExt};
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -524,11 +524,11 @@ impl TableProvider for SearchResultTableProvider {
                     self.data_dir.as_ref(),
                     self.config.clone(),
                 )
-                .map_err(|e| DataFusionError::External(e))?;
+                .map_err(DataFusionError::External)?;
                 let index_bytes = index_file
                     .read_bytes()
                     .await
-                    .map_err(|e| DataFusionError::External(e))?
+                    .map_err(DataFusionError::External)?
                     .ok_or_else(|| {
                         DataFusionError::Execution(format!(
                             "Text index file not found: {}",
@@ -545,7 +545,7 @@ impl TableProvider for SearchResultTableProvider {
             &rewritten_query,
             search_limit,
         )
-        .map_err(|e| DataFusionError::External(e))?;
+        .map_err(DataFusionError::External)?;
 
         for hit in hits {
             // hit.pass_idx indexes into per_entry, so we know exactly which
@@ -606,7 +606,6 @@ impl TableProvider for SearchResultTableProvider {
         let projected_schema = project_schema(&output_schema, projection)?;
 
         let data_source = SearchDataSource {
-            output_schema,
             physical_output_schema: self.physical_output_schema.clone(),
             projected_schema,
             projection: projection.cloned(),
@@ -694,9 +693,12 @@ impl SearchResultTableProvider {
             .iter()
             .map(bundle_schema::generate_internal_name)
             .collect();
-        let mut builder =
-            bundlebase_index::TextIndexBuilder::new(self.index_def.name(), &field_names, &tokenizer)
-                .map_err(DataFusionError::External)?;
+        let mut builder = bundlebase_index::TextIndexBuilder::new(
+            self.index_def.name(),
+            &field_names,
+            &tokenizer,
+        )
+        .map_err(DataFusionError::External)?;
         let mut docs = 0usize;
 
         for (&unified_ref, (block, rows)) in updated {
@@ -709,14 +711,16 @@ impl SearchResultTableProvider {
             if projection.is_empty() {
                 continue;
             }
-            let projected_ids: Vec<crate::object_id::ColumnId> = projection
-                .iter()
-                .map(|&p| block.column_ids()[p])
-                .collect();
+            let projected_ids: Vec<crate::object_id::ColumnId> =
+                projection.iter().map(|&p| block.column_ids()[p]).collect();
             let overlays = block.update_overlays();
             let mut stream = block
                 .reader()
-                .extract_rowids_stream(ObjectIdAlias::from(unified_ref), self.ctx.clone(), Some(&projection))
+                .extract_rowids_stream(
+                    ObjectIdAlias::from(unified_ref),
+                    self.ctx.clone(),
+                    Some(&projection),
+                )
                 .await
                 .map_err(DataFusionError::External)?;
             while let Some(batch_result) = stream.next().await {
@@ -770,7 +774,9 @@ impl SearchResultTableProvider {
             return Ok(Vec::new());
         }
         let index = builder.finish().map_err(DataFusionError::External)?;
-        let hits = index.search(query, limit).map_err(DataFusionError::External)?;
+        let hits = index
+            .search(query, limit)
+            .map_err(DataFusionError::External)?;
         Ok(hits
             .into_iter()
             .map(|hit| (hit.row_id, hit.score as f64))
@@ -793,9 +799,8 @@ impl SearchResultTableProvider {
 /// The Tantivy search phase (producing `score_map`) completes in `scan()`,
 /// but the data-fetching phase is deferred to `open()` so rows are streamed
 /// rather than materialized into a `Vec<RecordBatch>`.
+#[derive(Clone)]
 struct SearchDataSource {
-    /// The final logical schema (operations applied + `_score`).
-    output_schema: SchemaRef,
     /// The raw physical schema (block columns + `_score`), before operations.
     physical_output_schema: SchemaRef,
     projected_schema: SchemaRef,
@@ -832,21 +837,14 @@ impl fmt::Display for SearchDataSource {
     }
 }
 
-impl DataSource for SearchDataSource {
-    fn open(
-        &self,
-        _partition: usize,
-        _context: Arc<TaskContext>,
-    ) -> datafusion::common::Result<SendableRecordBatchStream> {
-        let output_schema = self.output_schema.clone();
+impl SearchDataSource {
+    fn raw_stream(&self) -> SendableRecordBatchStream {
+        let schema = self.physical_output_schema.clone();
         let physical_output_schema = self.physical_output_schema.clone();
-        let projected_schema = self.projected_schema.clone();
         let score_map = self.score_map.clone();
         let block_id_to_ref = self.block_id_to_ref.clone();
         let ctx = self.ctx.clone();
-        let projection = self.projection.clone();
         let bundle_schema = self.bundle_schema.clone();
-        let operations = self.operations.clone();
 
         let matching_block_refs = self.matching_block_refs.clone();
 
@@ -863,57 +861,48 @@ impl DataSource for SearchDataSource {
             }
         }
 
-        // Check if any operations transform data (not just rename/drop schema changes)
-        let has_data_transforming_ops = operations.iter().any(|op| {
-            matches!(
-                op,
-                AnyOperation::AddColumn(_)
-                    | AnyOperation::CastColumn(_)
-                    | AnyOperation::DropCastColumn(_)
-                    | AnyOperation::Filter(_)
-            )
-        });
+        // Build a mapping from ColumnId → position in unified schema.
+        // With shared ColumnIds across blocks, we can align by ID directly.
+        let physical_col_ids = bundle_schema.physical_column_ids();
+        let num_physical_cols = physical_output_schema.fields().len() - 1;
+        let unified_id_to_pos: HashMap<crate::object_id::ColumnId, usize> = physical_col_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
 
-        // Build an async stream that collects raw batches, applies operations, then streams results
-        let result_stream = stream::once(async move {
-            // Step 1: Collect raw physical batches with scores from all matching blocks
-            let mut raw_batches: Vec<RecordBatch> = Vec::new();
+        let streams =
+            stream::iter(blocks_to_scan)
+                .map(move |(block, block_ref_idx)| {
+                    let ctx = ctx.clone();
+                    let score_map = score_map.clone();
+                    let physical_output_schema = physical_output_schema.clone();
+                    let unified_id_to_pos = unified_id_to_pos.clone();
+                    stream::once(async move {
+                        let reader = block.reader();
+                        let block_ref = ObjectIdAlias::from(block_ref_idx);
+                        // Block-level edit state: the raw reader below knows nothing of
+                        // tombstones or update overlays, and search output does not pass
+                        // through the scan-level appliers (bb-fqm.2).
+                        let deleted = block.deleted_rows();
+                        let overlays = block.update_overlays();
 
-            // Build a mapping from ColumnId → position in unified schema.
-            // With shared ColumnIds across blocks, we can align by ID directly.
-            let physical_col_ids = bundle_schema.physical_column_ids();
-            let num_physical_cols = physical_output_schema.fields().len() - 1;
-            let unified_id_to_pos: HashMap<crate::object_id::ColumnId, usize> = physical_col_ids
-                .iter()
-                .enumerate()
-                .map(|(i, id)| (*id, i))
-                .collect();
+                        // Build mapping: unified position → block column index (None if block lacks this column)
+                        let mut unified_to_block: Vec<Option<usize>> =
+                            vec![None; num_physical_cols];
+                        for (block_idx, col_id) in block.column_ids().iter().enumerate() {
+                            if let Some(&unified_pos) = unified_id_to_pos.get(col_id) {
+                                unified_to_block[unified_pos] = Some(block_idx);
+                            }
+                        }
 
-            for (block, block_ref_idx) in blocks_to_scan {
-                let reader = block.reader();
-                let block_ref = ObjectIdAlias::from(block_ref_idx);
-                // Block-level edit state: the raw reader below knows nothing of
-                // tombstones or update overlays, and search output does not pass
-                // through the scan-level appliers (bb-fqm.2).
-                let deleted = block.deleted_rows();
-                let overlays = block.update_overlays();
-
-                // Build mapping: unified position → block column index (None if block lacks this column)
-                let mut unified_to_block: Vec<Option<usize>> = vec![None; num_physical_cols];
-                for (block_idx, col_id) in block.column_ids().iter().enumerate() {
-                    if let Some(&unified_pos) = unified_id_to_pos.get(col_id) {
-                        unified_to_block[unified_pos] = Some(block_idx);
-                    }
-                }
-
-                let mut rowid_stream = reader
-                    .extract_rowids_stream(block_ref, ctx.clone(), None)
-                    .await
-                    .map_err(|e| DataFusionError::External(e))?;
-
-                while let Some(batch_result) = rowid_stream.next().await {
-                    let rowid_batch = batch_result.map_err(|e| DataFusionError::External(e))?;
-
+                        let rowid_stream = reader
+                            .extract_rowids_stream(block_ref, ctx.clone(), None)
+                            .await
+                            .map_err(DataFusionError::External)?;
+                        let column_ids = block.column_ids().to_vec();
+                        Ok::<_, DataFusionError>(rowid_stream.map(move |batch_result| {
+                    let rowid_batch = batch_result.map_err(DataFusionError::External)?;
                     let row_ids = &rowid_batch.row_ids;
                     // Apply update overlays to the batch VALUES (positions are
                     // untouched, so row_ids indexing below stays valid).
@@ -925,10 +914,10 @@ impl DataSource for SearchDataSource {
                         crate::bundle::update_overlay::UpdateOverlay::apply_to_batch(
                             &overlays,
                             &rowid_batch.batch,
-                            &block.column_ids(),
+                            &column_ids,
                             &row_numbers,
                         )
-                        .map_err(|e| DataFusionError::External(e))?
+                        .map_err(DataFusionError::External)?
                     };
                     let batch = &batch;
 
@@ -948,7 +937,7 @@ impl DataSource for SearchDataSource {
                     }
 
                     if matching_indices.is_empty() {
-                        continue;
+                        return Ok(None);
                     }
 
                     let num_matching = matching_indices.len();
@@ -991,100 +980,92 @@ impl DataSource for SearchDataSource {
                         RecordBatch::try_new(physical_output_schema.clone(), aligned_columns)
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
-                    raw_batches.push(result_batch);
-                }
-            }
-
-            if raw_batches.is_empty() {
-                // Return empty batch with the correct output schema
-                return Ok(stream::iter(
-                    Vec::<datafusion::common::Result<RecordBatch>>::new(),
-                ));
-            }
-
-            // Step 2: Apply operations to transform raw batches into logical output
-            let final_batches = if has_data_transforming_ops {
-                // Register raw batches as a "bundle" table and apply operations
-                let mut config = SessionConfig::new();
-                config.options_mut().sql_parser.enable_ident_normalization = false;
-                let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
-
-                let mem_table =
-                    MemTable::try_new(physical_output_schema.clone(), vec![raw_batches])?;
-                op_ctx.register_table("bundle", Arc::new(mem_table))?;
-                let mut df = op_ctx.table("bundle").await?;
-
-                // Apply each operation to transform the data
-                let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
-                let cast_active = resolve_cast_ops(&operations);
-                for (op, active) in operations.iter().zip(cast_active.iter()) {
-                    if *active {
-                        df = op
-                            .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
-                            .await
-                            .map_err(|e: crate::BundlebaseError| DataFusionError::External(e))?;
-                    }
-                }
-
-                // Final rename: internal names → user-visible names
-                df = bundle_schema
-                    .rename_to_real_names(df)
-                    .map_err(|e| DataFusionError::External(e))?;
-
-                let result_batches: Vec<RecordBatch> = df.collect().await?;
-
-                result_batches
-            } else {
-                // No data-transforming operations, just apply schema rename/drop
-                // by re-mapping the physical batches to use the logical schema
-                let mut result_batches = Vec::new();
-                for batch in raw_batches {
-                    let result_batch =
-                        RecordBatch::try_new(output_schema.clone(), batch.columns().to_vec())
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-                    result_batches.push(result_batch);
-                }
-                result_batches
-            };
-
-            // Step 3: Apply projection if specified
-            let projected_batches: Vec<datafusion::common::Result<RecordBatch>> = final_batches
-                .into_iter()
-                .map(|batch| {
-                    if let Some(ref proj) = projection {
-                        let projected_columns: Vec<_> =
-                            proj.iter().map(|&i| batch.column(i).clone()).collect();
-                        let proj_schema = Arc::new(
-                            output_schema
-                                .project(proj)
-                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
-                        );
-                        if proj.is_empty() {
-                            // `SELECT COUNT(*) FROM search('term')` lands here:
-                            // DataFusion's count plan asks for an empty
-                            // projection, and Arrow can't construct a 0-column
-                            // RecordBatch without an explicit row count. Use
-                            // try_new_with_options to preserve the row count
-                            // from the underlying batch.
-                            let opts = arrow::record_batch::RecordBatchOptions::new()
-                                .with_row_count(Some(batch.num_rows()));
-                            RecordBatch::try_new_with_options(proj_schema, projected_columns, &opts)
-                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
-                        } else {
-                            RecordBatch::try_new(proj_schema, projected_columns)
-                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
+                    Ok(Some(result_batch))
+                }).filter_map(|result| async move { result.transpose() }))
+                    })
+                    .flat_map(|result| match result {
+                        Ok(stream) => futures::future::Either::Left(stream),
+                        Err(error) => {
+                            futures::future::Either::Right(stream::once(async move { Err(error) }))
                         }
-                    } else {
-                        Ok(batch)
-                    }
+                    })
                 })
-                .collect();
+                .flatten();
+        Box::pin(RecordBatchStreamAdapter::new(schema, streams))
+    }
+}
 
-            Ok(stream::iter(projected_batches))
+#[derive(Debug)]
+struct SearchRawPartition(SearchDataSource);
+
+impl PartitionStream for SearchRawPartition {
+    fn schema(&self) -> &SchemaRef {
+        &self.0.physical_output_schema
+    }
+    fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+        self.0.raw_stream()
+    }
+}
+
+impl DataSource for SearchDataSource {
+    fn open(
+        &self,
+        _partition: usize,
+        _context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        let physical_output_schema = self.physical_output_schema.clone();
+        let projected_schema = self.projected_schema.clone();
+        let ctx = self.ctx.clone();
+        let projection = self.projection.clone();
+        let operations = self.operations.clone();
+
+        let source = self.clone();
+        let result_stream = stream::once(async move {
+            let mut config = SessionConfig::new();
+            config.options_mut().sql_parser.enable_ident_normalization = false;
+            let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
+            // Replay operations with the same functions used to plan their schema.
+            let state = ctx.state();
+            for udf in state.scalar_functions().values() {
+                op_ctx.register_udf(udf.as_ref().clone());
+            }
+            for udaf in state.aggregate_functions().values() {
+                op_ctx.register_udaf(udaf.as_ref().clone());
+            }
+            for udwf in state.window_functions().values() {
+                op_ctx.register_udwf(udwf.as_ref().clone());
+            }
+            let table = StreamingTable::try_new(
+                physical_output_schema.clone(),
+                vec![Arc::new(SearchRawPartition(source))],
+            )?;
+            op_ctx.register_table("bundle", Arc::new(table))?;
+            let mut df = op_ctx.table("bundle").await?;
+            let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
+            let cast_active = resolve_cast_ops(&operations);
+            for (op, active) in operations.iter().zip(cast_active.iter()) {
+                if *active {
+                    df = op
+                        .apply_dataframe(df, Arc::new(op_ctx.clone()), &mut bundle_schema)
+                        .await
+                        .map_err(DataFusionError::External)?;
+                }
+            }
+            df = bundle_schema
+                .rename_to_real_names(df)
+                .map_err(DataFusionError::External)?;
+            let final_stream = df.execute_stream().await?;
+            Ok::<_, DataFusionError>(final_stream.map(move |batch| {
+                let batch = batch?;
+                match &projection {
+                    Some(projection) => batch.project(projection).map_err(Into::into),
+                    None => Ok(batch),
+                }
+            }))
         })
         .flat_map(|result| match result {
-            Ok(batch_stream) => futures::future::Either::Left(batch_stream),
-            Err(e) => futures::future::Either::Right(stream::once(async move { Err(e) })),
+            Ok(stream) => futures::future::Either::Left(stream),
+            Err(error) => futures::future::Either::Right(stream::once(async move { Err(error) })),
         });
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(

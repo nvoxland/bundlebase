@@ -534,8 +534,6 @@ impl BundleBuilder {
         let manifest_dir = self.bundle.data_dir().writable_subdir(META_DIR)?;
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
-        let passed_config = Some((*self.bundle.config.passed_config()).clone());
-        let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
 
         if last_manifest_version == 0 {
@@ -1206,7 +1204,7 @@ impl BundleBuilder {
         // the just-applied AttachBlock/ReplaceBlock/DetachBlock lives
         // there and won't reach `status` until after this method returns.
         let mut all_ops: Vec<AnyOperation> = self.bundle.operations.read().clone();
-        all_ops.extend(self.status().operations().into_iter());
+        all_ops.extend(self.status().operations());
         let in_progress = self.in_progress_change.read();
         let in_progress_ops: &[AnyOperation] = in_progress
             .as_ref()
@@ -1263,16 +1261,13 @@ impl BundleBuilder {
         use crate::object_id::ColumnId;
 
         // Group blocks by (index_id, column_ids) for batching
-        let mut blocks_to_index: HashMap<(ObjectId, Vec<ColumnId>), Vec<(BlockId, String)>> =
-            HashMap::new();
+        type IndexGroup = (ObjectId, Vec<ColumnId>);
+        type VersionedBlocks = Vec<(BlockId, String)>;
+        let mut blocks_to_index: HashMap<IndexGroup, VersionedBlocks> = HashMap::new();
 
         // Collect index definitions before the loop to avoid holding the lock across awaits
         let index_defs: Vec<Arc<IndexDefinition>> =
             self.bundle.indexes.read().iter().cloned().collect();
-
-        // Use bundle's operations directly (not self.operations() which includes
-        // pending changes and would duplicate operations already applied to bundle)
-        let operations = self.bundle.operations.read().clone();
 
         for index_def in &index_defs {
             let index_id = index_def.id();
@@ -1331,7 +1326,7 @@ impl BundleBuilder {
     ///
     /// # Arguments
     /// * `pack` - The pack name: `None` or `"base"` for the base pack,
-    ///            otherwise a join name.
+    ///   otherwise a join name.
     ///
     /// # Returns
     /// * `Ok(ObjectId)` - The resolved pack ID
@@ -1569,6 +1564,7 @@ impl BundleFacade for BundleBuilder {
 // Due to Rust's dev-dependency type identity limitation, bundlebase-command extension traits
 // cannot be used in unit tests within the bundlebase crate itself.
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::bundle::commit::{list_manifest_files, sort_manifest_files};

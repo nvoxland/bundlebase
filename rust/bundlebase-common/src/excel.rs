@@ -65,7 +65,7 @@ pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, 
         .map(|c| {
             range
                 .get((0, c))
-                .map(|v| cell_to_string(v))
+                .map(cell_to_string)
                 .unwrap_or_else(|| format!("column_{}", c))
         })
         .collect();
@@ -74,13 +74,13 @@ pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, 
     let mut builders: Vec<StringBuilder> = (0..col_count).map(|_| StringBuilder::new()).collect();
 
     for row in 1..row_count {
-        for col in 0..col_count {
+        for (col, builder) in builders.iter_mut().enumerate() {
             match range.get((row, col)) {
                 Some(cell) if !matches!(cell, Data::Empty) => {
-                    builders[col].append_value(cell_to_string(cell));
+                    builder.append_value(cell_to_string(cell));
                 }
                 _ => {
-                    builders[col].append_null();
+                    builder.append_null();
                 }
             }
         }
@@ -105,8 +105,7 @@ pub fn excel_to_parquet(data: &[u8], sheet_name: Option<&str>) -> Result<Bytes, 
     {
         let props = parquet::file::properties::WriterProperties::builder()
             .set_compression(parquet::basic::Compression::ZSTD(
-                parquet::basic::ZstdLevel::try_new(3)
-                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+                parquet::basic::ZstdLevel::try_new(3).unwrap_or_default(),
             ))
             .build();
         let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))?;
@@ -155,7 +154,7 @@ mod tests {
     #[test]
     fn test_cell_to_string() {
         assert_eq!(cell_to_string(&Data::Int(42)), "42");
-        assert_eq!(cell_to_string(&Data::Float(3.14)), "3.14");
+        assert_eq!(cell_to_string(&Data::Float(2.75)), "2.75");
         assert_eq!(cell_to_string(&Data::Float(100.0)), "100");
         assert_eq!(cell_to_string(&Data::String("hello".to_string())), "hello");
         assert_eq!(cell_to_string(&Data::Bool(true)), "true");

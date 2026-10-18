@@ -82,6 +82,7 @@ fn active_cast_depth(ops: &[AnyOperation], id: bundlebase_common::object_id::Col
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use super::*;
     use crate::parser::parse_command;

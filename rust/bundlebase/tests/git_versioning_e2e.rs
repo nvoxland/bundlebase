@@ -217,8 +217,8 @@ async fn attach_errors_when_enabled_outside_git_repo() -> Result<(), BundlebaseE
 }
 
 #[tokio::test]
-async fn enabling_git_versioning_refreshes_existing_block_versions(
-) -> Result<(), BundlebaseError> {
+async fn enabling_git_versioning_refreshes_existing_block_versions() -> Result<(), BundlebaseError>
+{
     // The change hook for system.git_versioning must walk every attached
     // block and emit UpdateVersionOps so existing recorded versions
     // (mtime hashes) get replaced with git OIDs in the same commit.
@@ -271,8 +271,8 @@ async fn enabling_git_versioning_refreshes_existing_block_versions(
 }
 
 #[tokio::test]
-async fn disabling_git_versioning_refreshes_existing_block_versions(
-) -> Result<(), BundlebaseError> {
+async fn disabling_git_versioning_refreshes_existing_block_versions() -> Result<(), BundlebaseError>
+{
     // Symmetric to the enabling test: flipping the flag from on → off
     // must refresh recorded versions back to the storage-layer value
     // (mtime hash for local files), not leave stale git OIDs around.

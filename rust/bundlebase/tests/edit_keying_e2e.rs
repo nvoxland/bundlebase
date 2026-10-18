@@ -251,11 +251,7 @@ async fn test_update_skips_deleted_rows() -> Result<(), BundlebaseError> {
     let n = builder
         .run_command("update deleted row".to_string(), async {
             let n = builder
-                .evaluate_update_cols(
-                    std::slice::from_ref(&city),
-                    &["'GHOST'".to_string()],
-                    &wc,
-                )
+                .evaluate_update_cols(std::slice::from_ref(&city), &["'GHOST'".to_string()], &wc)
                 .await?;
             builder.flush_pending_updates_to_blocks()?;
             Ok(n)
@@ -338,7 +334,10 @@ async fn test_undo_after_several_edits_restores_prior_values() -> Result<(), Bun
 
     assert_eq!(city_of(builder.as_ref(), 2).await.as_deref(), Some("FIRST"));
     assert_eq!(city_of(builder.as_ref(), 3).await.as_deref(), Some("FIRST"));
-    assert_ne!(city_of(builder.as_ref(), 4).await.as_deref(), Some("SECOND"));
+    assert_ne!(
+        city_of(builder.as_ref(), 4).await.as_deref(),
+        Some("SECOND")
+    );
     assert_eq!(
         query_count(builder.as_ref(), "SELECT COUNT(*) FROM bundle").await,
         149,
@@ -347,8 +346,14 @@ async fn test_undo_after_several_edits_restores_prior_values() -> Result<(), Bun
 
     builder.commit("after undo").await?;
     let reopened = bundlebase::Bundle::open(&url, None).await?;
-    assert_eq!(city_of(reopened.as_ref(), 2).await.as_deref(), Some("FIRST"));
-    assert_ne!(city_of(reopened.as_ref(), 4).await.as_deref(), Some("SECOND"));
+    assert_eq!(
+        city_of(reopened.as_ref(), 2).await.as_deref(),
+        Some("FIRST")
+    );
+    assert_ne!(
+        city_of(reopened.as_ref(), 4).await.as_deref(),
+        Some("SECOND")
+    );
     assert_eq!(
         query_count(reopened.as_ref(), "SELECT COUNT(*) FROM bundle").await,
         149

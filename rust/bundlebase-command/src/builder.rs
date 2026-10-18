@@ -13,7 +13,9 @@ mod create_index;
 mod create_report;
 mod create_source;
 mod create_view;
+mod define_metric;
 mod delete;
+mod describe_column;
 mod detach_block;
 mod drop_always_delete;
 mod drop_always_update;
@@ -23,6 +25,7 @@ mod drop_connector;
 mod drop_function;
 mod drop_index;
 mod drop_join;
+mod drop_metric;
 mod drop_report;
 mod drop_view;
 mod export_empty;
@@ -35,9 +38,6 @@ mod join;
 mod normalize_column_names;
 mod rebuild_index;
 mod reindex;
-mod define_metric;
-mod describe_column;
-mod drop_metric;
 mod rename_column;
 mod rename_connector;
 mod rename_function;
@@ -62,7 +62,9 @@ pub use create_index::CreateIndexCommand;
 pub use create_report::CreateReportCommand;
 pub use create_source::CreateSourceCommand;
 pub use create_view::CreateViewCommand;
+pub use define_metric::DefineMetricCommand;
 pub use delete::DeleteCommand;
+pub use describe_column::DescribeColumnCommand;
 pub use detach_block::DetachBlockCommand;
 pub use drop_always_delete::DropAlwaysDeleteCommand;
 pub use drop_always_update::DropAlwaysUpdateCommand;
@@ -72,6 +74,7 @@ pub use drop_connector::DropConnectorCommand;
 pub use drop_function::DropFunctionCommand;
 pub use drop_index::DropIndexCommand;
 pub use drop_join::DropJoinCommand;
+pub use drop_metric::DropMetricCommand;
 pub use drop_report::DropReportCommand;
 pub use drop_view::DropViewCommand;
 pub use export_empty::ExportEmptyCommand;
@@ -84,9 +87,6 @@ pub use join::JoinCommand;
 pub use normalize_column_names::NormalizeColumnNamesCommand;
 pub use rebuild_index::RebuildIndexCommand;
 pub use reindex::ReindexCommand;
-pub use define_metric::DefineMetricCommand;
-pub use describe_column::DescribeColumnCommand;
-pub use drop_metric::DropMetricCommand;
 pub use rename_column::RenameColumnCommand;
 pub use rename_connector::RenameConnectorCommand;
 pub use rename_function::RenameFunctionCommand;
@@ -121,13 +121,13 @@ pub(crate) fn extract_json_opts(
 }
 
 mod alter_semantics;
-mod semantic_keys;
 mod import_semantic_model;
+mod semantic_keys;
 pub use alter_semantics::{
     AlterColumnCommand, AlterDatasetCommand, AlterMetricCommand, AlterSemanticModelCommand,
     SemanticPropertyChange,
 };
+pub use import_semantic_model::ImportSemanticModelCommand;
 pub use semantic_keys::{
     DeclarePrimaryKeyCommand, DeclareUniqueKeyCommand, DropPrimaryKeyCommand, DropUniqueKeyCommand,
 };
-pub use import_semantic_model::ImportSemanticModelCommand;

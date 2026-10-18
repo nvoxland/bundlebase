@@ -117,8 +117,8 @@ fn describe_expected(positives: &[Rule]) -> Option<String> {
     } else if labels.len() == 1 {
         Some(labels[0].to_string())
     } else {
-        let last = labels.pop().unwrap();
-        Some(format!("{}, or {}", labels.join(", "), last))
+        let (last, others) = labels.split_last()?;
+        Some(format!("{}, or {}", others.join(", "), last))
     }
 }
 
@@ -167,9 +167,9 @@ pub fn extract_string_content(quoted: &str) -> Result<String, BundlebaseError> {
     }
 
     // Remove surrounding quotes
-    let content = if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
-        &trimmed[1..trimmed.len() - 1]
-    } else if trimmed.starts_with('"') && trimmed.ends_with('"') {
+    let content = if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
         &trimmed[1..trimmed.len() - 1]
     } else {
         return Err(format!("Invalid quoted string: {}", quoted).into());
@@ -260,11 +260,7 @@ pub fn is_command_statement(sql: &str) -> bool {
 
 /// Extract the first keyword from a SQL string.
 pub fn first_keyword(sql: &str) -> String {
-    sql.trim()
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_uppercase()
+    sql.split_whitespace().next().unwrap_or("").to_uppercase()
 }
 
 /// Returns all statement keywords that indicate a bundlebase command.
@@ -330,6 +326,7 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use super::*;
 

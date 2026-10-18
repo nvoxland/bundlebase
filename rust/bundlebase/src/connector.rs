@@ -268,7 +268,7 @@ mod tests {
 
         let result = validate_connector_args(func.as_ref(), &args);
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("does not accept argument 'invalid_arg'"));
         assert!(err.contains("Valid arguments:"));
         assert!(err.contains("url (required)"));
@@ -283,7 +283,7 @@ mod tests {
 
         let result = validate_connector_args(func.as_ref(), &args);
         assert!(result.is_err());
-        let err = result.err().expect("expected error").to_string();
+        let err = result.expect_err("expected error").to_string();
         assert!(err.contains("requires a 'url' argument"));
         assert!(err.contains("Valid arguments:"));
     }
@@ -438,8 +438,7 @@ mod tests {
         let result = SaveAs::Copy.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("err")
+            .expect_err("err")
             .to_string()
             .contains("not valid for format"));
     }
@@ -473,8 +472,7 @@ mod tests {
         let result = SaveAs::Ref.resolve(&SourceFormat::Csv, true);
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("err")
+            .expect_err("err")
             .to_string()
             .contains("requires data to be copied"));
     }
@@ -484,8 +482,7 @@ mod tests {
         let result = SaveAs::Ref.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("err")
+            .expect_err("err")
             .to_string()
             .contains("not valid for format"));
     }

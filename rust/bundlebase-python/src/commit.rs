@@ -28,11 +28,7 @@ impl PyCommit {
 
     #[getter]
     fn changes(&self) -> Vec<PyChange> {
-        self.inner
-            .changes
-            .iter()
-            .map(|change| PyChange::from_rust(change))
-            .collect()
+        self.inner.changes.iter().map(PyChange::from_rust).collect()
     }
 
     #[getter]

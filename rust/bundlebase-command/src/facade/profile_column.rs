@@ -234,7 +234,7 @@ async fn try_profile_from_stats(
 
     // Sort by count descending, take top 10
     let mut entries: Vec<(String, u64)> = merged.into_iter().collect();
-    entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
     entries.truncate(10);
 
     let mut values: Vec<Option<String>> = entries.iter().map(|(v, _)| Some(v.clone())).collect();
@@ -249,6 +249,7 @@ async fn try_profile_from_stats(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Test setup and assertions may panic on failure.
 mod tests {
     use super::*;
     use crate::parser::parse_command;

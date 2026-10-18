@@ -553,8 +553,8 @@ impl FunctionRegistry {
     fn deregister_by_user_name(&self, name: &str) {
         if let Some(id) = self.name_to_internal_id.get(name) {
             let internal = internal_function_name(id);
-            let _ = self.ctx.deregister_udf(&internal);
-            let _ = self.ctx.deregister_udaf(&internal);
+            self.ctx.deregister_udf(&internal);
+            self.ctx.deregister_udaf(&internal);
         }
     }
 

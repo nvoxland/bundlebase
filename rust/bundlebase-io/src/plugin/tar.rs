@@ -123,13 +123,12 @@ impl TarObjectStore {
         let mut archive = Archive::new(file);
         let mut entries = HashMap::new();
 
-        for (_i, entry_result) in archive
+        for entry_result in archive
             .entries()
             .map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
                 source: Box::new(e),
             })?
-            .enumerate()
         {
             let entry = entry_result.map_err(|e| object_store::Error::Generic {
                 store: "TarObjectStore",
@@ -162,7 +161,7 @@ impl TarObjectStore {
                 .mtime()
                 .ok()
                 .and_then(|mtime| chrono::DateTime::from_timestamp(mtime as i64, 0))
-                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
+                .unwrap_or(chrono::DateTime::UNIX_EPOCH);
 
             let tar_entry = TarEntry {
                 offset: entry.raw_file_position(),
@@ -551,7 +550,7 @@ fn compute_offsets(
         // an extra 512-byte header plus the name (NUL-terminated) padded to a
         // block — BEFORE the real entry header. Skip it or every offset after
         // a long-named entry is shifted (bb-dvo.9).
-        let name_len = name.as_bytes().len() as u64;
+        let name_len = name.len() as u64;
         if name_len > 100 {
             offset += 512 + pad512(name_len + 1);
         }
@@ -1446,6 +1445,7 @@ impl Drop for StagedTempFile<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     #[tokio::test]
     async fn test_readonly_tar_offsets_with_gnu_long_names() {
@@ -1802,7 +1802,7 @@ mod tests {
         let url = Url::parse("tar+file:///home/user/data.tar/subdir/file.parquet").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
         assert!(
-            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/home/user/data.tar"))
+            matches!(location, TarArchiveLocation::Local(ref p) if p == std::path::Path::new("/home/user/data.tar"))
         );
         assert_eq!(internal_path, "subdir/file.parquet");
     }
@@ -1813,7 +1813,7 @@ mod tests {
         let url = Url::parse("tar+file:///data.tar/").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
         assert!(
-            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/data.tar"))
+            matches!(location, TarArchiveLocation::Local(ref p) if p == std::path::Path::new("/data.tar"))
         );
         assert_eq!(internal_path, "");
     }
@@ -1824,7 +1824,7 @@ mod tests {
         let url = Url::parse("tar+file:///archive.tar").unwrap();
         let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
         assert!(
-            matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/archive.tar"))
+            matches!(location, TarArchiveLocation::Local(ref p) if p == std::path::Path::new("/archive.tar"))
         );
         assert_eq!(internal_path, "");
     }

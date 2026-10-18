@@ -108,7 +108,13 @@ impl UdfEntrypoint for JavaRuntime {
         args: &datafusion::logical_expr::ScalarFunctionArgs,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<ColumnarValue> {
-        invoke_ipc_scalar_impl(name, &self.to_entrypoint_string(), function_name, args, subprocess_cache)
+        invoke_ipc_scalar_impl(
+            name,
+            &self.to_entrypoint_string(),
+            function_name,
+            args,
+            subprocess_cache,
+        )
     }
 
     fn create_accumulator(

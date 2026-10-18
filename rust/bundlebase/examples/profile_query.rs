@@ -12,9 +12,7 @@ use std::time::Instant;
 async fn main() -> Result<(), BundlebaseError> {
     bundlebase_catalog::init();
     let path = std::env::args().nth(1).ok_or_else(|| {
-        BundlebaseError::from(
-            "usage: profile_query <bundle_path> [sql] [iters]".to_string(),
-        )
+        BundlebaseError::from("usage: profile_query <bundle_path> [sql] [iters]".to_string())
     })?;
     let sql = std::env::args()
         .nth(2)

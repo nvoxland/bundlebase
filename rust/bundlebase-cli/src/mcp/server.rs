@@ -6,7 +6,6 @@
 use bundlebase::{Bundle, BundleBuilder, BundleFacade};
 use bundlebase_common::progress::run_with_tracker;
 use bundlebase_common::BundlebaseError;
-use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars;
@@ -163,7 +162,6 @@ pub struct UpgradeBundleParams {
 #[derive(Clone)]
 pub struct BundlebaseMcpServer {
     bundles: Arc<Mutex<HashMap<String, Arc<dyn BundleFacade>>>>,
-    tool_router: ToolRouter<Self>,
 }
 
 impl BundlebaseMcpServer {
@@ -189,7 +187,6 @@ impl BundlebaseMcpServer {
     pub fn new(bundles: HashMap<String, Arc<dyn BundleFacade>>) -> Self {
         Self {
             bundles: Arc::new(Mutex::new(bundles)),
-            tool_router: Self::tool_router(),
         }
     }
 

@@ -162,9 +162,7 @@ async fn copy_bundled_runtime_files(
     for file_path in paths {
         // Skip absolute / parent-relative paths — those reference files
         // outside the bundle and aren't ours to copy.
-        if file_path.starts_with('/')
-            || file_path.starts_with("./")
-            || file_path.starts_with("../")
+        if file_path.starts_with('/') || file_path.starts_with("./") || file_path.starts_with("../")
         {
             continue;
         }

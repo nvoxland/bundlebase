@@ -40,15 +40,10 @@ impl ReaderPlugin for BundlebasePlugin {
         // Compound scheme: bundle+s3://bucket/key -> s3://bucket/key
         // Filesystem:      bundle:///path/to/dir   -> /path/to/dir
         // Also accepts "bundlebase" as an alias for "bundle"
-        let target_path = if source.starts_with("bundle+") {
-            &source["bundle+".len()..]
-        } else if source.starts_with("bundlebase+") {
-            &source["bundlebase+".len()..]
-        } else if source.starts_with("bundle://") {
-            &source["bundle://".len()..]
-        } else if source.starts_with("bundlebase://") {
-            &source["bundlebase://".len()..]
-        } else {
+        let target_path = ["bundle+", "bundlebase+", "bundle://", "bundlebase://"]
+            .iter()
+            .find_map(|prefix| source.strip_prefix(*prefix));
+        let Some(target_path) = target_path else {
             return Ok(None);
         };
         if target_path.is_empty() {

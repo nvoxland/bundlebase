@@ -1,4 +1,3 @@
-use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
 use bundlebase_command::BundleBuilderExt;
@@ -31,7 +30,7 @@ async fn test_attach() -> Result<(), BundlebaseError> {
     init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     let full_path = test_datafile("userdata.parquet");
-    bundle.attach(&full_path, None).await?;
+    bundle.attach(full_path, None).await?;
 
     assert_eq!(1000, bundle.bundle().num_rows().await?);
 

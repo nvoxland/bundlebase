@@ -306,8 +306,7 @@ mod tests {
         let result = func.validate_args(&args);
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("expected error")
+            .expect_err("expected error")
             .to_string()
             .contains("Invalid URL"));
     }
@@ -350,8 +349,7 @@ mod tests {
         };
         assert!(result.is_err());
         assert!(result
-            .err()
-            .expect("expected error")
+            .expect_err("expected error")
             .to_string()
             .contains("requires a 'url' argument"));
     }

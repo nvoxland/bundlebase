@@ -2,7 +2,7 @@
 //!
 //! These are bundlebase-level settings not specific to any storage provider.
 
-use crate::config::{ConfigKey, ConfigScope, Scope};
+use crate::config::{ConfigKey, ConfigScope};
 use crate::{config_keys, config_scopes, BundlebaseError, ConfigProvider};
 
 config_scopes!(system_scopes, {

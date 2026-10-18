@@ -195,11 +195,11 @@ fn convert_line(line: &str) -> String {
 
     // Bullet lists: keep as-is (Typst uses same syntax)
     if line.starts_with("- ") || line.starts_with("  - ") {
-        return format!("{}", convert_inline(line));
+        return convert_inline(line);
     }
 
     // Numbered lists: keep as-is
-    if line.chars().next().map_or(false, |c| c.is_ascii_digit()) && line.contains(". ") {
+    if line.chars().next().is_some_and(|c| c.is_ascii_digit()) && line.contains(". ") {
         return convert_inline(line);
     }
 
@@ -269,12 +269,7 @@ fn find_closing(chars: &[char], start: usize, marker: &[char; 2]) -> Option<usiz
 
 /// Find closing single-char marker.
 fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usize> {
-    for i in start..chars.len() {
-        if chars[i] == marker {
-            return Some(i);
-        }
-    }
-    None
+    (start..chars.len()).find(|&i| chars[i] == marker)
 }
 
 #[cfg(test)]

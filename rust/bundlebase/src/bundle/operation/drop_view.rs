@@ -80,6 +80,7 @@ impl Operation for DropViewOp {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     #[test]

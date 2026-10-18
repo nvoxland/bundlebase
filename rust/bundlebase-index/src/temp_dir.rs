@@ -92,7 +92,7 @@ impl TempDirManager {
 
     /// Create temp directory using system temp.
     fn create_system_temp(prefix: &str) -> Result<Self, BundlebaseError> {
-        let temp_dir = TempDir::with_prefix(&format!("bundlebase_{}_", prefix)).map_err(|e| {
+        let temp_dir = TempDir::with_prefix(format!("bundlebase_{}_", prefix)).map_err(|e| {
             BundlebaseError::from(format!("Failed to create system temp dir: {}", e))
         })?;
         let path = temp_dir.path().to_path_buf();
@@ -124,6 +124,7 @@ impl Drop for TempDirManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::test_utils::random_memory_dir;

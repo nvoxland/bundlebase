@@ -125,11 +125,11 @@ impl UdfEntrypoint for FfiRuntime {
 
         let result =
             invoke_lib_scalar(&self.path, symbol, &arrays, args.number_rows).map_err(|e| {
-            datafusion::common::DataFusionError::Execution(format!(
-                "FFI function '{}' ({}:{}) failed: {}",
-                name, self.path, symbol, e
-            ))
-        })?;
+                datafusion::common::DataFusionError::Execution(format!(
+                    "FFI function '{}' ({}:{}) failed: {}",
+                    name, self.path, symbol, e
+                ))
+            })?;
 
         Ok(ColumnarValue::Array(result))
     }

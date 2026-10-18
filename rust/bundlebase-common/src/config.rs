@@ -186,6 +186,9 @@ pub enum ConfigPersistence {
     RuntimeOnly,
 }
 
+/// Resolves a dynamic configuration default.
+pub type ConfigDefaultResolver = fn() -> Option<String>;
+
 /// Defines a known configuration key.
 ///
 /// Each service/provider defines its own slice of `ConfigKey` entries.
@@ -204,7 +207,7 @@ pub struct ConfigKey {
     /// Static default value, set via `with_default()`.
     pub default_value: Option<&'static str>,
     /// Dynamic default: `(description, resolver)`, set via `with_default_fn()`.
-    pub default_fn: Option<(&'static str, fn() -> Option<String>)>,
+    pub default_fn: Option<(&'static str, ConfigDefaultResolver)>,
 }
 
 impl ConfigKey {
@@ -452,11 +455,7 @@ pub trait ConfigProvider: Send + Sync {
     }
 
     /// Like `get`, but errors if the key has no value.
-    fn get_required(
-        &self,
-        key: &ConfigKey,
-        context: &str,
-    ) -> Result<String, BundlebaseError> {
+    fn get_required(&self, key: &ConfigKey, context: &str) -> Result<String, BundlebaseError> {
         let scope = Scope::try_from(key.scope.name)?;
         self.get_required_in_scope(&scope, key, context)
     }

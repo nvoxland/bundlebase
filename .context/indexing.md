@@ -572,6 +572,21 @@ match self.load_and_lookup_index(...).await {
 - Falls back to full table scan (query succeeds)
 - Never fails the query due to index issues
 
+## Snapshot Isolation and Search Execution
+
+Extending a bundle creates an independent index registry and independent
+`IndexDefinition` block registrations. Copied data blocks refer to that new
+registry. Creating, dropping, or rebuilding an index in a builder therefore
+does not change the source snapshot or sibling builders. Immutable index-file
+metadata can remain shared.
+
+Text search streams matching Arrow batches through a `StreamingTable` and the
+normal operation pipeline. Operations run across the complete search stream so
+global filters, limits, and aggregates retain their semantics. Schema planning
+and execution both register the bundle's scalar, aggregate, and window
+functions. The existing matching row-ID/score map remains in memory; fetched
+Arrow batches and transformed results are not accumulated before delivery.
+
 ## Future Enhancements
 
 Potential improvements not currently implemented:
